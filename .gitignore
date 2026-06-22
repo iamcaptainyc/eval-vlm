@@ -1,0 +1,10 @@
+outputs/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# 本地工具状态(OMC 编排 / Claude Code),不入库
+.claude/
+.omc/

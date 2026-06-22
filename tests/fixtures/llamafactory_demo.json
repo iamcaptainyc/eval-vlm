@@ -1,0 +1,42 @@
+[
+  {
+    "messages": [
+      {"role": "user", "content": "<image>What animal is in the picture?"},
+      {"role": "assistant", "content": "A cat."}
+    ],
+    "images": ["images/sample1.png"],
+    "task_type": "vqa"
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>How many apples are there?"},
+      {"role": "assistant", "content": "3"}
+    ],
+    "images": ["images/sample2.png"],
+    "task_type": "counting"
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>What color is the car?"},
+      {"role": "assistant", "content": "Red"}
+    ],
+    "images": ["images/sample3.png"],
+    "task_type": "vqa"
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>Is this a fruit?"},
+      {"role": "assistant", "content": "Yes"}
+    ],
+    "images": ["images/sample4.png"],
+    "task_type": "vqa"
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>Read the text in the image."},
+      {"role": "assistant", "content": "STOP"}
+    ],
+    "images": ["images/sample5.png"],
+    "task_type": "ocr"
+  }
+]

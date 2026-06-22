@@ -1,0 +1,38 @@
+[
+  {
+    "messages": [
+      {"role": "user", "content": "<image>请描述这张图片。"},
+      {"role": "assistant", "content": "画面是一名成年男性的面部特写,眉头紧锁,目光锐利向下凝视,神情明显不悦。"},
+      {"role": "user", "content": "请从以下选项中选择一个词来描述图片中人物的情绪:厌恶、快乐、悲伤、生气、惊讶、害怕、中性。"},
+      {"role": "assistant", "content": "生气"}
+    ],
+    "images": ["images/sample1.png"]
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>请描述这张图片。"},
+      {"role": "assistant", "content": "画面中人物嘴角上扬,眼睛弯起,露出明显的笑容,神态轻松愉快。"},
+      {"role": "user", "content": "请从以下选项中选择一个词来描述图片中人物的情绪:厌恶、快乐、悲伤、生气、惊讶、害怕、中性。"},
+      {"role": "assistant", "content": "快乐"}
+    ],
+    "images": ["images/sample2.png"]
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>请描述这张图片。"},
+      {"role": "assistant", "content": "人物双眉抬高,嘴巴张开成圆形,眼睛睁大,表现出意料之外的反应。"},
+      {"role": "user", "content": "请从以下选项中选择一个词来描述图片中人物的情绪:厌恶、快乐、悲伤、生气、惊讶、害怕、中性。"},
+      {"role": "assistant", "content": "惊讶"}
+    ],
+    "images": ["images/sample3.png"]
+  },
+  {
+    "messages": [
+      {"role": "user", "content": "<image>请描述这张图片。"},
+      {"role": "assistant", "content": "人物面无明显表情,目光平视,情绪平稳。"},
+      {"role": "user", "content": "请从以下选项中选择一个词来描述图片中人物的情绪:厌恶、快乐、悲伤、生气、惊讶、害怕、中性。"},
+      {"role": "assistant", "content": "中性"}
+    ],
+    "images": ["images/sample4.png"]
+  }
+]

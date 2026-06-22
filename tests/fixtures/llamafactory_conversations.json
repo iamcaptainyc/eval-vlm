@@ -1,0 +1,16 @@
+[
+  {
+    "conversations": [
+      {"from": "human", "value": "<image>What animal is in the picture?"},
+      {"from": "gpt", "value": "A cat."}
+    ],
+    "images": ["images/sample1.png"]
+  },
+  {
+    "conversations": [
+      {"from": "human", "value": "<image>What color is the car?"},
+      {"from": "gpt", "value": "Red"}
+    ],
+    "images": ["images/sample3.png"]
+  }
+]

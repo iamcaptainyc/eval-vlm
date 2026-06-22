@@ -1,0 +1,80 @@
+# eval_vlm 数据集配置(由 `eval-vlm split --dataset <源json>` 从内置模板自动生成)
+# 此文件随数据集文件夹一起存放,run/score/eval 直接读它,无需再回到 configs/。
+# 后续微调:直接手改本文件即可(机器级路径来自全局配置 ~/.eval_vlm/config.yaml)。
+#
+# 占位符由 split 时填入:run_name/源数据/机器级路径/划分参数;其余为可手改默认值。
+
+run_name: {{RUN_NAME}}                 # 仅作展示/元信息;实际产物落在本文件所在文件夹
+output_dir: {{OUTPUT_DIR}}             # 工作目录(workspace);仅作元信息
+
+# ---------------------------------------------------------------------------
+# 数据源:LlamaFactory 数据集格式 JSON(sharegpt 风格)
+# ---------------------------------------------------------------------------
+data:
+  source: {{SOURCE}}                   # 初始化时传入的完整数据集 JSON(split 用;run/score 读本文件夹的 test.json)
+  media_root: {{MEDIA_ROOT}}           # 相对图片路径相对此目录解析(机器级,来自全局配置)
+  image_strip_prefix: {{IMAGE_STRIP_PREFIX}}   # 跨机训练绝对前缀,本机不需要则为 null(机器级,来自全局配置)
+  # 字段映射,对齐 LlamaFactory dataset_info.json。
+  # 默认 mllm_demo 风格(messages + role/content + user/assistant)。
+  # 若数据是 conversations + from/value + human/gpt,改成下方注释写法即可,无需改代码。
+  mapping:
+    messages: messages        # 对话列名(另一变体:conversations)
+    images: images            # 图片列名
+    tags:
+      role: role              # 角色字段(另一变体:from)
+      content: content        # 内容字段(另一变体:value)
+      user: user              # 用户角色取值(另一变体:human)
+      assistant: assistant    # 助手角色取值(另一变体:gpt)
+  # conversations 变体示例:
+  # mapping:
+  #   messages: conversations
+  #   images: images
+  #   tags: {role: from, content: value, user: human, assistant: gpt}
+
+# ---------------------------------------------------------------------------
+# 数据划分(step 1: split)— 这些值由 split 命令行参数填入,后续手改无效(split 已执行完)。
+# 把源 JSON 纯分割成 train / test(+可选 val),三份都是原样 LlamaFactory 格式。
+# ---------------------------------------------------------------------------
+split:
+  train: {{TRAIN}}            # 训练集比例(--train)
+  test: {{TEST}}             # 测试集比例(--test)
+  val: {{VAL}}              # 验证集比例(--val;>0 才产出 val.json)
+  seed: {{SEED}}             # 固定随机种子(--seed)-> 可复现
+  stratify_by: {{STRATIFY_BY}}     # 分层抽样字段(--stratify-by);null 表示不分层
+  # 自定义各份输出位置(可直接写到 LlamaFactory data/);留空落到本文件夹。
+  train_out: null
+  val_out: null
+  test_out: null
+
+# ---------------------------------------------------------------------------
+# 推理后端(step 2: run)— 部署完模型后手改这里,或用 --base-url/--model 临时覆盖。
+# ---------------------------------------------------------------------------
+inference:
+  backend: openai             # openai(OpenAI 兼容 API) | fake(测试回显, 不联网)
+  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署地址(可用 --base-url 覆盖)
+  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖)
+  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+  system_prompt: null         # 可选系统提示
+  max_concurrency: 8          # 并发请求数
+  max_tokens: 512
+  temperature: 0.0
+  request_timeout: 120        # 单请求超时(秒)
+  max_retries: 3              # 失败重试次数(指数退避)
+  image_detail: auto          # OpenAI image_url 的 detail: auto|low|high
+
+# ---------------------------------------------------------------------------
+# 多轮评测策略(step 2/3 共用)
+# 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
+# ---------------------------------------------------------------------------
+eval:
+  targets: all                # all=每个 assistant 轮都评;last=仅最后一轮
+  context: rollout            # rollout=用模型自己生成的前文;gold=用数据集标准前文
+
+# ---------------------------------------------------------------------------
+# 评分(step 3: score)
+# ---------------------------------------------------------------------------
+scoring:
+  scorer: exact_match         # 默认 scorer(已注册名称);可被 --scorer 覆盖
+  turn_scorers: []            # 逐轮指定(按目标顺序),缺省回落到 scorer
+  # 例:轮1描述用 token_f1(相似度),轮2标签用 exact_match(精确匹配):
+  # turn_scorers: [token_f1, exact_match]

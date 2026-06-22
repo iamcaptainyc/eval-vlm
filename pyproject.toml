@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eval_vlm"
+version = "0.1.0"
+description = "解耦的 VLM 测试集评测工具(split / run / score)"
+requires-python = ">=3.9"
+dependencies = [
+    "openai>=1.0.0",
+    "PyYAML>=6.0",
+    "Pillow>=9.0.0",
+    "tqdm>=4.60.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+eval-vlm = "eval_vlm.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+eval_vlm = ["templates/*.yaml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
