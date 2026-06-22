@@ -65,6 +65,20 @@ def test_unknown_split_key_rejected(tmp_path, monkeypatch):
         workspace.set_global_value("split.nope", "1")
 
 
+def test_describe_settable_keys_lists_all_and_marks_non_settable():
+    """config keys 文案应覆盖全部可设置键,并提示数据集级(不可全局设)的项。"""
+    text = workspace.describe_settable_keys()
+    for key in workspace._all_keys():            # 每个可设置键都出现
+        assert key in text
+    # 每个可设置键都能被 set_global_value 接受(_all_keys 与校验保持一致)
+    assert set(workspace._all_keys()) == set(
+        workspace._TOP_KEYS + tuple(f"split.{k}" for k in workspace._SPLIT_DEFAULTS)
+    )
+    # 数据集级、不可全局设置的项也要标注出来
+    assert "scoring.scorer" in text and "inference.backend" in text
+    assert "需手改" in text
+
+
 def test_split_defaults_flow_into_dataset_and_cli_overrides(temp_global):
     ws = temp_global                          # fixture 已把 EVAL_VLM_CONFIG 指向临时文件
     workspace.set_global_value("split.train", "0.7")

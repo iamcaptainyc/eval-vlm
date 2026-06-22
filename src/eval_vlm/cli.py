@@ -42,6 +42,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
         cfg = workspace.load_global_config()
         print(f"[config] {path}")
         print(json.dumps(cfg, ensure_ascii=False, indent=2))
+    elif action == "keys":
+        print(workspace.describe_settable_keys())
     elif action == "set":
         if not args.key:
             print("用法: eval-vlm config set <key> <value>", file=sys.stderr)
@@ -186,7 +188,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # config
     p_config = sub.add_parser("config", help="管理全局配置(workspace/media_root 等)")
-    p_config.add_argument("action", choices=["init", "show", "set"], help="操作")
+    p_config.add_argument("action", choices=["init", "show", "set", "keys"],
+                          help="init=生成默认 / show=查看当前 / set=改一个键 / keys=列出所有可设置键")
     p_config.add_argument("key", nargs="?", default=None,
                           help="set 时的键:workspace/media_root/image_strip_prefix,"
                                "或 split 默认 split.train/split.test/split.val/split.seed/split.stratify_by")

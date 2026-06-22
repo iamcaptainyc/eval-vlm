@@ -68,6 +68,7 @@ pip install -e .
 
 ```bash
 eval-vlm config init                              # 生成 ~/.eval_vlm/config.yaml(带注释)
+eval-vlm config keys                              # 列出所有可设置的键(类型/默认/说明)+ 哪些只能手改数据集 config.yaml
 eval-vlm config set workspace /root/autodl-tmp/capt/eval_runs   # 所有数据集文件夹的父目录
 eval-vlm config set media_root /root/autodl-tmp/capt/code/LlamaFactory   # 图片根
 eval-vlm config show                              # 查看当前全局配置
@@ -118,7 +119,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 
 | 命令 | `--dataset` 含义 | 作用 |
 | --- | --- | --- |
-| `config init / show / set <k> <v>` | — | 管理全局配置(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`) |
+| `config init / show / set <k> <v> / keys` | — | 管理全局配置;`keys` 列出全部可设置键(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`)及不可全局设的数据集级项 |
 | `split --dataset <源JSON>` | 源数据集 JSON 路径 | **初始化**:建文件夹 + 生成 config.yaml + 分割 |
 | `run --dataset <名\|路径>` | 已存在数据集 | 读 test.json → predictions.jsonl |
 | `score --dataset <名\|路径>` | 已存在数据集 | 评分 → metrics/scored/failures/summary |

@@ -35,6 +35,43 @@ _SPLIT_DEFAULTS = {
     "stratify_by": None,
 }
 
+# 可通过 `eval-vlm config set <key> <value>` 设置的全部键(唯一真源:校验/帮助/文档)。
+# (key, 类型, 默认值, 说明)
+_KEY_SPECS: tuple[tuple[str, str, Any, str], ...] = (
+    ("workspace", "路径", _GLOBAL_DEFAULTS["workspace"],
+     "所有数据集文件夹的父目录(split 在此创建 <数据集名>/)"),
+    ("media_root", "路径", _GLOBAL_DEFAULTS["media_root"],
+     "图片相对路径解析根(写进每个数据集的 config.yaml)"),
+    ("image_strip_prefix", "字符串|null", _GLOBAL_DEFAULTS["image_strip_prefix"],
+     "跨机训练要剥除的绝对路径前缀;本机不需要则设为 null"),
+    ("split.train", "float", _SPLIT_DEFAULTS["train"],
+     "默认训练集比例(不传 --train 时用)"),
+    ("split.test", "float", _SPLIT_DEFAULTS["test"],
+     "默认测试集比例(不传 --test 时用)"),
+    ("split.val", "float", _SPLIT_DEFAULTS["val"],
+     "默认验证集比例(>0 才产出 val.json;不传 --val 时用)"),
+    ("split.seed", "int", _SPLIT_DEFAULTS["seed"],
+     "默认随机种子,可复现(不传 --seed 时用)"),
+    ("split.stratify_by", "字符串|null", _SPLIT_DEFAULTS["stratify_by"],
+     "默认分层抽样字段名;null 表示不分层(不传 --stratify-by 时用)"),
+)
+
+# 不在全局配置、只能手改某个数据集文件夹内 config.yaml 的键(说明用,非可设置)。
+_DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
+    ("data.mapping.*",
+     "字段映射(messages/images/role/content 等),对齐你的数据集格式"),
+    ("inference.backend / base_url / model / api_key_env",
+     "推理后端、部署地址、模型名、api key 环境变量(base_url/model 可用 --base-url/--model 临时覆盖)"),
+    ("inference.max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail / system_prompt",
+     "推理参数"),
+    ("eval.targets / eval.context",
+     "评测哪些 assistant 轮(all|last)、用什么上下文(rollout|gold)"),
+    ("scoring.scorer / scoring.turn_scorers",
+     "评分器与逐轮评分器(scorer 可用 --scorer 临时覆盖)"),
+    ("split.train_out / val_out / test_out",
+     "三份产物的输出路径(可用 --train-out/--val-out/--test-out 临时覆盖)"),
+)
+
 _DEFAULT_GLOBAL_TEXT = """\
 # eval_vlm 全局配置(机器级,所有数据集共享)
 # 路径:EVAL_VLM_CONFIG 环境变量优先,否则 ~/.eval_vlm/config.yaml
@@ -108,7 +145,28 @@ def load_global_config() -> dict[str, Any]:
 
 def _all_keys() -> tuple[str, ...]:
     """可设置键的完整清单(顶层 + 嵌套 split.*),供校验与帮助文本。"""
-    return _TOP_KEYS + tuple(f"split.{k}" for k in _SPLIT_DEFAULTS)
+    return tuple(spec[0] for spec in _KEY_SPECS)
+
+
+def describe_settable_keys() -> str:
+    """渲染「可设置键」清单(类型/默认/说明)+「不可设置(数据集级)」清单。
+
+    供 `eval-vlm config keys` 打印,让用户一眼看清哪些键能全局设、哪些得手改数据集 config.yaml。
+    """
+    kw = max(len(spec[0]) for spec in _KEY_SPECS)
+    out = ["可通过 `eval-vlm config set <key> <value>` 设置的全局键:", ""]
+    for key, typ, default, desc in _KEY_SPECS:
+        out.append(f"  {key.ljust(kw)}  ({typ}, 默认 {_yaml_scalar(default)})")
+        out.append(f"  {' ' * kw}      {desc}")
+    out.append("")
+    out.append("不属于全局配置(单个数据集独有,需手改该数据集文件夹内的 config.yaml):")
+    for name, desc in _DATASET_LEVEL_HINTS:
+        out.append(f"  {name}")
+        out.append(f"      {desc}")
+    out.append("")
+    out.append("提示:split 比例命令行参数 > 全局 split.* > 内置默认;base_url/model/scorer "
+               "可用 run/score/eval 的 --base-url/--model/--scorer 临时覆盖(不回写文件)。")
+    return "\n".join(out)
 
 
 def _coerce_top(key: str, value: Optional[str]) -> Any:
