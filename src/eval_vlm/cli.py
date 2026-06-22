@@ -7,7 +7,7 @@
     split   : 初始化  —— --dataset = 源数据集 JSON 路径
               在 workspace 下建 <数据集名>/,从内置模板生成 config.yaml,再分割
     run     : 读取已有 —— --dataset = 数据集名(或文件夹路径);test.json -> predictions.jsonl
-    score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.jsonl / summary.md
+    score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.md / summary.md
     eval    : 读取已有 —— 一键连续执行 run + score(不含 split:split 后需先部署模型)
 
 临时覆盖(不回写 config.yaml,永久改动请手改文件夹内 config.yaml):
@@ -72,6 +72,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         args.dataset, ws,
         name=args.name,
         split_overrides=so,
+        split_defaults=global_cfg.get("split"),   # 不传 --train 等时用全局默认
         media_root=global_cfg.get("media_root", "."),
         image_strip_prefix=global_cfg.get("image_strip_prefix"),
         force=args.force,
@@ -131,9 +132,11 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
     per_turn = metrics.get("per_turn") or {}
     print(f"[score] {len(per_turn)} 个目标轮,总体均分 {metrics.get('overall_mean_score')} "
           f"-> {cfg.metrics_path}")
-    n_fail = metrics.get("num_failures", 0)
+    n_fail = metrics.get("num_failed_samples", 0)
     if n_fail:
-        print(f"[score] 未命中 {n_fail} 条,清单(含原图地址)-> {cfg.failures_path}")
+        print(f"[score] exact_match 未命中 {n_fail} 个样本"
+              f"(共 {metrics.get('num_failed_targets', 0)} 个错误轮),"
+              f"人类可读清单 -> {cfg.failures_path}")
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     return metrics
 
@@ -184,7 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
     # config
     p_config = sub.add_parser("config", help="管理全局配置(workspace/media_root 等)")
     p_config.add_argument("action", choices=["init", "show", "set"], help="操作")
-    p_config.add_argument("key", nargs="?", default=None, help="set 时的键(workspace/media_root/image_strip_prefix)")
+    p_config.add_argument("key", nargs="?", default=None,
+                          help="set 时的键:workspace/media_root/image_strip_prefix,"
+                               "或 split 默认 split.train/split.test/split.val/split.seed/split.stratify_by")
     p_config.add_argument("value", nargs="?", default=None, help="set 时的值(null 表示清空)")
     p_config.add_argument("--force", action="store_true", help="init 时覆盖已有全局配置")
     p_config.set_defaults(func=_cmd_config)
@@ -193,12 +198,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_split = sub.add_parser("split", help="初始化数据集文件夹并分割(--dataset=源JSON)")
     p_split.add_argument("--dataset", "-d", required=True, help="源数据集 JSON 文件路径")
     p_split.add_argument("--name", default=None, help="数据集文件夹名(默认取源文件名,不含扩展名)")
-    p_split.add_argument("--train", type=float, default=None, help="训练集比例(如 0.8)")
-    p_split.add_argument("--test", type=float, default=None, help="测试集比例(如 0.2)")
-    p_split.add_argument("--val", type=float, default=None, help="验证集比例(>0 才产出 val.json)")
-    p_split.add_argument("--seed", type=int, default=None, help="随机种子(可复现)")
+    p_split.add_argument("--train", type=float, default=None,
+                         help="训练集比例(如 0.8);不传则用全局配置 split.train")
+    p_split.add_argument("--test", type=float, default=None,
+                         help="测试集比例(如 0.2);不传则用全局配置 split.test")
+    p_split.add_argument("--val", type=float, default=None,
+                         help="验证集比例(>0 才产出 val.json);不传则用全局配置 split.val")
+    p_split.add_argument("--seed", type=int, default=None,
+                         help="随机种子(可复现);不传则用全局配置 split.seed")
     p_split.add_argument("--stratify-by", dest="stratify_by", default=None,
-                         help="分层抽样字段名(如标签字段)")
+                         help="分层抽样字段名(如标签字段);不传则用全局配置 split.stratify_by")
     p_split.add_argument("--train-out", default=None, help="覆盖 train.json 输出路径")
     p_split.add_argument("--val-out", default=None, help="覆盖 val.json 输出路径")
     p_split.add_argument("--test-out", default=None, help="覆盖 test.json 输出路径")

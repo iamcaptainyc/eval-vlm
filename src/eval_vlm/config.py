@@ -161,8 +161,8 @@ class Config:
 
     @property
     def failures_path(self) -> Path:
-        """exact_match 未命中(含缺失/报错)的样本清单,供人工审核。"""
-        return self.run_dir / "failures.jsonl"
+        """exact_match 未命中样本的人类可读清单(按 id 分组,含完整对话),供人工审核。"""
+        return self.run_dir / "failures.md"
 
     @property
     def summary_path(self) -> Path:

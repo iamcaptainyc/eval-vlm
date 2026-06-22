@@ -18,7 +18,7 @@
 
 ```
 完整数据集 JSON ──split──▶ train.json / val.json / test.json ──run──▶ predictions.jsonl ──score──▶ metrics.json
- (LlamaFactory)            (均为原样 LlamaFactory 格式)        (原始预测+原图地址,可断点续跑)  scored.jsonl / failures.jsonl / summary.md
+ (LlamaFactory)            (均为原样 LlamaFactory 格式)        (原始预测+原图地址,可断点续跑)  scored.jsonl / failures.md / summary.md
 ```
 
 - **split 只做纯分割**:每条记录原样写出(答案、对话结构、**图片路径全不动**),`train.json` 直接能喂给 LlamaFactory 训练。
@@ -71,7 +71,17 @@ eval-vlm config init                              # 生成 ~/.eval_vlm/config.ya
 eval-vlm config set workspace /root/autodl-tmp/capt/eval_runs   # 所有数据集文件夹的父目录
 eval-vlm config set media_root /root/autodl-tmp/capt/code/LlamaFactory   # 图片根
 eval-vlm config show                              # 查看当前全局配置
+
+# 可选:改 split 默认比例(不传 --train/--test 等时使用;命令行参数优先)
+eval-vlm config set split.train 0.9               # 训练集默认比例
+eval-vlm config set split.test 0.1                # 测试集默认比例
+eval-vlm config set split.seed 7                  # 默认随机种子
 ```
+
+> **split 比例的默认值从哪改**:不传 `--train/--test/--val/--seed/--stratify-by` 时,
+> 取全局配置 `~/.eval_vlm/config.yaml` 的 `split:` 块(出厂默认 train 0.95 / test 0.05 /
+> val 0.0 / seed 42)。优先级:**命令行参数 > 全局 `split.*` > 内置默认**。用
+> `eval-vlm config set split.<键> <值>` 或直接手改该文件均可。
 
 ### 快速开始(用内置 fixture 跑通,不联网)
 
@@ -108,7 +118,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 
 | 命令 | `--dataset` 含义 | 作用 |
 | --- | --- | --- |
-| `config init / show / set <k> <v>` | — | 管理全局配置(workspace/media_root/image_strip_prefix) |
+| `config init / show / set <k> <v>` | — | 管理全局配置(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`) |
 | `split --dataset <源JSON>` | 源数据集 JSON 路径 | **初始化**:建文件夹 + 生成 config.yaml + 分割 |
 | `run --dataset <名\|路径>` | 已存在数据集 | 读 test.json → predictions.jsonl |
 | `score --dataset <名\|路径>` | 已存在数据集 | 评分 → metrics/scored/failures/summary |
@@ -131,7 +141,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 
 配置分两层:
 
-- **全局配置** `~/.eval_vlm/config.yaml`(机器级,一次性):`workspace` / `media_root` / `image_strip_prefix`。用 `eval-vlm config set <k> <v>` 修改。
+- **全局配置** `~/.eval_vlm/config.yaml`(机器级,一次性):`workspace` / `media_root` / `image_strip_prefix`,以及 `split:` 块(split 默认比例 train/test/val/seed/stratify_by)。用 `eval-vlm config set <k> <v>` 修改(嵌套用点号,如 `config set split.train 0.9`)。split 取值优先级:命令行参数 > 全局 `split.*` > 内置默认。
 - **数据集配置** `<workspace>/<名>/config.yaml`(每个数据集一份,split 时从内置模板生成):下表各段。`configs/example.yaml` 是同结构的**可读参考**。
 
 关键段:
@@ -164,10 +174,10 @@ data:
 | `train.json` / `test.json` / `val.json` | 划分出的数据集,**均为原样 LlamaFactory 格式**(val 仅 `val>0` 时产出) |
 | `split_meta.json` | 划分元信息(seed/比例/计数/源哈希/原始下标),用于复现与审计 |
 | `predictions.jsonl` | 每行一条预测(id/**turn**/prediction/**images**/latency/error),`images` 为原图地址可追溯回原图人工核查;多轮下每样本多行,**追加写,支持断点续跑** |
-| `metrics.json` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failures`) |
-| `scored.jsonl` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...) |
-| `failures.jsonl` | **exact_match 未命中清单(含缺失/报错),每条带原图地址,供人工审核** |
-| `summary.md` | 人类可读摘要(含未命中条数) |
+| `metrics.json` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failed_samples`/`num_failed_targets`) |
+| `scored.jsonl` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...);机器可读全量数据 |
+| `failures.md` | **exact_match 未命中清单(人类可读)**:仅纳入 exact_match 评分错误的样本,按 `id` 分组列出**全部对话轮**(模型输出 vs 标准答案 + ✓/✗ + 原图地址),供人工核查。非 exact_match(如 token_f1)不计入 |
+| `summary.md` | 人类可读摘要(含未命中样本/目标轮数) |
 | `run_meta.json` | 运行元信息(模型/配置/时间/计数),用于复现 |
 
 **断点续跑**:`run` 会跳过 `predictions.jsonl` 中已成功的 id,只补缺失/失败的——大测试集中断后重跑无需从头。

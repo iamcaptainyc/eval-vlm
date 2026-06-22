@@ -17,12 +17,22 @@ from typing import Any, Optional
 
 import yaml
 
-# 全局配置的机器级键(及默认值)。
-_GLOBAL_KEYS = ("workspace", "media_root", "image_strip_prefix")
+# 全局配置的机器级顶层键(及默认值)。
+_TOP_KEYS = ("workspace", "media_root", "image_strip_prefix")
 _GLOBAL_DEFAULTS = {
     "workspace": "~/eval_vlm_workspace",
     "media_root": ".",
     "image_strip_prefix": None,
+}
+
+# split 默认值(嵌套在全局配置 split: 块下;不传 --train/--test 等时使用)。
+# 同时作为 init_dataset 的内置兜底,保证唯一真源。
+_SPLIT_DEFAULTS = {
+    "train": 0.95,
+    "test": 0.05,
+    "val": 0.0,
+    "seed": 42,
+    "stratify_by": None,
 }
 
 _DEFAULT_GLOBAL_TEXT = """\
@@ -33,6 +43,15 @@ _DEFAULT_GLOBAL_TEXT = """\
 workspace: ~/eval_vlm_workspace   # 所有数据集文件夹的父目录(split 在此创建 <数据集名>/)
 media_root: .                     # 图片相对路径解析根(写进每个数据集的 config.yaml)
 image_strip_prefix: null          # 跨机训练绝对前缀,本机不需要则 null
+
+# split 默认比例/参数:不传 --train/--test/--val/--seed/--stratify-by 时用这里的值。
+# 命令行参数优先级更高。改法:eval-vlm config set split.train 0.9
+split:
+  train: 0.95                     # 训练集比例
+  test: 0.05                      # 测试集比例
+  val: 0.0                        # 验证集比例(>0 才产出 val.json)
+  seed: 42                        # 随机种子(可复现)
+  stratify_by: null               # 分层抽样字段名(默认不分层)
 """
 
 
@@ -69,26 +88,74 @@ def load_global_config() -> dict[str, Any]:
             file=sys.stderr,
         )
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    cfg = dict(_GLOBAL_DEFAULTS)
-    for k in _GLOBAL_KEYS:
+    cfg: dict[str, Any] = dict(_GLOBAL_DEFAULTS)
+    for k in _TOP_KEYS:
         if k in raw:
             cfg[k] = raw[k]
+    # 嵌套 split 默认:缺键用内置默认;数值容错(手改成字符串也能用)。
+    split = dict(_SPLIT_DEFAULTS)
+    raw_split = raw.get("split")
+    if isinstance(raw_split, dict):
+        for k in _SPLIT_DEFAULTS:
+            if k in raw_split:
+                try:
+                    split[k] = _coerce_split(k, raw_split[k])
+                except (ValueError, TypeError):
+                    split[k] = _SPLIT_DEFAULTS[k]
+    cfg["split"] = split
     return cfg
 
 
+def _all_keys() -> tuple[str, ...]:
+    """可设置键的完整清单(顶层 + 嵌套 split.*),供校验与帮助文本。"""
+    return _TOP_KEYS + tuple(f"split.{k}" for k in _SPLIT_DEFAULTS)
+
+
+def _coerce_top(key: str, value: Optional[str]) -> Any:
+    """顶层键类型转换:image_strip_prefix 允许 None,其余转字符串。"""
+    if key == "image_strip_prefix":
+        return value                           # None 或字符串
+    if value is None:
+        raise ValueError(f"{key} 不能设为空")
+    return str(value)
+
+
+def _coerce_split(child: str, value: Optional[str]) -> Any:
+    """split 子键类型转换:train/test/val -> float, seed -> int, stratify_by -> str|None。"""
+    if child == "stratify_by":
+        return value                           # None 或字符串
+    if value is None:
+        raise ValueError(f"split.{child} 不能设为空")
+    if child == "seed":
+        return int(value)
+    return float(value)                        # train / test / val
+
+
 def set_global_value(key: str, value: Optional[str]) -> Path:
-    """设置一个全局配置键(保留注释/其余行);value 为 None 写成 null。"""
-    if key not in _GLOBAL_KEYS:
-        raise KeyError(f"未知全局配置键: {key}(可选: {', '.join(_GLOBAL_KEYS)})")
-    init_global_config()                       # 确保文件存在
+    """设置一个全局配置键(保留注释/其余行)。
+
+    支持顶层键(workspace/media_root/image_strip_prefix)与嵌套 split.<子键>
+    (split.train/test/val/seed/stratify_by)。命令行传入的字符串会按键类型转换。
+    """
+    init_global_config()                       # 确保文件存在(含默认 split 块)
     path = global_config_path()
     text = path.read_text(encoding="utf-8")
-    text = _update_yaml_value(text, key, value)
+
+    if "." in key:
+        parent, child = key.split(".", 1)
+        if parent != "split" or child not in _SPLIT_DEFAULTS:
+            raise KeyError(f"未知全局配置键: {key}(可选: {', '.join(_all_keys())})")
+        text = _set_nested_value(text, "split", child, _coerce_split(child, value))
+    else:
+        if key not in _TOP_KEYS:
+            raise KeyError(f"未知全局配置键: {key}(可选: {', '.join(_all_keys())})")
+        text = _update_yaml_value(text, key, _coerce_top(key, value))
+
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def _update_yaml_value(text: str, key: str, value: Optional[str]) -> str:
+def _update_yaml_value(text: str, key: str, value: Any) -> str:
     """整行替换某顶层键的值,保留行尾内联注释;缺该键则追加一行。"""
     literal = _yaml_scalar(value)
     pattern = re.compile(rf"^({re.escape(key)}:[ \t]*)([^#\n]*?)([ \t]*#.*)?$", re.MULTILINE)
@@ -102,6 +169,43 @@ def _update_yaml_value(text: str, key: str, value: Optional[str]) -> str:
         sep = "" if text.endswith("\n") else "\n"
         new_text = f"{text}{sep}{key}: {literal}\n"
     return new_text
+
+
+def _set_nested_value(text: str, parent: str, child: str, value: Any) -> str:
+    """替换 `parent:` 块下缩进子键 `child:` 的值,保留行尾内联注释。
+
+    block 不存在则在文末追加 `parent:\\n  child: ...`;block 存在但缺该子键则
+    插在 parent 行之后。仅依赖缩进识别 block 范围,匹配本程序生成的全局配置。
+    """
+    literal = _yaml_scalar(value)
+    lines = text.splitlines(keepends=True)
+    parent_re = re.compile(rf"^{re.escape(parent)}:[ \t]*(#.*)?\r?\n?$")
+    child_re = re.compile(
+        rf"^([ \t]+){re.escape(child)}:[ \t]*([^#\n\r]*?)([ \t]*#[^\n\r]*)?(\r?\n?)$"
+    )
+
+    parent_idx = next((i for i, ln in enumerate(lines) if parent_re.match(ln)), None)
+    if parent_idx is None:
+        sep = "" if text.endswith("\n") else "\n"
+        return f"{text}{sep}{parent}:\n  {child}: {literal}\n"
+
+    j = parent_idx + 1
+    while j < len(lines):
+        ln = lines[j]
+        if ln.strip() == "":                   # 块内/块后空行,跳过
+            j += 1
+            continue
+        if not re.match(r"^[ \t]", ln):         # 顶到非缩进行 -> 块结束
+            break
+        m = child_re.match(ln)
+        if m:
+            indent, comment, eol = m.group(1), m.group(3) or "", m.group(4) or "\n"
+            lines[j] = f"{indent}{child}: {literal}{comment}{eol}"
+            return "".join(lines)
+        j += 1
+
+    lines.insert(parent_idx + 1, f"  {child}: {literal}\n")   # 块内缺该子键 -> 插入
+    return "".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -163,13 +267,16 @@ def init_dataset(
     *,
     name: Optional[str] = None,
     split_overrides: Optional[dict[str, Any]] = None,
+    split_defaults: Optional[dict[str, Any]] = None,
     media_root: Any = ".",
     image_strip_prefix: Any = None,
     force: bool = False,
 ) -> Path:
     """初始化一个数据集文件夹:建目录 + 从模板渲染 config.yaml。返回文件夹路径。
 
-    不在此执行 split(由调用方拿到 folder 后 load_dataset_config + split_dataset)。
+    split 取值优先级:split_overrides(命令行)> split_defaults(全局配置)
+    > _SPLIT_DEFAULTS(内置兜底)。不在此执行 split(由调用方拿到 folder 后
+    load_dataset_config + split_dataset)。
     """
     src = Path(source_json).expanduser().resolve()
     if not src.is_file():
@@ -184,18 +291,22 @@ def init_dataset(
         )
 
     folder.mkdir(parents=True, exist_ok=True)
-    so = split_overrides or {}
+    # 内置兜底 <- 全局默认 <- 命令行覆盖,逐层合并(仅取认识的子键)。
+    sp = dict(_SPLIT_DEFAULTS)
+    for src_dict in (split_defaults, split_overrides):
+        if src_dict:
+            sp.update({k: src_dict[k] for k in _SPLIT_DEFAULTS if k in src_dict})
     values = {
         "RUN_NAME": ds_name,
         "OUTPUT_DIR": str(workspace),
         "SOURCE": str(src),
         "MEDIA_ROOT": media_root,
         "IMAGE_STRIP_PREFIX": image_strip_prefix,
-        "TRAIN": so.get("train", 0.95),
-        "TEST": so.get("test", 0.05),
-        "VAL": so.get("val", 0.0),
-        "SEED": so.get("seed", 42),
-        "STRATIFY_BY": so.get("stratify_by", None),
+        "TRAIN": sp["train"],
+        "TEST": sp["test"],
+        "VAL": sp["val"],
+        "SEED": sp["seed"],
+        "STRATIFY_BY": sp["stratify_by"],
     }
     config_path.write_text(render_template(values), encoding="utf-8")
     return folder

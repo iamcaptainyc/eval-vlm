@@ -1,7 +1,7 @@
 """验证两项可追溯/审核能力:
   1) predictions.jsonl 每条预测都带原图地址(images),可追溯回原图。
-  2) score 阶段自动产出 failures.jsonl:exact_match 未命中(含缺失/报错)的清单,
-     且每条带原图地址,供人工审核。
+  2) score 阶段自动产出 failures.md:仅 exact_match 未命中的样本,按 id 分组列出
+     全部对话轮,人类可读,供人工审核。非 exact_match 评分(token_f1)不计入。
 """
 from __future__ import annotations
 
@@ -34,9 +34,9 @@ def test_predictions_carry_original_images(messages_config):
     assert "images" in first and first["images"]
 
 
-def test_failures_list_lists_wrong_exact_match(messages_config, monkeypatch):
-    """强制模型输出错误答案 -> 所有目标轮 exact_match 未命中,全进 failures 清单。"""
-    cfg = messages_config
+def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
+    """强制错误答案 -> 每个样本(含两轮)exact_match 未命中,按 id 分组进 failures.md。"""
+    cfg = tworound_config
     split_dataset(cfg)
 
     def wrong(self, context, images, sample_id, expected=None):
@@ -46,25 +46,45 @@ def test_failures_list_lists_wrong_exact_match(messages_config, monkeypatch):
     run_inference(cfg)
     metrics = score_predictions(cfg)
 
-    assert metrics["num_failures"] == metrics["num_targets"]
-    assert cfg.failures_path.exists()
+    # 以 id 为单位:所有样本都因 exact_match 错误被纳入;错误目标轮 = 全部目标轮
+    assert metrics["num_failed_samples"] == metrics["num_samples"]
+    assert metrics["num_failed_targets"] == metrics["num_targets"]
+    assert cfg.failures_path.exists() and cfg.failures_path.name == "failures.md"
 
-    rows = [json.loads(l) for l in
-            cfg.failures_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(rows) == metrics["num_targets"]
-    for r in rows:
-        assert r["detail"]["exact_match"] == 0.0
-        assert r["images"]            # 带原图地址,供人工核查
-        assert r["prediction"] == "__definitely_wrong__"
+    md = cfg.failures_path.read_text(encoding="utf-8")
+    assert "## 样本" in md                       # 按 id 分组的标题
+    assert "✗ 未命中" in md                       # 命中标记
+    assert "__definitely_wrong__" in md          # 模型输出
+    assert "请描述这张图片" in md                 # 含完整对话上下文(user 轮)
+    # 同一样本的两个目标轮(描述 + 标签)都在 -> 分组到一起
+    assert md.count("scorer: `exact_match`") >= metrics["num_targets"]
 
 
 def test_no_failures_when_all_correct(messages_config):
-    """fake 回显标准答案 -> 全部命中 -> failures 清单为空。"""
+    """fake 回显标准答案 -> 全部命中 -> failures.md 标注无未命中。"""
     cfg = messages_config
     split_dataset(cfg)
     run_inference(cfg)
     metrics = score_predictions(cfg)
 
-    assert metrics["num_failures"] == 0
-    rows = [l for l in cfg.failures_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert rows == []
+    assert metrics["num_failed_samples"] == 0
+    assert metrics["num_failed_targets"] == 0
+    assert "无 exact_match 未命中" in cfg.failures_path.read_text(encoding="utf-8")
+
+
+def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
+    """token_f1 评分即使分数<1,也不计入 failures(只看 exact_match)。"""
+    cfg = messages_config
+    cfg.scoring.scorer = "token_f1"
+    split_dataset(cfg)
+
+    def wrong(self, context, images, sample_id, expected=None):
+        return Prediction(id=sample_id, prediction="完全不同的答案")
+
+    monkeypatch.setattr(FakeBackend, "complete", wrong)
+    run_inference(cfg)
+    metrics = score_predictions(cfg)
+
+    assert metrics["overall_mean_score"] < 1.0      # 确有低分
+    assert metrics["num_failed_samples"] == 0       # 但非 exact_match -> 不计入
+    assert "无 exact_match 未命中" in cfg.failures_path.read_text(encoding="utf-8")
