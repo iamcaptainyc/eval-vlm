@@ -124,6 +124,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `run --dataset <名\|路径>` | 已存在数据集 | 读 test.json → predictions.jsonl |
 | `score --dataset <名\|路径>` | 已存在数据集 | 评分 → metrics/scored/failures/summary |
 | `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **run + score**(不含 split) |
+| `pred --datadir <图片文件夹>` | — | **无标注图片描述**:逐张调 VLM(vLLM API 与对话组织可经文件夹 `config.yaml` 定制),产物落 `workspace/<同名>/`(不评分) |
 
 ### split / 临时覆盖参数
 
@@ -134,9 +135,70 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `--name NAME` | split | 数据集文件夹名(默认取源文件名,不含扩展名) |
 | `--force` | split | 文件夹已存在时重建(覆盖 config.yaml + 重新分割) |
 | `--train-out / --val-out / --test-out` | split | 把对应产物直接写到任意目录(如 LlamaFactory `data/`) |
-| `--base-url / --model` | run / eval | 临时覆盖部署地址 / 模型名(不回写 config.yaml) |
+| `--base-url / --model` | run / eval / pred | 临时覆盖部署地址 / 模型名(不回写 config.yaml) |
 | `--scorer` | score / eval | 临时覆盖评分器 |
-| `--workspace DIR` | split/run/score/eval | 临时覆盖全局 workspace |
+| `--datadir DIR` | pred | 待描述的图片文件夹(无需 split/数据集 JSON) |
+| `--name NAME` | pred | 输出文件夹名(默认取图片文件夹名);产物落 `workspace/<名>/` |
+| `--prompt TEXT` | pred | 临时覆盖单轮提示词(不传则用文件夹 `config.yaml` 的 `pred.prompt`,默认 `请描述图片`;设了多轮 `template` 时无效) |
+| `--system-prompt TEXT` | pred | 临时覆盖系统提示(不传则用 `config.yaml` 的 `pred.system_prompt`) |
+| `--backend openai\|fake` | pred | 临时覆盖推理后端(fake=回显不联网,自检用) |
+| `--force` | pred | 重新生成文件夹内 `config.yaml`(覆盖手改) |
+| `--workspace DIR` | split/run/score/eval/pred | 临时覆盖全局 workspace |
+
+### pred(无标注图片描述)
+
+`run`/`score` 面向**带标注的测试集**(数据集 JSON → split → 评分)。当你只有**一堆无标注照片**、
+想让模型逐张描述时,用 `pred`:它不需要 split、没有标准答案、**不评分**,每张图各起一段独立对话:
+
+```
+user:      <image>请描述图片
+assistant: <模型生成的描述>
+```
+
+```bash
+# 自检(不联网,回显验证全链路):产物落到 <workspace>/test_images/
+eval-vlm pred --datadir test_images --backend fake
+
+# 调真实部署的模型(OpenAI 兼容服务)
+eval-vlm pred --datadir test_images --base-url http://localhost:8000/v1 --model trained-vlm
+# 自定义提示词 / 系统提示 / 输出文件夹名
+eval-vlm pred --datadir ./photos --prompt "用一句话描述这张图" --system-prompt "你是图像描述助手" --name photos_desc
+```
+
+#### 自定义 vLLM API 与对话组织(`config.yaml`)
+
+`pred` 沿用**自包含文件夹模型**(同 `split`→`run`):**首次运行**在 `<workspace>/<名>/` 生成一份
+`config.yaml`,**再次运行**直接读它。想完整定制 **vLLM API** 或**每张图的对话怎么组织**,就手改这份
+`config.yaml` 后重跑(`--force` 可重新生成,覆盖手改)。优先级:**CLI flag > 文件夹 `config.yaml` > 模板默认**。
+
+- **vLLM API**:`inference:` 块全参可调 —— `base_url` / `model` / `api_key_env` / `max_tokens` /
+  `temperature` / `max_concurrency` / `request_timeout` / `max_retries` / `image_detail` / `system_prompt`。
+- **对话组织**:`pred:` 块。两种写法二选一:
+  - **单轮简写**:只设 `prompt`(+可选 `system_prompt`)。若 `prompt` 不含 `<image>`,自动在最前面加一个。
+  - **多轮模板**:设 `template`(`role`/`content` 列表),**覆盖** `prompt`,可加纯文本 `assistant`/`user` 轮做 few-shot 引导。
+
+```yaml
+pred:
+  system_prompt: 你是专业的图像描述助手        # 映射到 inference.system_prompt
+  template:                                    # 多轮:覆盖 prompt
+    - {role: user, content: "我会给你一张图片,请用简体中文、200 字内客观描述。"}
+    - {role: assistant, content: "好的,请提供图片。"}
+    - {role: user, content: "<image>请描述这张图片"}
+```
+
+> 模板规则(否则构造时即报错):全部轮里 `<image>` **恰好出现 1 次**且**位于某个 `user` 轮**;**最后一轮必须是 `user`**(模型据此作答)。
+
+产物落在 `<workspace>/<图片文件夹名>/`(与 `split` 一致;若该路径正是图片文件夹本身会报错,
+用 `--name` 区分):
+
+| 文件 | 内容 |
+| --- | --- |
+| `config.yaml` | 该次 pred 的自包含配置(首次生成;重跑读取);改这里定制 vLLM API 与对话组织 |
+| `predictions.jsonl` | 每行一条成功描述,**原样 LlamaFactory 格式**(`messages` + `images`,多轮模板会完整保留各轮),可直接当新数据集复用;额外带 `id`/`latency` 便于追溯。**追加写,支持断点续跑**(已成功图片自动跳过) |
+| `failures.jsonl` | 每行一条失败记录(`id`/`image`/`error`),供排查与重跑(**仅反映本轮**:每次运行重写) |
+| `pred_meta.json` | 运行元信息(模型/后端/对话结构/计数/时间) |
+
+支持的图片扩展名:`.png/.jpg/.jpeg/.webp/.bmp/.gif/.tif/.tiff`(仅当前层,不递归)。
 
 ## 配置说明
 
@@ -211,9 +273,11 @@ src/eval_vlm/
 │   ├── base.py / registry.py / exact_match.py / token_f1.py   # 可插拔评分
 ├── results/store.py     # 产物读写(断点续跑)
 ├── runner.py            # 执行测试(并发编排)
+├── predict.py           # 无标注图片文件夹 -> 单轮描述(不评分)
 ├── evaluate.py          # 评分编排
 ├── workspace.py         # 工作目录模型:全局配置 + 数据集初始化/定位 + 模板渲染
 ├── templates/
-│   └── config.template.yaml   # 内置数据集配置模板(split 时渲染)
-└── cli.py               # config / split / run / score / eval
+│   ├── config.template.yaml       # 内置数据集配置模板(split 时渲染)
+│   └── config.pred.template.yaml  # pred 配置模板(inference + pred 块;pred 首次运行渲染)
+└── cli.py               # config / split / run / score / eval / pred
 ```

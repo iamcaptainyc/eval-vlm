@@ -307,11 +307,16 @@ def _yaml_scalar(value: Any) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
-def render_template(values: dict[str, Any]) -> str:
-    """读取内置模板,把 {{KEY}} 占位符替换为渲染后的 YAML 标量。"""
+def render_template(values: dict[str, Any],
+                    template_name: str = "config.template.yaml") -> str:
+    """读取内置模板,把 {{KEY}} 占位符替换为渲染后的 YAML 标量。
+
+    template_name 选模板:默认数据集模板;pred 用 config.pred.template.yaml。
+    仅替换标量占位符(列表如多轮 template 在模板里静态写,不经此函数)。
+    """
     text = (
         resources.files("eval_vlm")
-        .joinpath("templates/config.template.yaml")
+        .joinpath(f"templates/{template_name}")
         .read_text(encoding="utf-8")
     )
     for key, val in values.items():
@@ -368,3 +373,32 @@ def init_dataset(
     }
     config_path.write_text(render_template(values), encoding="utf-8")
     return folder
+
+
+def init_pred_config(
+    out_dir: Path,
+    datadir: Path,
+    global_cfg: dict[str, Any],
+    *,
+    force: bool = False,
+) -> Path:
+    """为 pred 在输出文件夹生成 config.yaml(含 inference + pred 块)。返回其路径。
+
+    类比 init_dataset,但用 pred 专用模板(无 split/源 JSON):media_root 钉到图片
+    文件夹,image_strip_prefix 取自全局配置。已存在且非 force 时不动(保留用户手改)。
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config_path = out_dir / "config.yaml"
+    if config_path.exists() and not force:
+        return config_path
+    values = {
+        "RUN_NAME": out_dir.name,
+        "OUTPUT_DIR": str(out_dir.parent),
+        "MEDIA_ROOT": str(datadir),
+        "IMAGE_STRIP_PREFIX": global_cfg.get("image_strip_prefix"),
+    }
+    config_path.write_text(
+        render_template(values, template_name="config.pred.template.yaml"),
+        encoding="utf-8",
+    )
+    return config_path

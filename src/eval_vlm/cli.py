@@ -9,6 +9,7 @@
     run     : 读取已有 —— --dataset = 数据集名(或文件夹路径);test.json -> predictions.jsonl
     score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.md / summary.md
     eval    : 读取已有 —— 一键连续执行 run + score(不含 split:split 后需先部署模型)
+    pred    : 无标注 —— --datadir = 图片文件夹;逐张单轮描述,产物落 workspace/<同名>/(不评分)
 
 临时覆盖(不回写 config.yaml,永久改动请手改文件夹内 config.yaml):
     --base-url / --model   run/eval 注入部署地址与模型名
@@ -21,9 +22,12 @@ import json
 import sys
 from typing import Optional
 
-from .config import Config, load_dataset_config
+from pathlib import Path
+
+from .config import Config, DEFAULT_PROMPT, load_dataset_config
 from .data.splitter import split_dataset
 from .runner import run_inference
+from .predict import predict_folder
 from .evaluate import score_predictions
 from .scoring import available_scorers
 from . import workspace
@@ -166,6 +170,56 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# pred:无标注图片文件夹 -> 单轮描述(不评分)
+# ---------------------------------------------------------------------------
+def _cmd_pred(args: argparse.Namespace) -> int:
+    """遍历 --datadir 内所有图片,按 config.yaml 组织对话调 VLM 描述,落到 workspace/<同名>。
+
+    自包含文件夹模型(同 split→run):首次运行在 workspace/<名>/ 生成 config.yaml
+    (含 inference + pred 两段),再次运行直接读它。改 vLLM API 或对话组织 = 手改该
+    config.yaml 重跑。CLI flag 为临时覆盖,优先级:flag > 文件夹 config.yaml > 模板默认。
+    """
+    global_cfg = workspace.load_global_config()
+    ws = workspace.resolve_workspace(args.workspace, global_cfg)
+
+    datadir = Path(args.datadir).expanduser().resolve()
+    if not datadir.is_dir():
+        raise FileNotFoundError(f"--datadir 不是文件夹: {datadir}")
+
+    name = args.name or datadir.name
+    out_dir = (ws / name).resolve()
+    if out_dir == datadir:
+        raise ValueError(
+            f"输出文件夹与 --datadir 相同({out_dir});请用 --name 指定不同名字,"
+            f"或把 workspace 设为别处(预测产物不应写回原图片文件夹)。"
+        )
+
+    # 生成(首次/--force)或沿用已有 config.yaml,然后读回成强类型 Config。
+    config_path = out_dir / "config.yaml"
+    existed = config_path.exists()
+    workspace.init_pred_config(out_dir, datadir, global_cfg, force=args.force)
+    cfg = load_dataset_config(out_dir)          # 读 config.yaml + 钉 run_dir_path=out_dir
+    action = "重新生成(--force)" if (existed and args.force) else ("沿用" if existed else "首次生成")
+    print(f"[pred] {action}配置 -> {config_path}")
+
+    # 图片永远定位到 --datadir(即便 config 里 media_root 被改过)。
+    cfg.data.media_root = str(datadir)
+    # CLI 临时覆盖(不回写 config.yaml)。
+    if args.backend is not None:
+        cfg.inference.backend = args.backend
+    _apply_inference_overrides(cfg, args)       # --base-url / --model
+    if args.system_prompt is not None:
+        cfg.pred.system_prompt = args.system_prompt
+
+    stats = predict_folder(cfg, datadir, prompt=args.prompt)   # --prompt 显式才覆盖(默认 None)
+    print(f"[pred] 完成 {stats['newly_completed']} 张描述,失败 {stats['errors']} 张,"
+          f"跳过(已完成) {stats['skipped_already_done']} 张 -> {stats['predictions_path']}")
+    if stats["errors"]:
+        print(f"[pred] 注意:有 {stats['errors']} 张失败(已记录到 failures.jsonl,可重跑补齐)。")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # 参数
 # ---------------------------------------------------------------------------
 def _add_workspace_arg(p: argparse.ArgumentParser) -> None:
@@ -240,6 +294,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--scorer", default=None, help="临时覆盖评分器")
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
+
+    # pred(无标注图片描述)
+    p_pred = sub.add_parser(
+        "pred", help="对无标注图片文件夹逐张描述(不评分;--datadir=图片文件夹)")
+    p_pred.add_argument("--datadir", "-d", required=True, help="待描述的图片文件夹路径")
+    p_pred.add_argument("--name", default=None,
+                        help="输出文件夹名(默认取图片文件夹名);产物落在 workspace/<名>/")
+    p_pred.add_argument("--prompt", default=None,
+                        help=f"临时覆盖单轮提示词(不传则用文件夹 config.yaml 的 pred.prompt,"
+                             f"默认 {DEFAULT_PROMPT!r};config 里设了多轮 template 时此项无效)")
+    p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
+                        help="临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
+    p_pred.add_argument("--backend", default=None, choices=["openai", "fake"],
+                        help="临时覆盖推理后端:openai(调真实 API)| fake(回显,不联网,自检用)")
+    p_pred.add_argument("--force", action="store_true",
+                        help="重新生成文件夹内 config.yaml(覆盖你的手改)")
+    _add_inference_args(p_pred)
+    _add_workspace_arg(p_pred)
+    p_pred.set_defaults(func=_cmd_pred)
 
     return parser
 

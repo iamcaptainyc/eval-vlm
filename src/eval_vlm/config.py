@@ -12,6 +12,9 @@ from typing import Any, Optional
 
 import yaml
 
+# pred 默认单轮提示词(唯一真源;predict.py / cli.py import 本常量)。
+DEFAULT_PROMPT = "请描述图片"
+
 
 @dataclass
 class Tags:
@@ -95,6 +98,26 @@ class ScoringConfig:
 
 
 @dataclass
+class PredConfig:
+    """无标注图片描述(pred 命令)的对话组织。
+
+    两种写法,二选一:
+      - 单轮简写:只设 prompt(+可选 system_prompt)。每张图发一轮
+        user 消息;若 prompt 不含 <image> 占位符,自动前置一个。
+      - 多轮模板:设 template(role/content 字典列表),覆盖 prompt。
+        可含纯文本 assistant/user 轮做 few-shot 引导;<image> 标记目标图位置。
+
+    约束(由 predict.build_context 校验):全部轮中 <image> 恰好 1 个且在 user 轮;
+    最后一轮必须是 user(模型据此作答)。system_prompt 运行时映射到
+    inference.system_prompt,复用后端既有系统消息处理。
+    """
+    prompt: str = DEFAULT_PROMPT
+    system_prompt: Optional[str] = None
+    # list[dict{role, content}];设置后覆盖 prompt。保持原始 dict(无需 dataclass 递归)。
+    template: Optional[list] = None
+
+
+@dataclass
 class Config:
     run_name: str = "default_run"
     output_dir: str = "outputs"
@@ -103,6 +126,7 @@ class Config:
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
+    pred: PredConfig = field(default_factory=PredConfig)
 
     # 配置文件所在目录,用于把相对路径解析成绝对路径。
     config_dir: Path = field(default_factory=lambda: Path.cwd())
@@ -194,7 +218,8 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     kwargs: dict[str, Any] = {}
     type_hints = {f.name: f.type for f in fields(cls)}
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
-              "eval": EvalConfig, "scoring": ScoringConfig, "mapping": Mapping, "tags": Tags}
+              "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
+              "mapping": Mapping, "tags": Tags}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

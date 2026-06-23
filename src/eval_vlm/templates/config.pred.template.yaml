@@ -1,0 +1,51 @@
+# eval_vlm 无标注图片描述配置(由 `eval-vlm pred --datadir <图片文件夹>` 首次运行生成)
+# 此文件随输出文件夹一起存放;再次对同一文件夹跑 pred 会直接读它(无需 --config)。
+# 想定制 vLLM API 或每张图的对话组织,直接手改本文件,然后重跑 pred 即可。
+# (机器级路径来自全局配置 ~/.eval_vlm/config.yaml;CLI --base-url/--model/--prompt 等可临时覆盖。)
+
+run_name: {{RUN_NAME}}                 # 仅作展示/元信息
+output_dir: {{OUTPUT_DIR}}             # 工作目录(workspace);仅作元信息
+
+# ---------------------------------------------------------------------------
+# 数据:pred 没有数据集 JSON,只有一个图片文件夹。media_root 钉到该文件夹,
+# 因此 predictions.jsonl 里的图片名按相对它解析(运行时会再次确保指向 --datadir)。
+# ---------------------------------------------------------------------------
+data:
+  source: ""                           # pred 不用源 JSON
+  media_root: {{MEDIA_ROOT}}           # = 图片文件夹(--datadir)
+  image_strip_prefix: {{IMAGE_STRIP_PREFIX}}   # 跨机绝对前缀,本机不需要则 null
+
+# ---------------------------------------------------------------------------
+# 推理后端(vLLM / SGLang / LlamaFactory api 等 OpenAI 兼容服务)
+# 这里是「自定义 vLLM API」的地方:全部参数都可手改。
+# base_url/model 也可用 pred 的 --base-url/--model 临时覆盖。
+# ---------------------------------------------------------------------------
+inference:
+  backend: openai             # openai(OpenAI 兼容 API) | fake(回显, 不联网, 自检用)
+  base_url: http://localhost:8000/v1   # 部署地址(可用 --base-url 覆盖)
+  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖)
+  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+  system_prompt: null         # 系统提示;也可在下方 pred.system_prompt 设置(后者运行时映射到这里)
+  max_concurrency: 8          # 并发请求数(图片级并发)
+  max_tokens: 512
+  temperature: 0.0
+  request_timeout: 120        # 单请求超时(秒)
+  max_retries: 3              # 失败重试次数(指数退避)
+  image_detail: auto          # OpenAI image_url 的 detail: auto|low|high
+
+# ---------------------------------------------------------------------------
+# 每张图片的对话怎么组织(pred 专用)
+# 两种写法二选一:
+#   1) 单轮简写:只设 prompt(+可选 system_prompt)。每张图发一轮 user 消息;
+#      若 prompt 不含 <image>,会自动在最前面加一个。
+#   2) 多轮模板:取消注释 template(role/content 列表),它会覆盖 prompt。
+#      可加纯文本的 assistant/user 轮做 few-shot 引导。
+# 规则:全部轮里 <image> 必须恰好出现 1 次且位于某个 user 轮;最后一轮必须是 user。
+# ---------------------------------------------------------------------------
+pred:
+  prompt: 请描述图片          # 单轮默认提示词(可用 --prompt 临时覆盖)
+  system_prompt: null         # 可选系统提示(可用 --system-prompt 临时覆盖)
+  # template:                 # 多轮模板(取消注释并编辑;设置后覆盖 prompt)
+  #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}
+  #   - {role: assistant, content: "好的,请提供图片。"}
+  #   - {role: user, content: "<image>请描述这张图片"}
