@@ -1,20 +1,26 @@
-# eval_vlm 数据集配置(由 `eval-vlm split --dataset <源json>` 从内置模板自动生成)
-# 此文件随数据集文件夹一起存放,run/score/eval 直接读它,无需再回到 configs/。
-# 后续微调:直接手改本文件即可(机器级路径来自全局配置 ~/.eval_vlm/config.yaml)。
+# eval_vlm 数据集配置(单一统一模板,所有命令共用)
+# 由 `eval-vlm split --dataset <源json>`(有标注)或 `eval-vlm pred --datadir <图片夹>`(无标注)
+# 首次运行时从本模板渲染到该数据集文件夹;之后微调直接手改这个 config.yaml 再重跑即可。
+# (机器级路径来自全局配置 ~/.eval_vlm/config.yaml;CLI --base-url/--model/--prompt 等可临时覆盖。)
 #
-# 占位符由 split 时填入:run_name/源数据/机器级路径/划分参数;其余为可手改默认值。
+# 一份配置覆盖全部命令,每段都标了「谁用」。与你当前命令无关的段保持默认即可,不会有副作用:
+#   data.source / data.mapping / split / eval / scoring  -> split·run·score·eval 使用;pred 忽略
+#   data.media_root / image_strip_prefix / inference     -> 所有命令共用
+#   pred                                                 -> 仅 pred 使用;run·score 忽略
 
 run_name: {{RUN_NAME}}                 # 仅作展示/元信息;实际产物落在本文件所在文件夹
 output_dir: {{OUTPUT_DIR}}             # 工作目录(workspace);仅作元信息
 
 # ---------------------------------------------------------------------------
-# 数据源:LlamaFactory 数据集格式 JSON(sharegpt 风格)
+# 数据(所有命令)
+#   source / mapping  -> 仅 split·run·score·eval(从 LlamaFactory 数据集 JSON 读样本);pred 留空
+#   media_root        -> 所有命令:相对图片路径相对此目录解析(pred 运行时强制指向 --datadir)
 # ---------------------------------------------------------------------------
 data:
-  source: {{SOURCE}}                   # 初始化时传入的完整数据集 JSON(split 用;run/score 读本文件夹的 test.json)
-  media_root: {{MEDIA_ROOT}}           # 相对图片路径相对此目录解析(机器级,来自全局配置)
-  image_strip_prefix: {{IMAGE_STRIP_PREFIX}}   # 跨机训练绝对前缀,本机不需要则为 null(机器级,来自全局配置)
-  # 字段映射,对齐 LlamaFactory dataset_info.json。
+  source: {{SOURCE}}                   # 数据集 JSON(split 用;run/score 读本文件夹的 test.json);pred 为空
+  media_root: {{MEDIA_ROOT}}           # 图片相对路径解析根(机器级;pred = 图片文件夹)
+  image_strip_prefix: {{IMAGE_STRIP_PREFIX}}   # 跨机训练绝对前缀,本机不需要则 null(机器级)
+  # 字段映射(仅 split·run·score),对齐 LlamaFactory dataset_info.json。
   # 默认 mllm_demo 风格(messages + role/content + user/assistant)。
   # 若数据是 conversations + from/value + human/gpt,改成下方注释写法即可,无需改代码。
   mapping:
@@ -32,8 +38,9 @@ data:
   #   tags: {role: from, content: value, user: human, assistant: gpt}
 
 # ---------------------------------------------------------------------------
-# 数据划分(step 1: split)— 这些值由 split 命令行参数填入,后续手改无效(split 已执行完)。
+# 数据划分(仅 split;pred 忽略本段)
 # 把源 JSON 纯分割成 train / test(+可选 val),三份都是原样 LlamaFactory 格式。
+# train/test/val/seed/stratify_by 的值由 split 命令行参数填入,split 执行完后手改无效。
 # ---------------------------------------------------------------------------
 split:
   train: {{TRAIN}}            # 训练集比例(--train)
@@ -42,28 +49,33 @@ split:
   seed: {{SEED}}             # 固定随机种子(--seed)-> 可复现
   stratify_by: {{STRATIFY_BY}}     # 分层抽样字段(--stratify-by);null 表示不分层
   # 自定义各份输出位置(可直接写到 LlamaFactory data/);留空落到本文件夹。
+  # 也可用命令行覆盖:--train-out / --val-out / --test-out。
   train_out: null
   val_out: null
   test_out: null
 
 # ---------------------------------------------------------------------------
-# 推理后端(step 2: run)— 部署完模型后手改这里,或用 --base-url/--model 临时覆盖。
+# 推理后端(所有命令:run / eval / pred 都用这段)
+# 这里也是「自定义 vLLM API」的地方:全部参数都可手改;base_url/model 也可用 --base-url/--model 覆盖。
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai(OpenAI 兼容 API) | fake(测试回显, 不联网)
-  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署地址(可用 --base-url 覆盖)
-  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖)
-  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
-  system_prompt: null         # 可选系统提示
-  max_concurrency: 8          # 并发请求数
-  max_tokens: 512
+  backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显,自检用)
+  base_url: http://localhost:8000/v1   # 部署地址(可用 --base-url 覆盖;mnn 后端忽略)
+  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖;mnn 后端忽略)
+  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
+  system_prompt: null         # 系统提示(pred 也可在下方 pred.system_prompt 设置,后者运行时映射到这里)
+  max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)
+  max_tokens: 512             # 生成上限(mnn 后端作为 response 的 max_new_tokens)
   temperature: 0.0
   request_timeout: 120        # 单请求超时(秒)
   max_retries: 3              # 失败重试次数(指数退避)
-  image_detail: auto          # OpenAI image_url 的 detail: auto|low|high
+  image_detail: auto          # OpenAI image_url 的 detail: auto|low|high(mnn 后端忽略)
+  # backend=mnn 专用:训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
+  # 仅 mnn 后端使用;可用 `eval-vlm pred --mnn-config <config.json>` 临时覆盖。
+  mnn_config_path: null       # 例: /root/autodl-tmp/qwen2-vl-mnn/config.json
 
 # ---------------------------------------------------------------------------
-# 多轮评测策略(step 2/3 共用)
+# 多轮评测策略(仅 run·score·eval;pred 忽略本段)
 # 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
 # ---------------------------------------------------------------------------
 eval:
@@ -71,10 +83,27 @@ eval:
   context: rollout            # rollout=用模型自己生成的前文;gold=用数据集标准前文
 
 # ---------------------------------------------------------------------------
-# 评分(step 3: score)
+# 评分(仅 score·eval;pred 忽略本段)
 # ---------------------------------------------------------------------------
 scoring:
   scorer: exact_match         # 默认 scorer(已注册名称);可被 --scorer 覆盖
   turn_scorers: []            # 逐轮指定(按目标顺序),缺省回落到 scorer
   # 例:轮1描述用 token_f1(相似度),轮2标签用 exact_match(精确匹配):
   # turn_scorers: [token_f1, exact_match]
+
+# ---------------------------------------------------------------------------
+# 无标注图片的对话怎么组织(仅 pred;run·score 忽略本段)
+# 两种写法二选一:
+#   1) 单轮简写:只设 prompt(+可选 system_prompt)。每张图发一轮 user 消息;
+#      若 prompt 不含 <image>,会自动在最前面加一个。(可用 --prompt 临时覆盖)
+#   2) 多轮模板:取消注释 template(role/content 列表),它会覆盖 prompt。
+#      可加纯文本的 assistant/user 轮做 few-shot 引导。
+# 规则:全部轮里 <image> 必须恰好出现 1 次且位于某个 user 轮;最后一轮必须是 user。
+# ---------------------------------------------------------------------------
+pred:
+  prompt: 请描述图片          # 单轮默认提示词(可用 --prompt 临时覆盖)
+  system_prompt: null         # 可选系统提示(可用 --system-prompt 临时覆盖)
+  # template:                 # 多轮模板(取消注释并编辑;设置后覆盖 prompt)
+  #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}
+  #   - {role: assistant, content: "好的,请提供图片。"}
+  #   - {role: user, content: "<image>请描述这张图片"}

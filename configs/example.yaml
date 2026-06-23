@@ -4,8 +4,10 @@
 #   eval-vlm config set workspace <dir>                      # 机器级,一次性
 #   eval-vlm split --dataset <源JSON> --train 0.95 --test 0.05  # 在 workspace 下建文件夹 + 生成同结构 config.yaml
 #   eval-vlm eval  --dataset <数据集名>                       # 一键 run + score
-# split 时该 config.yaml 由内置模板(src/eval_vlm/templates/config.template.yaml)自动生成,
-# 之后微调直接手改 <workspace>/<名>/config.yaml。本文件仅供查阅各字段。
+# 所有命令(split/run/score/eval/pred)共用同一个内置模板
+# (src/eval_vlm/templates/config.template.yaml)自动生成;每段都标了「谁用」,
+# 与当前命令无关的段保持默认即可(惰性、无副作用)。之后微调直接手改
+# <workspace>/<名>/config.yaml。本文件仅供查阅各字段。
 
 run_name: emotion_open11200_dataset_regen_v1            # 输出落到 <output_dir>/<run_name>/
 output_dir: outputs
@@ -61,17 +63,20 @@ split:
 # 推理后端(step 2: run)
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai(OpenAI 兼容 API) | fake(测试回显, 不联网)
-  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(可用 --base-url 覆盖)
-  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖)
-  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+  backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显, 不联网)
+  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(可用 --base-url 覆盖;mnn 后端忽略)
+  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖;mnn 后端忽略)
+  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
   system_prompt: null         # 可选系统提示
-  max_concurrency: 8          # 并发请求数
-  max_tokens: 512
+  max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)
+  max_tokens: 512             # 生成上限(mnn 后端作为 response 的 max_new_tokens)
   temperature: 0.0
   request_timeout: 120        # 单请求超时(秒)
   max_retries: 3              # 失败重试次数(指数退避)
-  image_detail: auto          # OpenAI image_url 的 detail 字段: auto|low|high
+  image_detail: auto          # OpenAI image_url 的 detail 字段: auto|low|high(mnn 后端忽略)
+  # backend=mnn 专用:训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
+  # 仅 mnn 后端使用;可用 `eval-vlm pred --mnn-config <config.json>` 临时覆盖。
+  mnn_config_path: null       # 例: /root/autodl-tmp/qwen2-vl-mnn/config.json
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(step 2/3 共用)
@@ -89,3 +94,16 @@ scoring:
   turn_scorers: []            # 逐轮指定(按目标顺序),缺省回落到 scorer
   # 例:轮1描述用 token_f1(相似度),轮2标签用 exact_match(精确匹配):
   # turn_scorers: [token_f1, exact_match]
+
+# ---------------------------------------------------------------------------
+# 无标注图片的对话怎么组织(仅 pred:eval-vlm pred --datadir <图片夹>;run/score 忽略)
+# 单轮简写:只设 prompt(不含 <image> 时自动前置);或取消注释 template 写多轮(覆盖 prompt)。
+# 规则:全部轮里 <image> 恰好 1 次且在 user 轮;最后一轮必须是 user。
+# ---------------------------------------------------------------------------
+pred:
+  prompt: 请描述图片          # 单轮默认提示词(可用 --prompt 临时覆盖)
+  system_prompt: null         # 可选系统提示(可用 --system-prompt 临时覆盖;运行时映射到 inference.system_prompt)
+  # template:                 # 多轮模板(取消注释并编辑;设置后覆盖 prompt)
+  #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}
+  #   - {role: assistant, content: "好的,请提供图片。"}
+  #   - {role: user, content: "<image>请描述这张图片"}

@@ -203,8 +203,13 @@ eval-vlm pred --datadir ./photos --backend mnn
 `config.yaml`,**再次运行**直接读它。想完整定制 **vLLM API** 或**每张图的对话怎么组织**,就手改这份
 `config.yaml` 后重跑(`--force` 可重新生成,覆盖手改)。优先级:**CLI flag > 文件夹 `config.yaml` > 模板默认**。
 
+> 所有命令(`split`/`run`/`score`/`eval`/`pred`)共用**同一个统一模板**,所以 pred 生成的
+> `config.yaml` 也会带 `split` / `eval` / `scoring` 段——它们对 pred 是**惰性的**(每段都标了「谁用」),
+> 留默认即可、无副作用;pred 只读 `data.media_root` / `inference` / `pred` 三处。
+
 - **vLLM API**:`inference:` 块全参可调 —— `base_url` / `model` / `api_key_env` / `max_tokens` /
-  `temperature` / `max_concurrency` / `request_timeout` / `max_retries` / `image_detail` / `system_prompt`。
+  `temperature` / `max_concurrency` / `request_timeout` / `max_retries` / `image_detail` / `system_prompt`
+  (`backend=mnn` 时另用 `mnn_config_path`)。
 - **对话组织**:`pred:` 块。两种写法二选一:
   - **单轮简写**:只设 `prompt`(+可选 `system_prompt`)。若 `prompt` 不含 `<image>`,自动在最前面加一个。
   - **多轮模板**:设 `template`(`role`/`content` 列表),**覆盖** `prompt`,可加纯文本 `assistant`/`user` 轮做 few-shot 引导。
@@ -310,7 +315,6 @@ src/eval_vlm/
 ├── evaluate.py          # 评分编排
 ├── workspace.py         # 工作目录模型:全局配置 + 数据集初始化/定位 + 模板渲染
 ├── templates/
-│   ├── config.template.yaml       # 内置数据集配置模板(split 时渲染)
-│   └── config.pred.template.yaml  # pred 配置模板(inference + pred 块;pred 首次运行渲染)
+│   └── config.template.yaml       # 统一配置模板(所有命令共用;split/pred 首次运行渲染)
 └── cli.py               # config / split / run / score / eval / pred
 ```

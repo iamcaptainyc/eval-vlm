@@ -307,16 +307,16 @@ def _yaml_scalar(value: Any) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
-def render_template(values: dict[str, Any],
-                    template_name: str = "config.template.yaml") -> str:
-    """读取内置模板,把 {{KEY}} 占位符替换为渲染后的 YAML 标量。
+def render_template(values: dict[str, Any]) -> str:
+    """读取内置统一模板,把 {{KEY}} 占位符替换为渲染后的 YAML 标量。
 
-    template_name 选模板:默认数据集模板;pred 用 config.pred.template.yaml。
-    仅替换标量占位符(列表如多轮 template 在模板里静态写,不经此函数)。
+    全部命令(split / run / score / eval / pred)共用同一个 config.template.yaml;
+    各命令只填自己关心的占位符,其余取默认(与本命令无关的段是惰性的,无副作用)。
+    仅替换标量占位符(列表如多轮 pred.template 在模板里静态写,不经此函数)。
     """
     text = (
         resources.files("eval_vlm")
-        .joinpath(f"templates/{template_name}")
+        .joinpath("templates/config.template.yaml")
         .read_text(encoding="utf-8")
     )
     for key, val in values.items():
@@ -382,10 +382,11 @@ def init_pred_config(
     *,
     force: bool = False,
 ) -> Path:
-    """为 pred 在输出文件夹生成 config.yaml(含 inference + pred 块)。返回其路径。
+    """为 pred 在输出文件夹生成 config.yaml(统一模板,只是不评分)。返回其路径。
 
-    类比 init_dataset,但用 pred 专用模板(无 split/源 JSON):media_root 钉到图片
-    文件夹,image_strip_prefix 取自全局配置。已存在且非 force 时不动(保留用户手改)。
+    与 init_dataset 共用同一个模板:media_root 钉到图片文件夹,image_strip_prefix
+    取自全局配置;pred 无源 JSON 故 source 留空,split 段填默认值(对 pred 惰性、无副作用)。
+    已存在且非 force 时不动(保留用户手改)。
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     config_path = out_dir / "config.yaml"
@@ -394,11 +395,15 @@ def init_pred_config(
     values = {
         "RUN_NAME": out_dir.name,
         "OUTPUT_DIR": str(out_dir.parent),
+        "SOURCE": "",                              # pred 无源数据集 JSON
         "MEDIA_ROOT": str(datadir),
         "IMAGE_STRIP_PREFIX": global_cfg.get("image_strip_prefix"),
+        # split 段对 pred 无意义,仅为占位渲染(留默认值,pred 永不读取)。
+        "TRAIN": _SPLIT_DEFAULTS["train"],
+        "TEST": _SPLIT_DEFAULTS["test"],
+        "VAL": _SPLIT_DEFAULTS["val"],
+        "SEED": _SPLIT_DEFAULTS["seed"],
+        "STRATIFY_BY": _SPLIT_DEFAULTS["stratify_by"],
     }
-    config_path.write_text(
-        render_template(values, template_name="config.pred.template.yaml"),
-        encoding="utf-8",
-    )
+    config_path.write_text(render_template(values), encoding="utf-8")
     return config_path
