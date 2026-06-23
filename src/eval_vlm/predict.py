@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 from .config import Config, PredConfig
 from .data.schema import Prediction, Turn
-from .inference import build_backend
+from .inference import build_backend, worker_count
 from .inference.base import InferenceBackend
 from .results import store
 
@@ -185,7 +185,8 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None) 
             fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
             fh.flush()                            # 每条 flush:中断不丢已写结果
 
-        max_workers = max(1, cfg.inference.max_concurrency)
+        # 非线程安全后端(如 MNN 有状态单对象)强制串行;openai/fake 用配置并发。
+        max_workers = worker_count(backend, cfg.inference.max_concurrency)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
         # predictions 追加写(续跑安全);failures 每次重写(只反映本轮未完成项)。
         with pred_path.open("a", encoding="utf-8") as ok_fh, \

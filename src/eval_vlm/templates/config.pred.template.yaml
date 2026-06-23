@@ -21,17 +21,20 @@ data:
 # base_url/model 也可用 pred 的 --base-url/--model 临时覆盖。
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai(OpenAI 兼容 API) | fake(回显, 不联网, 自检用)
-  base_url: http://localhost:8000/v1   # 部署地址(可用 --base-url 覆盖)
-  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖)
-  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+  backend: openai             # openai/vllm(OpenAI 兼容 API) | mnn(本地 pymnn 推理) | fake(回显,自检用)
+  base_url: http://localhost:8000/v1   # 部署地址(可用 --base-url 覆盖;mnn 后端忽略)
+  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖;mnn 后端忽略)
+  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
   system_prompt: null         # 系统提示;也可在下方 pred.system_prompt 设置(后者运行时映射到这里)
-  max_concurrency: 8          # 并发请求数(图片级并发)
-  max_tokens: 512
+  max_concurrency: 8          # 并发请求数(图片级并发;mnn 后端有状态,自动降为 1 串行)
+  max_tokens: 512             # 生成上限(mnn 后端作为 response 的 max_new_tokens)
   temperature: 0.0
   request_timeout: 120        # 单请求超时(秒)
   max_retries: 3              # 失败重试次数(指数退避)
   image_detail: auto          # OpenAI image_url 的 detail: auto|low|high
+  # backend=mnn 专用:训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
+  # 仅 mnn 后端使用;可用 `eval-vlm pred --mnn-config <config.json>` 临时覆盖。
+  mnn_config_path: null       # 例: /root/autodl-tmp/qwen2-vl-mnn/config.json
 
 # ---------------------------------------------------------------------------
 # 每张图片的对话怎么组织(pred 专用)

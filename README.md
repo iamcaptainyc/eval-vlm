@@ -141,7 +141,8 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `--name NAME` | pred | 输出文件夹名(默认取图片文件夹名);产物落 `workspace/<名>/` |
 | `--prompt TEXT` | pred | 临时覆盖单轮提示词(不传则用文件夹 `config.yaml` 的 `pred.prompt`,默认 `请描述图片`;设了多轮 `template` 时无效) |
 | `--system-prompt TEXT` | pred | 临时覆盖系统提示(不传则用 `config.yaml` 的 `pred.system_prompt`) |
-| `--backend openai\|fake` | pred | 临时覆盖推理后端(fake=回显不联网,自检用) |
+| `--backend openai\|vllm\|mnn\|fake` | pred | 临时覆盖推理后端(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;fake=回显不联网,自检用) |
+| `--mnn-config FILE` | pred | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(临时覆盖 `inference.mnn_config_path`) |
 | `--force` | pred | 重新生成文件夹内 `config.yaml`(覆盖手改) |
 | `--workspace DIR` | split/run/score/eval/pred | 临时覆盖全局 workspace |
 
@@ -159,11 +160,42 @@ assistant: <模型生成的描述>
 # 自检(不联网,回显验证全链路):产物落到 <workspace>/test_images/
 eval-vlm pred --datadir test_images --backend fake
 
-# 调真实部署的模型(OpenAI 兼容服务)
+# 调真实部署的模型(OpenAI 兼容服务,vLLM/SGLang/LlamaFactory api)
 eval-vlm pred --datadir test_images --base-url http://localhost:8000/v1 --model trained-vlm
 # 自定义提示词 / 系统提示 / 输出文件夹名
 eval-vlm pred --datadir ./photos --prompt "用一句话描述这张图" --system-prompt "你是图像描述助手" --name photos_desc
+
+# 本地 MNN 推理(训练后转成 mnn 的模型,无需起服务)
+eval-vlm pred --datadir ./photos --backend mnn --mnn-config /root/qwen2-vl-mnn/config.json
 ```
+
+#### 本地 MNN 后端(`--backend mnn`)
+
+训练完 VLM 后转成 MNN 格式(`llm.mnn` / `llm.mnn.weight` / `tokenizer.mtok` / `config.json` 等
+放同一目录),即可用 **pymnn 在本机直接推理**,无需先把模型部署成 HTTP 服务——和
+`openai`/`vllm` 后端(调远端 OpenAI 兼容 API)互补。`mnn-infer` 即 `pred --backend mnn`,
+专用于**无标注图片文件夹**的推理,产物(`predictions.jsonl`/`failures.jsonl`/`pred_meta.json`)
+与其它后端完全一致。
+
+```bash
+# 一次性指定 MNN 模型 config.json
+eval-vlm pred --datadir ./photos --backend mnn --mnn-config /root/qwen2-vl-mnn/config.json
+# 或在文件夹 config.yaml 的 inference.mnn_config_path 写死后直接:
+eval-vlm pred --datadir ./photos --backend mnn
+```
+
+**前置依赖**:需安装**带 LLM 支持**的 pymnn(`MNN.llm` / `MNN.cv`)。一般需用
+`-DMNN_BUILD_LLM=ON` 编译;多模态(VL)再加 `-DMNN_BUILD_LLM_OMNI=ON`。未安装时用
+`--backend mnn` 会给出明确报错,不影响其它后端使用。
+
+**工作原理**(对齐 MNN 官方 pymnn 接口):图片用 `MNN.cv.imread` 原生读为 Var(免 numpy 往返),
+按 `{'text': '<img>image_0</img>…', 'images': [{'data': img, 'height': H, 'width': W}]}` 组织;
+`height`/`width` 由图片自动推导。调用 `model.response(prompt, stream=False, max_new_tokens)`
+**直接返回完整生成文本**(`max_new_tokens` 取 `inference.max_tokens`),无需手写解码循环。
+
+**约束**:pymnn 的 LLM 无批量接口且单个模型对象有状态(KV cache),因此 MNN 后端**强制串行**
+(`max_concurrency` 自动降为 1);仅支持**单图单轮**(`pred` 的默认场景),`base_url`/`model`/
+`api_key` 对它无效,采样参数请在 MNN 自己的 `config.json` 里配。
 
 #### 自定义 vLLM API 与对话组织(`config.yaml`)
 
@@ -266,8 +298,9 @@ src/eval_vlm/
 │   ├── loader.py        # 解析 LlamaFactory JSON(字段映射可配)
 │   └── splitter.py      # 确定性划分测试集
 ├── inference/
-│   ├── base.py          # 后端接口
-│   ├── openai_backend.py# OpenAI 兼容调用(图片 base64、并发、重试)
+│   ├── base.py          # 后端接口(thread_safe 标志:有状态后端串行)
+│   ├── openai_backend.py# OpenAI 兼容调用(图片 base64、并发、重试;vllm 为其别名)
+│   ├── mnn_backend.py   # 本地 MNN(pymnn)推理(转换后的 mnn 模型,无需服务)
 │   └── fake_backend.py  # 离线回显后端(测试/演示)
 ├── scoring/
 │   ├── base.py / registry.py / exact_match.py / token_f1.py   # 可插拔评分

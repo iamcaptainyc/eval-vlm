@@ -207,6 +207,8 @@ def _cmd_pred(args: argparse.Namespace) -> int:
     # CLI 临时覆盖(不回写 config.yaml)。
     if args.backend is not None:
         cfg.inference.backend = args.backend
+    if getattr(args, "mnn_config", None):
+        cfg.inference.mnn_config_path = args.mnn_config
     _apply_inference_overrides(cfg, args)       # --base-url / --model
     if args.system_prompt is not None:
         cfg.pred.system_prompt = args.system_prompt
@@ -306,8 +308,14 @@ def build_parser() -> argparse.ArgumentParser:
                              f"默认 {DEFAULT_PROMPT!r};config 里设了多轮 template 时此项无效)")
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
                         help="临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
-    p_pred.add_argument("--backend", default=None, choices=["openai", "fake"],
-                        help="临时覆盖推理后端:openai(调真实 API)| fake(回显,不联网,自检用)")
+    p_pred.add_argument("--backend", default=None,
+                        choices=["openai", "vllm", "mnn", "fake"],
+                        help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
+                             "mnn(本地 pymnn 推理转换后的 mnn 模型,需 --mnn-config)| "
+                             "fake(回显,不联网,自检用)")
+    p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
+                        help="backend=mnn 时:转换产物目录里 config.json 的路径"
+                             "(临时覆盖 inference.mnn_config_path)")
     p_pred.add_argument("--force", action="store_true",
                         help="重新生成文件夹内 config.yaml(覆盖你的手改)")
     _add_inference_args(p_pred)

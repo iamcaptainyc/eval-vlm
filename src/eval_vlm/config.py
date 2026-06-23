@@ -72,6 +72,10 @@ class InferenceConfig:
     request_timeout: float = 120.0
     max_retries: int = 3
     image_detail: str = "auto"
+    # MNN(pymnn)后端专用:训练后转 mnn 的模型目录里 config.json 的路径,
+    # 传给 MNN.llm.create()。仅 backend=mnn 时使用;openai/vllm/fake 忽略。
+    # 可用 pred 的 --mnn-config 临时覆盖。
+    mnn_config_path: Optional[str] = None
 
 
 @dataclass

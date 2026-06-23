@@ -18,6 +18,11 @@ class InferenceBackend(ABC):
     之前的对话上下文(context),后端据此生成**一个** assistant 轮的回答。
     """
 
+    # 后端是否可在多线程下并发调用。OpenAI/fake 走 HTTP/纯函数,可并发(True);
+    # 本地有状态后端(如 MNN:单个 Llm 对象 + KV cache)必须串行(置 False),
+    # 编排层(predict_folder / run_inference)据此把并发降为 1。
+    thread_safe: bool = True
+
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
 

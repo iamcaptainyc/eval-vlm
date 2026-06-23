@@ -18,7 +18,7 @@ from .config import Config
 from .data.loader import load_samples
 from .data.schema import Prediction, Sample, Turn
 from .data.splitter import load_split_meta
-from .inference import build_backend
+from .inference import build_backend, worker_count
 from .inference.base import InferenceBackend
 from .results import store
 
@@ -87,7 +87,8 @@ def run_inference(cfg: Config) -> dict:
     if not todo:
         print(f"全部 {len(samples)} 条样本({n_targets} 个目标轮)已完成,无需推理(断点续跑)。")
     else:
-        max_workers = max(1, cfg.inference.max_concurrency)
+        # 非线程安全后端(如 MNN)强制串行,避免有状态对象被并发破坏。
+        max_workers = worker_count(backend, cfg.inference.max_concurrency)
         with store.PredictionWriter(cfg.predictions_path) as writer, \
                 ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {pool.submit(_rollout_sample, cfg, backend, s): s for s in todo}
