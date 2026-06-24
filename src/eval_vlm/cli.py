@@ -11,9 +11,13 @@
     eval    : 读取已有 —— 一键连续执行 run + score(不含 split:split 后需先部署模型)
     pred    : 无标注 —— --datadir = 图片文件夹;逐张单轮描述,产物落 workspace/<同名>/(不评分)
 
-临时覆盖(不回写 config.yaml,永久改动请手改文件夹内 config.yaml):
-    --base-url / --model   run/eval 注入部署地址与模型名
-    --scorer               score/eval 覆盖评分器
+产物按模型分目录:run/score/eval/pred 的结果落在 工作目录/<数据集>/<inference.model>/,
+不同模型对同一数据集互不覆盖;split 产物(train/test/val)是各模型共享的,落在数据集文件夹本身。
+
+CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持久化,不再是临时):
+    --base-url / --model     run/eval/pred 写回 inference.base_url / inference.model
+    --scorer                 score/eval 写回 scoring.scorer
+    --backend / --mnn-config / --prompt / --system-prompt   pred 写回对应字段
 """
 from __future__ import annotations
 
@@ -109,19 +113,43 @@ def _cmd_split(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # run / score / eval:读取已有数据集文件夹
 # ---------------------------------------------------------------------------
-def _load_existing(args: argparse.Namespace) -> Config:
+def _resolve_folder(args: argparse.Namespace) -> Path:
+    """把 --dataset 解析成已存在的数据集文件夹(workspace 模型)。"""
     global_cfg = workspace.load_global_config()
     ws = workspace.resolve_workspace(args.workspace, global_cfg)
-    folder = workspace.resolve_dataset_dir(args.dataset, ws)
-    return load_dataset_config(folder)
+    return workspace.resolve_dataset_dir(args.dataset, ws)
 
 
-def _apply_inference_overrides(cfg: Config, args: argparse.Namespace) -> None:
-    """部署地址/模型名临时覆盖(不回写 config.yaml)。"""
-    if getattr(args, "base_url", None):
-        cfg.inference.base_url = args.base_url
-    if getattr(args, "model", None):
-        cfg.inference.model = args.model
+# CLI flag 名 -> 写回 config.yaml 的点号键(用户参数优先且持久化)。
+_PERSIST_MAP: tuple[tuple[str, str], ...] = (
+    ("base_url", "inference.base_url"),
+    ("model", "inference.model"),
+    ("backend", "inference.backend"),
+    ("mnn_config", "inference.mnn_config_path"),
+    ("scorer", "scoring.scorer"),
+    ("prompt", "pred.prompt"),
+    ("system_prompt", "pred.system_prompt"),
+)
+
+
+def _persist_overrides(folder: Path, args: argparse.Namespace) -> list[str]:
+    """把用户显式提供的 CLI 覆盖永久写回该数据集 config.yaml,返回写回的键列表。
+
+    只写回非 None 的 flag;某命令没有的 flag 自动跳过(getattr 兜底)。
+    写回后由调用方 load_dataset_config 读回,实现「用户参数优先 + 持久化」。
+    """
+    persisted: list[str] = []
+    for attr, dotted in _PERSIST_MAP:
+        val = getattr(args, attr, None)
+        if val is not None:
+            workspace.set_dataset_value(folder, dotted, val)
+            persisted.append(dotted)
+    return persisted
+
+
+def _report_persist(tag: str, persisted: list[str], folder: Path) -> None:
+    if persisted:
+        print(f"[{tag}] 已将 {', '.join(persisted)} 写回 {folder / 'config.yaml'}(永久生效)")
 
 
 def _do_run(cfg: Config) -> dict:
@@ -148,22 +176,31 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    cfg = _load_existing(args)
-    _apply_inference_overrides(cfg, args)
+    folder = _resolve_folder(args)
+    persisted = _persist_overrides(folder, args)      # --base-url/--model 永久写回
+    cfg = load_dataset_config(folder)
+    _report_persist("run", persisted, folder)
+    print(f"[run] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
     _do_run(cfg)
     return 0
 
 
 def _cmd_score(args: argparse.Namespace) -> int:
-    cfg = _load_existing(args)
+    folder = _resolve_folder(args)
+    persisted = _persist_overrides(folder, args)      # --scorer 永久写回
+    cfg = load_dataset_config(folder)
+    _report_persist("score", persisted, folder)
     _do_score(cfg, args.scorer)
     return 0
 
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     """一键连续执行 run + score(不含 split)。"""
-    cfg = _load_existing(args)
-    _apply_inference_overrides(cfg, args)
+    folder = _resolve_folder(args)
+    persisted = _persist_overrides(folder, args)      # --base-url/--model/--scorer 永久写回
+    cfg = load_dataset_config(folder)
+    _report_persist("eval", persisted, folder)
+    print(f"[eval] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
     _do_run(cfg)
     _do_score(cfg, args.scorer)
     return 0
@@ -176,8 +213,9 @@ def _cmd_pred(args: argparse.Namespace) -> int:
     """遍历 --datadir 内所有图片,按 config.yaml 组织对话调 VLM 描述,落到 workspace/<同名>。
 
     自包含文件夹模型(同 split→run):首次运行在 workspace/<名>/ 生成 config.yaml
-    (含 inference + pred 两段),再次运行直接读它。改 vLLM API 或对话组织 = 手改该
-    config.yaml 重跑。CLI flag 为临时覆盖,优先级:flag > 文件夹 config.yaml > 模板默认。
+    (含 inference + pred 两段),再次运行直接读它。产物按模型落 workspace/<名>/<模型>/。
+    CLI flag(--backend/--base-url/--model/--prompt 等)会永久写回该 config.yaml
+    (用户参数优先且持久化);--overwrite 整份重跑覆盖已有结果。
     """
     global_cfg = workspace.load_global_config()
     ws = workspace.resolve_workspace(args.workspace, global_cfg)
@@ -194,26 +232,26 @@ def _cmd_pred(args: argparse.Namespace) -> int:
             f"或把 workspace 设为别处(预测产物不应写回原图片文件夹)。"
         )
 
-    # 生成(首次/--force)或沿用已有 config.yaml,然后读回成强类型 Config。
+    # 生成(首次/--force)或沿用已有 config.yaml。
     config_path = out_dir / "config.yaml"
     existed = config_path.exists()
     workspace.init_pred_config(out_dir, datadir, global_cfg, force=args.force)
-    cfg = load_dataset_config(out_dir)          # 读 config.yaml + 钉 run_dir_path=out_dir
     action = "重新生成(--force)" if (existed and args.force) else ("沿用" if existed else "首次生成")
     print(f"[pred] {action}配置 -> {config_path}")
 
+    # 用户 CLI 覆盖永久写回 config.yaml(--backend/--base-url/--model/--mnn-config/--prompt/--system-prompt),
+    # 再读回成强类型 Config —— 用户参数优先且持久化。
+    persisted = _persist_overrides(out_dir, args)
+    cfg = load_dataset_config(out_dir)          # 读 config.yaml + 钉 dataset_dir=out_dir
+    _report_persist("pred", persisted, out_dir)
+
     # 图片永远定位到 --datadir(即便 config 里 media_root 被改过)。
     cfg.data.media_root = str(datadir)
-    # CLI 临时覆盖(不回写 config.yaml)。
-    if args.backend is not None:
-        cfg.inference.backend = args.backend
-    if getattr(args, "mnn_config", None):
-        cfg.inference.mnn_config_path = args.mnn_config
-    _apply_inference_overrides(cfg, args)       # --base-url / --model
-    if args.system_prompt is not None:
-        cfg.pred.system_prompt = args.system_prompt
+    print(f"[pred] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
 
-    stats = predict_folder(cfg, datadir, prompt=args.prompt)   # --prompt 显式才覆盖(默认 None)
+    # prompt/system_prompt 已写回 config,故 prompt=None 交给 cfg.pred 驱动。
+    stats = predict_folder(cfg, datadir, prompt=None,
+                           overwrite=getattr(args, "overwrite", False))
     print(f"[pred] 完成 {stats['newly_completed']} 张描述,失败 {stats['errors']} 张,"
           f"跳过(已完成) {stats['skipped_already_done']} 张 -> {stats['predictions_path']}")
     if stats["errors"]:
@@ -318,6 +356,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "(临时覆盖 inference.mnn_config_path)")
     p_pred.add_argument("--force", action="store_true",
                         help="重新生成文件夹内 config.yaml(覆盖你的手改)")
+    p_pred.add_argument("--overwrite", action="store_true",
+                        help="无视已有结果整份重跑(覆盖 predictions.jsonl);默认断点续跑只补未完成")
     _add_inference_args(p_pred)
     _add_workspace_arg(p_pred)
     p_pred.set_defaults(func=_cmd_pred)

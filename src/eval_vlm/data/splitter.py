@@ -61,7 +61,7 @@ def _partition(n: int, ratios: dict[str, float], seed: int,
 
 
 def split_dataset(cfg: Config) -> dict:
-    """执行划分,把 train/test(+val) 以 LlamaFactory 格式写到 run_dir,返回 meta。"""
+    """执行划分,把 train/test(+val) 以 LlamaFactory 格式写到 dataset_dir,返回 meta。"""
     records: list[Any] = load_raw_records(cfg.source_path)
     n = len(records)
     if n == 0:
@@ -76,7 +76,8 @@ def split_dataset(cfg: Config) -> dict:
 
     parts = _partition(n, ratios, cfg.split.seed, strata)
 
-    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+    # split 产物落数据集文件夹本身(各模型共享),不进 <模型> 子目录。
+    cfg.dataset_dir.mkdir(parents=True, exist_ok=True)
 
     written: dict[str, str] = {}
     # train / test 必出;val 仅在比例 > 0 时产出。

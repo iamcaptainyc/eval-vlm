@@ -8,6 +8,10 @@
 # (src/eval_vlm/templates/config.template.yaml)自动生成;每段都标了「谁用」,
 # 与当前命令无关的段保持默认即可(惰性、无副作用)。之后微调直接手改
 # <workspace>/<名>/config.yaml。本文件仅供查阅各字段。
+#
+# 产物按模型分目录:run/score/eval/pred 结果落 <数据集>/<inference.model>/,不同模型互不覆盖;
+# split 产物(train/test/val)各模型共享,落数据集文件夹本身。
+# CLI 覆盖永久写回 config.yaml(用户参数优先):--base-url/--model/--scorer/--backend/--prompt 等。
 
 run_name: emotion_open11200_dataset_regen_v1            # 输出落到 <output_dir>/<run_name>/
 output_dir: outputs
@@ -64,8 +68,8 @@ split:
 # ---------------------------------------------------------------------------
 inference:
   backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显, 不联网)
-  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(可用 --base-url 覆盖;mnn 后端忽略)
-  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖;mnn 后端忽略)
+  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(--base-url 永久写回;mnn 后端忽略)
+  model: trained-vlm          # 部署时注册的模型名(--model 永久写回;也用作产物子目录名 <数据集>/<model>/;mnn 后端忽略)
   api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
   system_prompt: null         # 可选系统提示
   max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)

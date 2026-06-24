@@ -142,12 +142,15 @@ def _to_record(image_name: str, context: list[Turn], pred: Prediction) -> dict:
     }
 
 
-def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None) -> dict:
+def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
+                   overwrite: bool = False) -> dict:
     """遍历 datadir 内所有图片,按 cfg.pred 组织对话调用 VLM 描述并落盘。返回统计。
 
     prompt(可选)为 CLI --prompt 临时覆盖;None 表示用 cfg.pred 的配置。
+    overwrite=True 时忽略已有结果、整份重跑(predictions.jsonl 截断重写);
+    默认 False 为断点续跑(已成功的图片跳过,追加写)。
 
-    产物(落在 cfg.run_dir,通常 = workspace/<图片文件夹名>):
+    产物(落在 cfg.run_dir = workspace/<图片文件夹名>/<模型>):
       predictions.jsonl — 每行一条成功描述(LlamaFactory 格式,可复用),追加写支持续跑;
       failures.jsonl    — 每行一条失败记录(id/image/error),供排查/重跑;
       pred_meta.json    — 运行元信息(模型/后端/对话结构/计数/时间)。
@@ -170,7 +173,8 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None) 
     pred_path = cfg.predictions_path
     fail_path = out_dir / "failures.jsonl"
 
-    done = _done_images(pred_path)
+    # overwrite:无视已有结果整份重跑;否则断点续跑跳过已成功项。
+    done = set() if overwrite else _done_images(pred_path)
     todo = [p for p in images if p.name not in done]
 
     backend = build_backend(cfg)
@@ -188,8 +192,8 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None) 
         # 非线程安全后端(如 MNN 有状态单对象)强制串行;openai/fake 用配置并发。
         max_workers = worker_count(backend, cfg.inference.max_concurrency)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
-        # predictions 追加写(续跑安全);failures 每次重写(只反映本轮未完成项)。
-        with pred_path.open("a", encoding="utf-8") as ok_fh, \
+        # predictions:续跑追加写(安全),overwrite 时截断重写;failures 每次重写(只反映本轮未完成项)。
+        with pred_path.open("w" if overwrite else "a", encoding="utf-8") as ok_fh, \
                 fail_path.open("w", encoding="utf-8") as fail_fh, \
                 ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {

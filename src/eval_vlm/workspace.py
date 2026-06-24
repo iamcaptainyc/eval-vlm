@@ -61,7 +61,7 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
     ("data.mapping.*",
      "字段映射(messages/images/role/content 等),对齐你的数据集格式"),
     ("inference.backend / base_url / model / api_key_env",
-     "推理后端、部署地址、模型名、api key 环境变量(base_url/model 可用 --base-url/--model 临时覆盖)"),
+     "推理后端、部署地址、模型名、api key 环境变量(--base-url/--model/--backend 会永久写回本文件)"),
     ("inference.max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail / system_prompt",
      "推理参数"),
     ("eval.targets / eval.context",
@@ -164,8 +164,8 @@ def describe_settable_keys() -> str:
         out.append(f"  {name}")
         out.append(f"      {desc}")
     out.append("")
-    out.append("提示:split 比例命令行参数 > 全局 split.* > 内置默认;base_url/model/scorer "
-               "可用 run/score/eval 的 --base-url/--model/--scorer 临时覆盖(不回写文件)。")
+    out.append("提示:split 比例命令行参数 > 全局 split.* > 内置默认;run/score/eval/pred 的 "
+               "--base-url/--model/--scorer 等会永久写回该数据集 config.yaml(用户参数优先且持久化)。")
     return "\n".join(out)
 
 
@@ -406,4 +406,38 @@ def init_pred_config(
         "STRATIFY_BY": _SPLIT_DEFAULTS["stratify_by"],
     }
     config_path.write_text(render_template(values), encoding="utf-8")
+    return config_path
+
+
+# 可由 CLI 临时参数永久写回数据集 config.yaml 的键(用户参数优先于模板/文件原值)。
+# (CLI flag -> config.yaml 的点号键)
+_OVERRIDE_KEYS: dict[str, str] = {
+    "base_url": "inference.base_url",
+    "model": "inference.model",
+    "backend": "inference.backend",
+    "mnn_config_path": "inference.mnn_config_path",
+    "scorer": "scoring.scorer",
+    "pred_prompt": "pred.prompt",
+    "pred_system_prompt": "pred.system_prompt",
+}
+
+
+def set_dataset_value(folder: Path, dotted_key: str, value: Any) -> Path:
+    """把一个键的值永久写回某数据集文件夹的 config.yaml(保留注释)。
+
+    用于「用户在命令行显式提供的设置(如 --model/--base-url)应永久生效」:
+    写回后,该数据集的后续命令都读到新值,实现「用户参数优先且持久化」。
+    支持点号嵌套键(如 inference.model / scoring.scorer / pred.prompt)与顶层键。
+    block/子键缺失时会自动插入(见 _set_nested_value)。
+    """
+    config_path = Path(folder) / "config.yaml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"数据集文件夹缺少 config.yaml: {config_path}")
+    text = config_path.read_text(encoding="utf-8")
+    if "." in dotted_key:
+        parent, child = dotted_key.split(".", 1)
+        text = _set_nested_value(text, parent, child, value)
+    else:
+        text = _update_yaml_value(text, dotted_key, value)
+    config_path.write_text(text, encoding="utf-8")
     return config_path

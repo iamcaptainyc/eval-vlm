@@ -1,7 +1,15 @@
 # eval_vlm 数据集配置(单一统一模板,所有命令共用)
 # 由 `eval-vlm split --dataset <源json>`(有标注)或 `eval-vlm pred --datadir <图片夹>`(无标注)
 # 首次运行时从本模板渲染到该数据集文件夹;之后微调直接手改这个 config.yaml 再重跑即可。
-# (机器级路径来自全局配置 ~/.eval_vlm/config.yaml;CLI --base-url/--model/--prompt 等可临时覆盖。)
+# (机器级路径来自全局配置 ~/.eval_vlm/config.yaml。)
+#
+# 产物按模型分目录:run/score/eval/pred 的结果落在 <数据集文件夹>/<inference.model>/,
+# 不同模型对同一数据集互不覆盖(组织为 工作目录/数据集/模型);split 产物(train/test/val)
+# 是各模型共享的,落在数据集文件夹本身。
+#
+# CLI 覆盖会「永久写回」本文件(用户参数优先且持久化,不是临时):
+#   --base-url/--model(run/eval/pred)、--scorer(score/eval)、
+#   --backend/--mnn-config/--prompt/--system-prompt(pred)
 #
 # 一份配置覆盖全部命令,每段都标了「谁用」。与你当前命令无关的段保持默认即可,不会有副作用:
 #   data.source / data.mapping / split / eval / scoring  -> split·run·score·eval 使用;pred 忽略
@@ -56,12 +64,13 @@ split:
 
 # ---------------------------------------------------------------------------
 # 推理后端(所有命令:run / eval / pred 都用这段)
-# 这里也是「自定义 vLLM API」的地方:全部参数都可手改;base_url/model 也可用 --base-url/--model 覆盖。
+# 这里也是「自定义 vLLM API」的地方:全部参数都可手改;--base-url/--model 会永久写回本文件。
+# 注意:model 同时决定产物子目录名(<数据集>/<model>/),换 model = 换结果目录,互不覆盖。
 # ---------------------------------------------------------------------------
 inference:
   backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显,自检用)
-  base_url: http://localhost:8000/v1   # 部署地址(可用 --base-url 覆盖;mnn 后端忽略)
-  model: trained-vlm          # 部署时注册的模型名(可用 --model 覆盖;mnn 后端忽略)
+  base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回;mnn 后端忽略)
+  model: trained-vlm          # 部署时注册的模型名(--model 永久写回;也用作产物子目录名;mnn 后端忽略)
   api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
   system_prompt: null         # 系统提示(pred 也可在下方 pred.system_prompt 设置,后者运行时映射到这里)
   max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)
@@ -101,8 +110,8 @@ scoring:
 # 规则:全部轮里 <image> 必须恰好出现 1 次且位于某个 user 轮;最后一轮必须是 user。
 # ---------------------------------------------------------------------------
 pred:
-  prompt: 请描述图片          # 单轮默认提示词(可用 --prompt 临时覆盖)
-  system_prompt: null         # 可选系统提示(可用 --system-prompt 临时覆盖)
+  prompt: 请描述图片          # 单轮默认提示词(--prompt 永久写回本字段)
+  system_prompt: null         # 可选系统提示(--system-prompt 永久写回本字段)
   # template:                 # 多轮模板(取消注释并编辑;设置后覆盖 prompt)
   #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}
   #   - {role: assistant, content: "好的,请提供图片。"}

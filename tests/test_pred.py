@@ -93,30 +93,41 @@ def test_parser_pred_prompt_default_none_and_flags():
     args = parser.parse_args(["pred", "--datadir", "imgs"])
     assert args.func is _cmd_pred
     assert args.prompt is None and args.system_prompt is None
-    assert args.backend is None and args.force is False
+    assert args.backend is None and args.force is False and args.overwrite is False
 
     args2 = parser.parse_args([
         "pred", "-d", "imgs", "--prompt", "P", "--system-prompt", "S",
-        "--backend", "fake", "--force", "--base-url", "http://h/v1", "--model", "m",
+        "--backend", "fake", "--force", "--overwrite",
+        "--base-url", "http://h/v1", "--model", "m",
     ])
     assert args2.prompt == "P" and args2.system_prompt == "S"
-    assert args2.backend == "fake" and args2.force is True
+    assert args2.backend == "fake" and args2.force is True and args2.overwrite is True
     assert args2.base_url == "http://h/v1" and args2.model == "m"
 
 
 # ---------------------------------------------------------------------------
 # 生成/读取 config.yaml + 端到端(fake 后端)
 # ---------------------------------------------------------------------------
+# pred 产物落 工作目录/<图片夹名>/<inference.model>;fake 流程模型名取模板默认。
+PRED_MODEL = "trained-vlm"
+
+
 def _run_pred(ws: Path, imgs: Path, **kw):
     """构造 argparse.Namespace 直接调 _cmd_pred(默认 fake 后端)。"""
     import argparse
     ns = argparse.Namespace(
         datadir=str(imgs), name=None, prompt=None, system_prompt=None,
-        backend="fake", force=False, base_url=None, model=None, workspace=str(ws),
+        backend="fake", force=False, overwrite=False, mnn_config=None,
+        base_url=None, model=None, workspace=str(ws),
     )
     for k, v in kw.items():
         setattr(ns, k, v)
     return _cmd_pred(ns)
+
+
+def _pred_out(ws: Path, imgs: Path) -> Path:
+    """pred 产物目录(模型子目录);config.yaml 仍在其父级(数据集文件夹)。"""
+    return ws / imgs.name / PRED_MODEL
 
 
 def test_pred_generates_then_reads_config(temp_global):
@@ -143,7 +154,7 @@ def test_pred_end_to_end_default_single_turn(temp_global):
     """默认单轮:产物为 [user(<image>请描述图片), assistant] 的 LlamaFactory 记录。"""
     ws, imgs = temp_global
     _run_pred(ws, imgs)
-    out = ws / imgs.name
+    out = _pred_out(ws, imgs)
     lines = (out / "predictions.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3                                  # 3 张图
     rec = json.loads(lines[0])
@@ -154,9 +165,9 @@ def test_pred_end_to_end_default_single_turn(temp_global):
 def test_pred_end_to_end_multiturn_template(temp_global):
     """多轮模板(预置 config.yaml):记录含全部模板轮 + 末 assistant;system_prompt 映射。"""
     ws, imgs = temp_global
-    out = ws / imgs.name
-    out.mkdir(parents=True)
-    (out / "config.yaml").write_text(
+    ds_dir = ws / imgs.name                                 # 数据集文件夹(放 config.yaml)
+    ds_dir.mkdir(parents=True)
+    (ds_dir / "config.yaml").write_text(
         "data:\n  media_root: " + str(imgs) + "\n"
         "inference:\n  backend: fake\n"
         "pred:\n"
@@ -169,6 +180,7 @@ def test_pred_end_to_end_multiturn_template(temp_global):
     )
     _run_pred(ws, imgs)                                     # config 已存在 -> 沿用
 
+    out = _pred_out(ws, imgs)                               # 产物在模型子目录
     rec = json.loads((out / "predictions.jsonl").read_text(encoding="utf-8").splitlines()[0])
     roles = [m["role"] for m in rec["messages"]]
     assert roles == ["user", "assistant", "user", "assistant"]   # 3 模板轮 + 末答案
@@ -184,14 +196,14 @@ def test_pred_record_roundtrips_as_llamafactory(temp_global):
     """产出的记录是合法 LlamaFactory(<image> 数==images 数),可被 loader 解析回流。"""
     ws, imgs = temp_global
     _run_pred(ws, imgs)
-    out = ws / imgs.name
+    out = _pred_out(ws, imgs)
     # predictions.jsonl 是逐行 JSON;转成 JSON 数组喂回 loader(校验 <image> 数==images 数)。
     rows = [json.loads(ln) for ln in
             (out / "predictions.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
     arr = out / "as_dataset.json"
     arr.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
 
-    cfg = load_config(out / "config.yaml")
+    cfg = load_config(ws / imgs.name / "config.yaml")
     samples = load_samples(cfg, source=arr)                # 能解析即说明记录是合法 LlamaFactory
     assert len(samples) == 3
     assert all(s.images and any("<image>" in t.content for t in s.turns) for s in samples)
@@ -201,8 +213,35 @@ def test_pred_resume_skips_done(temp_global):
     """断点续跑:已成功的图片再次运行被跳过(不重复追加)。"""
     ws, imgs = temp_global
     _run_pred(ws, imgs)
-    out = ws / imgs.name
+    out = _pred_out(ws, imgs)
     n_first = len((out / "predictions.jsonl").read_text(encoding="utf-8").splitlines())
     _run_pred(ws, imgs)                                     # 再跑一次
     n_second = len((out / "predictions.jsonl").read_text(encoding="utf-8").splitlines())
     assert n_first == n_second == 3                         # 没有重复追加
+
+
+def test_pred_overwrite_reinfers_all(temp_global):
+    """--overwrite:无视已有结果整份重跑(截断重写),不做断点续跑跳过。"""
+    ws, imgs = temp_global
+    _run_pred(ws, imgs)
+    out = _pred_out(ws, imgs)
+    pred_path = out / "predictions.jsonl"
+    assert len(pred_path.read_text(encoding="utf-8").splitlines()) == 3
+
+    # 续跑(默认):全部已完成 -> 跳过,无新增
+    _run_pred(ws, imgs)
+    assert len(pred_path.read_text(encoding="utf-8").splitlines()) == 3
+
+    # --overwrite:截断重写,重新描述 3 张(仍是 3 行,但是本轮全部 newly_completed)
+    _run_pred(ws, imgs, overwrite=True)
+    lines = pred_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3                                  # 截断重写,无重复累加
+
+
+def test_pred_persists_model_into_config(temp_global):
+    """pred 的 --model 永久写回 config.yaml,产物落到对应模型子目录。"""
+    ws, imgs = temp_global
+    _run_pred(ws, imgs, model="vlm_v2")
+    cfg_text = (ws / imgs.name / "config.yaml").read_text(encoding="utf-8")
+    assert "vlm_v2" in cfg_text                             # 写回 inference.model
+    assert (ws / imgs.name / "vlm_v2" / "predictions.jsonl").exists()

@@ -1,13 +1,18 @@
 """命令行参数层(工作目录模型)+ split 自定义输出位置。"""
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 import pytest
 
+from eval_vlm import workspace
 from eval_vlm.cli import build_parser, _cmd_split, _cmd_run, _cmd_score, _cmd_eval
+from eval_vlm.config import load_dataset_config
 from eval_vlm.data.splitter import split_dataset
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_split_custom_output_paths(messages_config, tmp_path):
@@ -65,3 +70,26 @@ def test_config_flag_removed():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["run", "--config", "x.yaml"])
+
+
+def test_eval_cli_persists_model_and_uses_model_dir(tmp_path, monkeypatch):
+    """eval --model 永久写回 config.yaml,且产物落在 数据集/<模型>/ 目录(用户参数优先)。"""
+    monkeypatch.setenv("EVAL_VLM_CONFIG", str(tmp_path / "g.yaml"))
+    ws = tmp_path / "ws"
+    folder = workspace.init_dataset(
+        str(FIXTURES / "llamafactory_demo.json"), ws,
+        media_root=str(FIXTURES), split_overrides={"train": 0.6, "test": 0.4},
+    )
+    workspace.set_dataset_value(folder, "inference.backend", "fake")   # 离线回显
+    split_dataset(load_dataset_config(folder))                         # 先产出 test.json
+
+    ns = argparse.Namespace(dataset="llamafactory_demo", workspace=str(ws),
+                            base_url=None, model="cli_model", scorer=None)
+    assert _cmd_eval(ns) == 0
+
+    # --model 写回 config.yaml(永久),产物落到该模型子目录
+    assert "cli_model" in (folder / "config.yaml").read_text(encoding="utf-8")
+    assert (folder / "cli_model" / "predictions.jsonl").exists()
+    assert (folder / "cli_model" / "metrics.json").exists()
+    # 重新加载确认持久化生效
+    assert load_dataset_config(folder).inference.model == "cli_model"

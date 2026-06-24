@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from eval_vlm import workspace
-from eval_vlm.config import load_dataset_config
+from eval_vlm.config import load_dataset_config, safe_model_dirname
 from eval_vlm.data.splitter import split_dataset
 from eval_vlm.runner import run_inference
 from eval_vlm.evaluate import score_predictions
@@ -110,7 +110,9 @@ def test_init_dataset_creates_self_contained_folder(temp_global):
     assert (folder / "config.yaml").exists()
 
     cfg = load_dataset_config(folder)
-    assert cfg.run_dir == folder                          # 产物目录钉到文件夹本身
+    assert cfg.dataset_dir == folder                      # 数据集文件夹钉到文件夹本身
+    # 产物按模型分目录:工作目录/数据集/<inference.model>(默认 trained-vlm)
+    assert cfg.run_dir == folder / "trained-vlm"
     assert cfg.data.source.endswith("llamafactory_demo.json")
     assert cfg.data.media_root == str(FIXTURES)
     assert cfg.split.train == 0.6 and cfg.split.test == 0.4
@@ -148,15 +150,87 @@ def test_end_to_end_via_workspace(temp_global):
     run_inference(cfg)
     metrics = score_predictions(cfg)
 
-    for name in ("config.yaml", "split_meta.json", "test.json",
-                 "predictions.jsonl", "metrics.json", "scored.jsonl",
+    # split 产物(各模型共享)落数据集文件夹本身
+    for name in ("config.yaml", "split_meta.json", "test.json"):
+        assert (folder / name).exists(), f"缺少数据集级产物 {name}"
+    # run/score 产物按模型分目录:数据集/<inference.model>/
+    mdir = folder / "trained-vlm"
+    for name in ("predictions.jsonl", "metrics.json", "scored.jsonl",
                  "failures.md", "summary.md"):
-        assert (folder / name).exists(), f"缺少产物 {name}"
+        assert (mdir / name).exists(), f"缺少模型级产物 {name}"
 
     # fake 回显标准答案 -> 全命中,无未命中
     assert metrics["overall_mean_score"] == 1.0
     assert metrics["num_failed_samples"] == 0
 
     # 预测带原图地址(可追溯)
-    first = json.loads((folder / "predictions.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    first = json.loads((mdir / "predictions.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert first["images"]
+
+
+# ---------------------------------------------------------------------------
+# 按模型分目录:不同模型对同一数据集结果互不覆盖
+# ---------------------------------------------------------------------------
+def test_safe_model_dirname():
+    """模型名里的路径分隔符/非法字符折成 '_';空回落 default。"""
+    assert safe_model_dirname("Qwen/Qwen2-VL-7B") == "Qwen_Qwen2-VL-7B"
+    assert safe_model_dirname("a:b*c?") == "a_b_c"
+    assert safe_model_dirname("trained-vlm") == "trained-vlm"
+    assert safe_model_dirname("") == "default"
+    assert safe_model_dirname("  ") == "default"
+
+
+def test_per_model_dirs_isolate_results(temp_global):
+    """两个模型跑同一数据集:各自 数据集/<模型>/ 目录,互不覆盖;split 产物共享。"""
+    ws = temp_global
+    folder = workspace.init_dataset(
+        str(SOURCE), ws, media_root=str(FIXTURES), split_overrides={"train": 0.6, "test": 0.4},
+    )
+    cfg = load_dataset_config(folder)
+    cfg.inference.backend = "fake"
+    split_dataset(cfg)
+    # split 产物落数据集文件夹本身(共享)
+    assert (folder / "test.json").exists()
+
+    # 模型 A
+    cfg.inference.model = "model_a"
+    run_inference(cfg)
+    score_predictions(cfg)
+    # 模型 B(同一 cfg,仅换模型名)
+    cfg.inference.model = "model_b"
+    run_inference(cfg)
+    score_predictions(cfg)
+
+    a = folder / "model_a"
+    b = folder / "model_b"
+    assert (a / "predictions.jsonl").exists() and (a / "metrics.json").exists()
+    assert (b / "predictions.jsonl").exists() and (b / "metrics.json").exists()
+    # 互不覆盖:各自 metrics 记录自己的模型名
+    assert json.loads((a / "metrics.json").read_text(encoding="utf-8"))["model"] == "model_a"
+    assert json.loads((b / "metrics.json").read_text(encoding="utf-8"))["model"] == "model_b"
+
+
+# ---------------------------------------------------------------------------
+# CLI 覆盖永久写回 config.yaml(用户参数优先且持久化)
+# ---------------------------------------------------------------------------
+def test_set_dataset_value_persists_and_keeps_comments(temp_global):
+    ws = temp_global
+    folder = workspace.init_dataset(str(SOURCE), ws, media_root=str(FIXTURES))
+
+    workspace.set_dataset_value(folder, "inference.model", "Qwen/Qwen2-VL")
+    workspace.set_dataset_value(folder, "inference.base_url", "http://h:9/v1")
+    workspace.set_dataset_value(folder, "scoring.scorer", "token_f1")
+
+    cfg = load_dataset_config(folder)
+    assert cfg.inference.model == "Qwen/Qwen2-VL"        # 用户值优先且持久化
+    assert cfg.inference.base_url == "http://h:9/v1"
+    assert cfg.scoring.scorer == "token_f1"
+    # 注释保留(整行替换只改值)
+    assert "#" in (folder / "config.yaml").read_text(encoding="utf-8")
+    # 产物目录随写回的模型名走(非法字符折成 _)
+    assert cfg.run_dir == folder / "Qwen_Qwen2-VL"
+
+
+def test_set_dataset_value_missing_config_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        workspace.set_dataset_value(tmp_path / "nope", "inference.model", "x")
