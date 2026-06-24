@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -177,39 +178,77 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
     done = set() if overwrite else _done_images(pred_path)
     todo = [p for p in images if p.name not in done]
 
+    # 后端构造可能很慢(如 MNN 的 model.load() 要加载权重);显式打点便于区分
+    # "卡在加载" vs "卡在推理"——中断在加载阶段时 predictions.jsonl 本就还没有任何结果。
+    print(f"[pred] 待描述 {len(todo)} 张(已完成跳过 {len(images) - len(todo)} 张),"
+          f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
+    print("[pred] 后端就绪,开始推理。", flush=True)
     started = datetime.now(timezone.utc).isoformat()
     n_ok = 0
     n_err = 0
+    interrupted = False
 
     if not todo:
         print(f"全部 {len(images)} 张图片已完成描述,无需推理(断点续跑)。")
     else:
-        def _append(fh, obj: dict) -> None:
-            fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
-            fh.flush()                            # 每条 flush:中断不丢已写结果
-
         # 非线程安全后端(如 MNN 有状态单对象)强制串行;openai/fake 用配置并发。
         max_workers = worker_count(backend, cfg.inference.max_concurrency)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _append(fh, obj: dict) -> None:
+            """写一条 -> flush -> fsync:即便进程随后崩溃/被杀(MNN 原生 segfault 等),
+            已写结果也已落盘,下次同命令断点续跑可据此跳过。"""
+            fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:                       # 某些文件系统不支持 fsync,flush 已够进程级崩溃
+                pass
+
+        def _record(pred: Prediction, ok_fh, fail_fh) -> None:
+            nonlocal n_ok, n_err
+            if pred.error:
+                n_err += 1
+                _append(fail_fh, {"id": pred.id, "image": pred.id, "error": pred.error})
+            else:
+                n_ok += 1
+                _append(ok_fh, _to_record(pred.id, context, pred))
+
         # predictions:续跑追加写(安全),overwrite 时截断重写;failures 每次重写(只反映本轮未完成项)。
         with pred_path.open("w" if overwrite else "a", encoding="utf-8") as ok_fh, \
-                fail_path.open("w", encoding="utf-8") as fail_fh, \
-                ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_describe_one, backend, p.name, context): p
-                for p in todo
-            }
-            for fut in tqdm(as_completed(futures), total=len(futures),
-                            desc="describe", unit="image"):
-                pred = fut.result()
-                if pred.error:
-                    n_err += 1
-                    _append(fail_fh, {"id": pred.id, "image": pred.id,
-                                      "error": pred.error})
+                fail_path.open("w", encoding="utf-8") as fail_fh:
+            try:
+                if max_workers == 1:
+                    # 串行后端(如 MNN):同一线程「算一条 -> 立即写盘」,不经线程池。
+                    # 这对 MNN 尤其关键:pymnn 原生推理基本不释放 GIL,旧的线程池写法里
+                    # worker 线程会连续跑完多张、主线程的写盘循环却抢不到调度,一旦某张在
+                    # 原生层 Segfault(core dump)整进程被杀,之前已生成的结果根本没落盘就丢了。
+                    # 这里推理返回即 flush+fsync 落盘,segfault 也只丢正在跑的那一张,其余可续跑。
+                    pbar = tqdm(todo, total=len(todo), desc="describe", unit="image")
+                    for p in pbar:
+                        pbar.set_postfix_str(p.name)   # 崩溃时进度条停留的就是肇事图片
+                        _record(_describe_one(backend, p.name, context), ok_fh, fail_fh)
                 else:
-                    n_ok += 1
-                    _append(ok_fh, _to_record(pred.id, context, pred))
+                    # 线程安全后端:并发推理,每条完成即写盘。
+                    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                        futures = {
+                            pool.submit(_describe_one, backend, p.name, context): p
+                            for p in todo
+                        }
+                        try:
+                            for fut in tqdm(as_completed(futures), total=len(futures),
+                                            desc="describe", unit="image"):
+                                _record(fut.result(), ok_fh, fail_fh)
+                        except KeyboardInterrupt:
+                            # 取消尚未开始的任务,避免 shutdown 把整队列跑完却不写盘。
+                            for fut in futures:
+                                fut.cancel()
+                            raise
+            except KeyboardInterrupt:
+                interrupted = True
+                print(f"\n[pred] 已中断:本轮成功 {n_ok} 张、失败 {n_err} 张均已落盘 "
+                      f"-> {pred_path};重跑同一命令即可断点续跑补齐剩余。", flush=True)
     backend.close()
 
     stats = {
@@ -226,6 +265,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
         "newly_completed": n_ok,
         "errors": n_err,
         "skipped_already_done": len(images) - len(todo),
+        "interrupted": interrupted,           # 中途被 Ctrl-C:已落盘结果仍有效,可断点续跑
         "predictions_path": str(pred_path),
         "started_at": started,
         "finished_at": datetime.now(timezone.utc).isoformat(),
