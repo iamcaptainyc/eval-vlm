@@ -12,6 +12,15 @@ HTTP 服务**——与 openai/vllm 后端(调远端 OpenAI 兼容 API)互补。
       * stream=0(False)时,生成内容写入内部字符串并**作为返回值**返回;
         stream=1 时只往 stdout 流式打印、返回空串。故本后端用 **stream=False**
         来拿到完整文本,无需手写 forward/argmax 解码循环。
+      * **包装层只收两参**:pymnn 的 Python 包装类 ``Llm.response(self, prompt,
+        stream=False)`` 只接受 (prompt, stream)——即便底层 C 扩展支持第三参
+        max_new_tokens(``"O|ii"``),包装层也**不转发**。多传一个位置参数会抛
+        ``TypeError: response() takes from 2 to 3 positional arguments``(整批失败)。
+        故本后端**自适应调用**(见 ``_respond``):先按三参调(兼容个别裸 C 绑定),
+        捕获 TypeError 后记住并退化为两参,max_new_tokens 改走 ``set_config`` 设置。
+  - 统计信息:新版包装无 ``get_context()``,而是 ``model.context`` 属性(Context 对象,
+    每次访问刷新);旧/裸绑定为 ``get_context()`` 返回 dict。本后端两者都尽力尝试。
+  - ``set_config`` 在新版包装收 **dict**(内部自行 json.dumps),裸绑定收 json 字符串。
   - 多模态 dict 形如 ``{'text': '<img>image_0</img>...', 'images': [{'data': Var,
     'width': W, 'height': H}]}``;images[i] 对应文本里的 ``image_{i}``。data 需是
     MNN Var,用 ``MNN.cv.imread(path)`` 高效原生读取(返回 Var,免 numpy 往返)。
@@ -70,6 +79,9 @@ class MNNBackend(InferenceBackend):
 
         self._cv = cv
         self._lock = threading.Lock()
+        # 乐观假设新版绑定 response 接受 max_new_tokens;首次 TypeError 后置 False,
+        # 之后不再尝试三参调用(见 _respond)。
+        self._response_takes_max_tokens = True
         self.model = llm.create(str(config_path))
         self.model.load()
 
@@ -101,6 +113,80 @@ class MNNBackend(InferenceBackend):
                 os.remove(tmp)
             except OSError:
                 pass
+
+    def _apply_max_tokens_via_config(self, max_tokens: int) -> None:
+        """旧绑定 response 不收 max_new_tokens 时,尽力经 config 设置生成上限。
+
+        不同 pymnn 版本暴露的设置入口不一(set_config(json) / set_max_new_tokens(n)),
+        全部 best-effort:设不上也不报错,退化为模型/ config.json 的默认上限。
+        """
+        if not max_tokens or max_tokens <= 0:
+            return
+        n = int(max_tokens)
+        fn = getattr(self.model, "set_config", None)
+        if callable(fn):
+            import json
+            # 新版包装 set_config 收 dict(内部 json.dumps);裸 C 绑定收 json 字符串。
+            # 两种都试,先 dict 后字符串。
+            for arg in ({"max_new_tokens": n}, json.dumps({"max_new_tokens": n})):
+                try:
+                    fn(arg)
+                    return
+                except Exception:  # noqa: BLE001 - 签名不符就换下一种
+                    pass
+        fn = getattr(self.model, "set_max_new_tokens", None)
+        if callable(fn):
+            try:
+                fn(n)
+            except Exception:  # noqa: BLE001 - 设不上就用默认
+                pass
+
+    def _respond(self, prompt, max_tokens: int):
+        """自适应调用 model.response,兼容新旧绑定签名差异(详见模块 docstring)。
+
+        始终用 stream=False 以拿到完整返回文本。新版传 max_new_tokens;旧版捕获
+        TypeError 后记住,改走 config 设上限并退化为两参调用。
+        """
+        if self._response_takes_max_tokens:
+            try:
+                return self.model.response(prompt, False, max_tokens)
+            except TypeError:
+                # 旧绑定:多传位置参数在参数解析期即抛 TypeError(未发生任何生成),
+                # 故可安全退化重试,不会重复消耗推理。
+                self._response_takes_max_tokens = False
+                self._apply_max_tokens_via_config(max_tokens)
+        return self.model.response(prompt, False)
+
+    def _collect_stats(self) -> dict:
+        """收集本次推理统计到 raw,兼容新旧绑定(详见模块 docstring)。
+
+        新版包装:``model.context`` 属性对象(每次访问刷新),按属性取;
+        旧/裸绑定:``model.get_context()`` 返回 dict。全 best-effort,拿不到不影响结果。
+        """
+        raw: dict = {"backend": "mnn"}
+        keys = ("prompt_len", "gen_seq_len", "vision_us", "prefill_us", "decode_us", "pixels_mp")
+        try:
+            ctx = self.model.context          # 新版:Context 对象
+        except Exception:  # noqa: BLE001 - 无该属性则退回 get_context()
+            ctx = None
+        if ctx is not None and not isinstance(ctx, dict):
+            for k in keys:
+                try:
+                    v = getattr(ctx, k)
+                except Exception:  # noqa: BLE001 - 缺某项就跳过
+                    continue
+                if v is not None:
+                    raw[k] = v
+            return raw
+        try:
+            d = ctx if isinstance(ctx, dict) else self.model.get_context()
+            if isinstance(d, dict):
+                for k in keys:
+                    if k in d:
+                        raw[k] = d[k]
+        except Exception:  # noqa: BLE001 - 统计可选
+            pass
+        return raw
 
     def _build_query_text(self, context: list[Turn], sample_id: str) -> str:
         """从对话上下文取出含 <image> 的 user 轮,转成 MNN 的单条多模态查询文本。
@@ -159,18 +245,9 @@ class MNNBackend(InferenceBackend):
                     self.model.reset()
                 except Exception:  # noqa: BLE001 - reset 不可用则依赖 reuse_kv=false 默认
                     pass
-                # stream=False -> 返回完整生成文本(见模块 docstring)。
-                text_out = self.model.response(prompt, False, ic.max_tokens)
-                raw = {"backend": "mnn"}
-                try:
-                    ctx = self.model.get_context()
-                    if isinstance(ctx, dict):
-                        for k in ("prompt_len", "gen_seq_len", "vision_us",
-                                  "prefill_us", "decode_us", "pixels_mp"):
-                            if k in ctx:
-                                raw[k] = ctx[k]
-                except Exception:  # noqa: BLE001 - 统计信息可选,拿不到不影响结果
-                    pass
+                # stream=False -> 返回完整生成文本;自适应兼容新旧绑定签名。
+                text_out = self._respond(prompt, ic.max_tokens)
+                raw = self._collect_stats()
                 return Prediction(
                     id=sample_id,
                     prediction=text_out or "",

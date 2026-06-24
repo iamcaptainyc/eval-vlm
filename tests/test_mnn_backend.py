@@ -176,6 +176,92 @@ def test_mnn_jpg_uses_native_imread_directly(fake_mnn, tmp_path):
     assert calls and calls[0].lower().endswith("a.jpg")
 
 
+def test_mnn_response_falls_back_to_two_arg_signature(fake_mnn, tmp_path):
+    """旧版 pymnn 绑定 response 仅接受 (content, stream),三参调用抛 TypeError;
+    后端应捕获并退化为两参调用,而非整批 148 张全失败。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)
+    assert backend._response_takes_max_tokens is True   # 初始乐观假设新版
+
+    calls: list[tuple] = []
+
+    def _old_response(content, stream=0):   # 没有 max_new_tokens 形参
+        calls.append((content, stream))
+        return "旧绑定的描述"
+
+    backend.model.response = _old_response
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["a.jpg"], "a.jpg")
+
+    assert pred.error is None
+    assert pred.prediction == "旧绑定的描述"
+    # 只成功调用了一次(两参);记住退化,后续不再尝试三参。
+    assert len(calls) == 1 and calls[0][1] is False
+    assert backend._response_takes_max_tokens is False
+
+
+def test_mnn_matches_latest_pymnn_wrapper(fake_mnn, tmp_path):
+    """对齐最新 pymnn Python 包装(MNN/llm/__init__.py)的真实形态:
+      - response(self, prompt, stream=False):仅两参,多传 max_new_tokens 抛 TypeError;
+      - set_config(dict):收 dict(内部 json.dumps);
+      - context 属性:Context 对象(非 dict),按属性读统计。
+    断言后端能退化为两参、经 set_config(dict) 设上限、并从 context 属性收集统计。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    class _Ctx:
+        prompt_len = 11
+        gen_seq_len = 9
+        vision_us = 2000
+        prefill_us = 5000
+        decode_us = 8000
+        pixels_mp = 0.18
+
+    class _WrapperModel:
+        def __init__(self):
+            self.set_config_args: list = []
+            self.response_calls: list = []
+
+        def load(self):
+            return True
+
+        def reset(self):
+            pass
+
+        def response(self, prompt, stream=False):   # 两参,无 max_new_tokens
+            self.response_calls.append((prompt, stream))
+            return "最新包装的描述"
+
+        def set_config(self, config):                # 收 dict
+            self.set_config_args.append(config)
+            return True
+
+        @property
+        def context(self):
+            return _Ctx()
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)
+    backend.model = _WrapperModel()
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["a.jpg"], "a.jpg")
+
+    assert pred.error is None
+    assert pred.prediction == "最新包装的描述"
+    # 退化为两参调用(stream=False),且只成功调一次。
+    assert len(backend.model.response_calls) == 1
+    assert backend.model.response_calls[0][1] is False
+    assert backend._response_takes_max_tokens is False
+    # max_tokens 经 set_config 以 dict 形式下发。
+    assert backend.model.set_config_args == [{"max_new_tokens": 128}]
+    # 统计从 context 属性对象收集(非 get_context dict)。
+    assert pred.raw["prompt_len"] == 11 and pred.raw["decode_us"] == 8000
+    assert pred.raw["pixels_mp"] == 0.18
+
+
 def test_mnn_missing_config_path_raises(fake_mnn, tmp_path):
     from eval_vlm.inference.mnn_backend import MNNBackend
 
