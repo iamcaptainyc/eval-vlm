@@ -24,8 +24,11 @@ HTTP 服务**——与 openai/vllm 后端(调远端 OpenAI 兼容 API)互补。
 """
 from __future__ import annotations
 
+import os
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from ..config import Config
@@ -35,6 +38,10 @@ from .base import InferenceBackend
 
 # 文本里的图片占位:本工具内部统一用 <image>;MNN 多模态用 <img>image_N</img>。
 _INTERNAL_PLACEHOLDER = "<image>"
+
+# MNN.cv.imread 底层用 stb_image 解码,只稳定支持这几种扩展名;.webp/.gif/.tiff
+# 等会"打不开"并返回**非法 Var**,后续读 .shape 会在 native 层 Segfault。
+_IMREAD_NATIVE_OK = {".jpg", ".jpeg", ".png", ".bmp", ".ppm", ".pgm"}
 
 
 class MNNBackend(InferenceBackend):
@@ -67,6 +74,34 @@ class MNNBackend(InferenceBackend):
         self.model.load()
 
     # ------------------------------------------------------------------
+    def _imread(self, img_path: Path):
+        """安全地把图片读成 MNN Var(HWC, uint8, BGR),兼容 .webp 等格式。
+
+        不直接对任意格式调 MNN.cv.imread:其底层解码器(stb_image)不认 .webp、
+        .gif 等;打不开时返回**非法 Var**,后续读 .shape 会在 native 层 Segfault、
+        直接 core dump 整个进程(而非被 complete 捕获成 Prediction.error)。
+
+        策略:原生解码器认得的扩展名走 imread 快路;其余先用 Pillow 解码并转码成
+        临时 PNG,再交给 imread —— 这样最终 Var 仍由 imread 产生,dtype/通道序/
+        排布与可用格式完全一致,只是多一步格式转换,不改变送入模型的像素语义。
+        """
+        if img_path.suffix.lower() in _IMREAD_NATIVE_OK:
+            return self._cv.imread(str(img_path))
+
+        from PIL import Image  # Pillow 已是项目依赖,支持 webp/gif/tiff 等
+
+        fd, tmp = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        try:
+            with Image.open(img_path) as im:
+                im.convert("RGB").save(tmp, format="PNG")
+            return self._cv.imread(tmp)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
     def _build_query_text(self, context: list[Turn], sample_id: str) -> str:
         """从对话上下文取出含 <image> 的 user 轮,转成 MNN 的单条多模态查询文本。
 
@@ -104,7 +139,7 @@ class MNNBackend(InferenceBackend):
             if not img_path.exists():
                 raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
 
-            img = self._cv.imread(str(img_path))   # MNN Var,HWC
+            img = self._imread(img_path)   # MNN Var,HWC(.webp 等经 Pillow 转码)
             shape = list(img.shape)
             if len(shape) < 2:
                 raise ValueError(f"无法识别图片尺寸(shape={shape}): {img_path}")

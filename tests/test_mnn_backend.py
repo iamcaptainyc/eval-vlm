@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -116,6 +117,63 @@ def test_mnn_complete_builds_multimodal_prompt(fake_mnn, tmp_path):
     assert model.reset_calls == 1
     # 统计信息落到 raw。
     assert pred.raw["backend"] == "mnn" and pred.raw["prompt_len"] == 7
+
+
+def test_mnn_webp_transcodes_via_pillow(fake_mnn, tmp_path):
+    """.webp 等原生解码器不认的格式:先经 Pillow 转码成临时 PNG 再 imread,
+    避免 MNN.cv.imread 打不开图后返回非法 Var、读 .shape 触发 Segfault。"""
+    from PIL import Image
+
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    webp = Path(cfg.data.media_root) / "城市.webp"
+    try:
+        Image.new("RGB", (8, 8), (10, 20, 30)).save(webp, format="WEBP")
+    except Exception as e:  # noqa: BLE001 - 本环境 Pillow 无 webp 支持则跳过
+        pytest.skip(f"Pillow 无 WEBP 支持: {e}")
+
+    backend = MNNBackend(cfg)
+    calls: list[str] = []
+
+    def _recording_imread(p, *a, **k):
+        calls.append(p)
+        return _FakeImg(8, 8)
+
+    backend._cv.imread = _recording_imread
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["城市.webp"], "城市.webp")
+
+    assert pred.error is None
+    assert pred.prediction == "这是一张图片的描述"
+    # 走了转码分支:imread 收到的是临时 .png,而非原始 .webp。
+    assert calls and calls[0].lower().endswith(".png")
+    assert not calls[0].lower().endswith(".webp")
+    # 临时文件用完即删,不留垃圾。
+    assert not Path(calls[0]).exists()
+
+
+def test_mnn_jpg_uses_native_imread_directly(fake_mnn, tmp_path):
+    """原生支持的扩展名(.jpg)直接走 imread 快路,不经 Pillow 转码。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)
+    calls: list[str] = []
+
+    def _recording_imread(p, *a, **k):
+        calls.append(p)
+        return _FakeImg(420, 420)
+
+    backend._cv.imread = _recording_imread
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["a.jpg"], "a.jpg")
+
+    assert pred.error is None
+    # 直接拿到原始 .jpg 路径,无临时 png。
+    assert calls and calls[0].lower().endswith("a.jpg")
 
 
 def test_mnn_missing_config_path_raises(fake_mnn, tmp_path):
