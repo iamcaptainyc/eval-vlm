@@ -87,25 +87,52 @@ class MNNBackend(InferenceBackend):
 
     # ------------------------------------------------------------------
     def _imread(self, img_path: Path):
-        """安全地把图片读成 MNN Var(HWC, uint8, BGR),兼容 .webp 等格式。
+        """安全地把图片读成 MNN Var(HWC, uint8, BGR),兼容 .webp 等格式 + 超大图缩放。
 
-        不直接对任意格式调 MNN.cv.imread:其底层解码器(stb_image)不认 .webp、
-        .gif 等;打不开时返回**非法 Var**,后续读 .shape 会在 native 层 Segfault、
-        直接 core dump 整个进程(而非被 complete 捕获成 Prediction.error)。
-
-        策略:原生解码器认得的扩展名走 imread 快路;其余先用 Pillow 解码并转码成
-        临时 PNG,再交给 imread —— 这样最终 Var 仍由 imread 产生,dtype/通道序/
-        排布与可用格式完全一致,只是多一步格式转换,不改变送入模型的像素语义。
+        1. 格式兼容:stb_image 不认 .webp/.gif 等,打不开会返回非法 Var -> segfault。
+           策略:不认的格式先用 Pillow 解码转临时 PNG 再 imread。
+        2. 超大图保护:分辨率过高(如 21MB PNG)会撑爆视觉编码器原生内存 -> segfault。
+           策略:原生格式先 imread 读出 Var,再查 shape;超限则回退 Pillow 缩放+重读。
         """
-        if img_path.suffix.lower() in _IMREAD_NATIVE_OK:
-            return self._cv.imread(str(img_path))
+        max_side = self.cfg.inference.mnn_image_max_side
 
-        from PIL import Image  # Pillow 已是项目依赖,支持 webp/gif/tiff 等
+        if img_path.suffix.lower() in _IMREAD_NATIVE_OK:
+            var = self._cv.imread(str(img_path))
+            if max_side <= 0:
+                return var
+            shape = list(var.shape)
+            if len(shape) >= 2 and max(shape[0], shape[1]) <= max_side:
+                return var
+            # 超限:用 Pillow 缩放后重新 imread
+            from PIL import Image
+            h, w = int(shape[0]), int(shape[1])
+            ratio = max_side / max(h, w)
+            new_w, new_h = int(w * ratio), int(h * ratio)
+            fd, tmp = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            try:
+                with Image.open(img_path) as im:
+                    im = im.resize((new_w, new_h), Image.LANCZOS)
+                    im.convert("RGB").save(tmp, format="PNG")
+                return self._cv.imread(tmp)
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+        # 非原生格式(.webp/.gif/.tiff 等):一律走 Pillow 解码 + 可选缩放
+        from PIL import Image
 
         fd, tmp = tempfile.mkstemp(suffix=".png")
         os.close(fd)
         try:
             with Image.open(img_path) as im:
+                if max_side > 0:
+                    w, h = im.size
+                    if max(w, h) > max_side:
+                        ratio = max_side / max(w, h)
+                        im = im.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
                 im.convert("RGB").save(tmp, format="PNG")
             return self._cv.imread(tmp)
         finally:

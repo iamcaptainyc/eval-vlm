@@ -79,7 +79,19 @@ def run_inference(cfg: Config) -> dict:
     todo: list[Sample] = [s for s in samples if not sample_done(s)]
     n_targets = sum(len(s.targets) for s in samples)
 
+    print(f"[run] 待推理 {len(todo)} 条样本(已完成跳过 {len(samples) - len(todo)} 条),"
+          f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
+    max_workers = worker_count(backend, cfg.inference.max_concurrency)
+    if cfg.inference.max_concurrency > 1 and max_workers == 1:
+        import warnings
+        warnings.warn(
+            f"[run] 注意: max_concurrency={cfg.inference.max_concurrency} 对 "
+            f"{cfg.inference.backend} 后端不生效(该后端为有状态单对象,必须串行推理),"
+            f"实际并发=1。如需并行加速,请换用 openai/vllm 后端。",
+            stacklevel=1,
+        )
+    print("[run] 后端就绪,开始推理。", flush=True)
     started = datetime.now(timezone.utc).isoformat()
     n_ok = 0
     n_err = 0
@@ -87,19 +99,37 @@ def run_inference(cfg: Config) -> dict:
     if not todo:
         print(f"全部 {len(samples)} 条样本({n_targets} 个目标轮)已完成,无需推理(断点续跑)。")
     else:
-        # 非线程安全后端(如 MNN)强制串行,避免有状态对象被并发破坏。
-        max_workers = worker_count(backend, cfg.inference.max_concurrency)
-        with store.PredictionWriter(cfg.predictions_path) as writer, \
-                ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_rollout_sample, cfg, backend, s): s for s in todo}
-            for fut in tqdm(as_completed(futures), total=len(futures),
-                            desc="inference", unit="sample"):
-                for pred in fut.result():
-                    writer.write(pred)
-                    if pred.error:
-                        n_err += 1
-                    else:
-                        n_ok += 1
+        with store.PredictionWriter(cfg.predictions_path) as writer:
+            try:
+                if max_workers == 1:
+                    pbar = tqdm(todo, total=len(todo), desc="inference", unit="sample")
+                    for s in pbar:
+                        pbar.set_postfix_str(s.id)
+                        for pred in _rollout_sample(cfg, backend, s):
+                            writer.write(pred)
+                            if pred.error:
+                                n_err += 1
+                            else:
+                                n_ok += 1
+                else:
+                    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                        futures = {pool.submit(_rollout_sample, cfg, backend, s): s for s in todo}
+                        try:
+                            for fut in tqdm(as_completed(futures), total=len(futures),
+                                            desc="inference", unit="sample"):
+                                for pred in fut.result():
+                                    writer.write(pred)
+                                    if pred.error:
+                                        n_err += 1
+                                    else:
+                                        n_ok += 1
+                        except KeyboardInterrupt:
+                            for fut in futures:
+                                fut.cancel()
+                            raise
+            except KeyboardInterrupt:
+                print(f"\n[run] 已中断:本轮成功 {n_ok} 条、失败 {n_err} 条均已落盘;"
+                      f"重跑同一命令即可断点续跑。", flush=True)
     backend.close()
 
     stats = {

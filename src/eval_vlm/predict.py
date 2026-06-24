@@ -183,6 +183,15 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
     print(f"[pred] 待描述 {len(todo)} 张(已完成跳过 {len(images) - len(todo)} 张),"
           f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
+    max_workers = worker_count(backend, cfg.inference.max_concurrency)
+    if cfg.inference.max_concurrency > 1 and max_workers == 1:
+        import warnings
+        warnings.warn(
+            f"[pred] 注意: max_concurrency={cfg.inference.max_concurrency} 对 "
+            f"{cfg.inference.backend} 后端不生效(该后端为有状态单对象,必须串行推理),"
+            f"实际并发=1。如需并行加速,请换用 openai/vllm 后端。",
+            stacklevel=1,
+        )
     print("[pred] 后端就绪,开始推理。", flush=True)
     started = datetime.now(timezone.utc).isoformat()
     n_ok = 0
@@ -192,8 +201,6 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
     if not todo:
         print(f"全部 {len(images)} 张图片已完成描述,无需推理(断点续跑)。")
     else:
-        # 非线程安全后端(如 MNN 有状态单对象)强制串行;openai/fake 用配置并发。
-        max_workers = worker_count(backend, cfg.inference.max_concurrency)
         pred_path.parent.mkdir(parents=True, exist_ok=True)
 
         def _append(fh, obj: dict) -> None:

@@ -91,6 +91,11 @@ class InferenceConfig:
     # 传给 MNN.llm.create()。仅 backend=mnn 时使用;openai/vllm/fake 忽略。
     # 可用 pred 的 --mnn-config 临时覆盖。
     mnn_config_path: Optional[str] = None
+    # MNN 后端:图片最长边的像素上限。超大图(如几千×几千、几十 MB)原样喂进
+    # pymnn 的 vision 编码器会在原生层 OOM/越界 -> Segmentation fault 直接 core dump
+    # 整个进程(Python 捕获不到)。超过此上限的图先等比缩放再推理,从根上避免崩溃。
+    # 正常尺寸图不受影响;设 <=0 关闭缩放(回到原样喂入,风险自负)。
+    mnn_image_max_side: int = 2048
 
 
 @dataclass

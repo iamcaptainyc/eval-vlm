@@ -126,6 +126,7 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("model", "inference.model"),
     ("backend", "inference.backend"),
     ("mnn_config", "inference.mnn_config_path"),
+    ("mnn_image_max_side", "inference.mnn_image_max_side"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -354,6 +355,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
                              "(临时覆盖 inference.mnn_config_path)")
+    p_pred.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int,
+                        default=None,
+                        help="backend=mnn 时:图片最长边像素上限(超大图等比缩放;默认 2048;"
+                             "设 0 关闭缩放)。临时覆盖 inference.mnn_image_max_side")
     p_pred.add_argument("--force", action="store_true",
                         help="重新生成文件夹内 config.yaml(覆盖你的手改)")
     p_pred.add_argument("--overwrite", action="store_true",
