@@ -1,23 +1,28 @@
 """命令行入口(工作目录模型)。
 
 机器级设置放全局配置(~/.eval_vlm/config.yaml);每个数据集是工作目录下一个
-自包含文件夹(含 config.yaml + 全部产物)。两类命令对 --dataset 的含义不同:
+自包含文件夹(含 config.yaml + 全部产物)。各命令对 --dataset / --datadir 的含义:
 
     config  : 管理全局配置(init / show / set)
     split   : 初始化  —— --dataset = 源数据集 JSON 路径
               在 workspace 下建 <数据集名>/,从内置模板生成 config.yaml,再分割
-    run     : 读取已有 —— --dataset = 数据集名(或文件夹路径);test.json -> predictions.jsonl
+    pred    : 预测(不评分),二选一:
+              --dataset = 数据集名(或文件夹路径);对其 test.json 推理 -> predictions.jsonl
+              --datadir = 无标注图片文件夹;逐张单轮描述,产物落 workspace/<同名>/
     score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.md / summary.md
-    eval    : 读取已有 —— 一键连续执行 run + score(不含 split:split 后需先部署模型)
-    pred    : 无标注 —— --datadir = 图片文件夹;逐张单轮描述,产物落 workspace/<同名>/(不评分)
+    eval    : 读取已有 —— 一键连续执行 pred(--dataset)+ score(不含 split:split 后需先部署模型)
 
-产物按模型分目录:run/score/eval/pred 的结果落在 工作目录/<数据集>/<inference.model>/,
-不同模型对同一数据集互不覆盖;split 产物(train/test/val)是各模型共享的,落在数据集文件夹本身。
+产物按模型分目录:pred/score/eval 的结果落在 工作目录/<数据集>/<模型名>/,
+不同模型对同一数据集互不覆盖(openai/vllm/fake 取 inference.openai.model;
+mnn 取 inference.mnn.config_path 所在目录名);split 产物(train/test/val)是各模型
+共享的,落在数据集文件夹本身。
 
 CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持久化,不再是临时):
-    --base-url / --model     run/eval/pred 写回 inference.base_url / inference.model
+    --base-url / --model     pred/eval 写回 inference.openai.base_url / inference.openai.model
     --scorer                 score/eval 写回 scoring.scorer
-    --backend / --mnn-config / --prompt / --system-prompt   pred 写回对应字段
+    --backend                pred 写回 inference.backend
+    --mnn-config / --mnn-image-max-side   pred 写回 inference.mnn.config_path / image_max_side
+    --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
 """
 from __future__ import annotations
 
@@ -122,11 +127,11 @@ def _resolve_folder(args: argparse.Namespace) -> Path:
 
 # CLI flag 名 -> 写回 config.yaml 的点号键(用户参数优先且持久化)。
 _PERSIST_MAP: tuple[tuple[str, str], ...] = (
-    ("base_url", "inference.base_url"),
-    ("model", "inference.model"),
+    ("base_url", "inference.openai.base_url"),
+    ("model", "inference.openai.model"),
     ("backend", "inference.backend"),
-    ("mnn_config", "inference.mnn_config_path"),
-    ("mnn_image_max_side", "inference.mnn_image_max_side"),
+    ("mnn_config", "inference.mnn.config_path"),
+    ("mnn_image_max_side", "inference.mnn.image_max_side"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -153,12 +158,12 @@ def _report_persist(tag: str, persisted: list[str], folder: Path) -> None:
         print(f"[{tag}] 已将 {', '.join(persisted)} 写回 {folder / 'config.yaml'}(永久生效)")
 
 
-def _do_run(cfg: Config) -> dict:
+def _do_run(cfg: Config, tag: str = "pred") -> dict:
     stats = run_inference(cfg)
-    print(f"[run] 完成 {stats['newly_completed']} 个目标轮,失败 {stats['errors']} 个,"
+    print(f"[{tag}] 完成 {stats['newly_completed']} 个目标轮,失败 {stats['errors']} 个,"
           f"跳过(已完成样本) {stats['skipped_samples_already_done']} 条 -> {cfg.predictions_path}")
     if stats["errors"]:
-        print(f"[run] 注意:有 {stats['errors']} 条推理失败(已记录 error,可重跑补齐)。")
+        print(f"[{tag}] 注意:有 {stats['errors']} 条推理失败(已记录 error,可重跑补齐)。")
     return stats
 
 
@@ -176,12 +181,16 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
     return metrics
 
 
-def _cmd_run(args: argparse.Namespace) -> int:
+def _pred_dataset(args: argparse.Namespace) -> int:
+    """pred --dataset:对已有数据集的 test.json 执行推理(只预测,不评分)。
+
+    等价于旧的 `run` 命令。--base-url/--model 等永久写回该数据集 config.yaml。
+    """
     folder = _resolve_folder(args)
     persisted = _persist_overrides(folder, args)      # --base-url/--model 永久写回
     cfg = load_dataset_config(folder)
-    _report_persist("run", persisted, folder)
-    print(f"[run] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
+    _report_persist("pred", persisted, folder)
+    print(f"[pred] 数据集预测,模型目录(按模型名区分)-> {cfg.run_dir}")
     _do_run(cfg)
     return 0
 
@@ -196,21 +205,33 @@ def _cmd_score(args: argparse.Namespace) -> int:
 
 
 def _cmd_eval(args: argparse.Namespace) -> int:
-    """一键连续执行 run + score(不含 split)。"""
+    """一键连续执行 预测 + 评分(不含 split)。"""
     folder = _resolve_folder(args)
     persisted = _persist_overrides(folder, args)      # --base-url/--model/--scorer 永久写回
     cfg = load_dataset_config(folder)
     _report_persist("eval", persisted, folder)
-    print(f"[eval] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
-    _do_run(cfg)
+    print(f"[eval] 模型目录(按模型名区分)-> {cfg.run_dir}")
+    _do_run(cfg, "eval")
     _do_score(cfg, args.scorer)
     return 0
 
 
 # ---------------------------------------------------------------------------
-# pred:无标注图片文件夹 -> 单轮描述(不评分)
+# pred:统一的「预测(不评分)」命令
+#   --dataset = 对已有数据集的 test.json 推理(旧 run)
+#   --datadir = 对无标注图片文件夹逐张描述(旧 pred)
 # ---------------------------------------------------------------------------
 def _cmd_pred(args: argparse.Namespace) -> int:
+    """pred 分发:--dataset 走数据集预测;--datadir 走无标注图片描述。
+
+    互斥参数组已保证二者恰好提供其一。
+    """
+    if args.dataset:
+        return _pred_dataset(args)
+    return _pred_datadir(args)
+
+
+def _pred_datadir(args: argparse.Namespace) -> int:
     """遍历 --datadir 内所有图片,按 config.yaml 组织对话调 VLM 描述,落到 workspace/<同名>。
 
     自包含文件夹模型(同 split→run):首次运行在 workspace/<名>/ 生成 config.yaml
@@ -248,7 +269,7 @@ def _cmd_pred(args: argparse.Namespace) -> int:
 
     # 图片永远定位到 --datadir(即便 config 里 media_root 被改过)。
     cfg.data.media_root = str(datadir)
-    print(f"[pred] 模型目录(按 inference.model 区分)-> {cfg.run_dir}")
+    print(f"[pred] 模型目录(按模型名区分)-> {cfg.run_dir}")
 
     # prompt/system_prompt 已写回 config,故 prompt=None 交给 cfg.pred 驱动。
     stats = predict_folder(cfg, datadir, prompt=None,
@@ -271,14 +292,15 @@ def _add_workspace_arg(p: argparse.ArgumentParser) -> None:
 
 def _add_inference_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-url", default=None,
-                   help="临时覆盖 inference.base_url(部署地址,如 http://localhost:8000/v1)")
-    p.add_argument("--model", default=None, help="临时覆盖 inference.model(部署时注册的模型名)")
+                   help="临时覆盖 inference.openai.base_url(部署地址,如 http://localhost:8000/v1)")
+    p.add_argument("--model", default=None,
+                   help="临时覆盖 inference.openai.model(部署时注册的模型名)")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eval_vlm",
-        description="解耦的 VLM 测试集评测工具(工作目录模型:config / split / run / score / eval)",
+        description="解耦的 VLM 测试集评测工具(工作目录模型:config / split / pred / score / eval)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -314,13 +336,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_arg(p_split)
     p_split.set_defaults(func=_cmd_split)
 
-    # run
-    p_run = sub.add_parser("run", help="对已有数据集执行推理(--dataset=名|路径)")
-    p_run.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
-    _add_inference_args(p_run)
-    _add_workspace_arg(p_run)
-    p_run.set_defaults(func=_cmd_run)
-
     # score
     p_score = sub.add_parser("score", help="对已有数据集的预测评分(--dataset=名|路径)")
     p_score.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
@@ -337,17 +352,22 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
 
-    # pred(无标注图片描述)
+    # pred(统一预测命令:--dataset=数据集 test.json | --datadir=无标注图片文件夹)
     p_pred = sub.add_parser(
-        "pred", help="对无标注图片文件夹逐张描述(不评分;--datadir=图片文件夹)")
-    p_pred.add_argument("--datadir", "-d", required=True, help="待描述的图片文件夹路径")
+        "pred",
+        help="预测(不评分):--dataset=对数据集 test.json 推理 | --datadir=对无标注图片文件夹逐张描述")
+    src = p_pred.add_mutually_exclusive_group(required=True)
+    src.add_argument("--dataset", default=None,
+                     help="数据集名(或文件夹路径):对其 test.json 推理(等价旧 run,只预测不评分)")
+    src.add_argument("--datadir", default=None,
+                     help="无标注图片文件夹路径:逐张单轮描述(等价旧 pred),产物落 workspace/<同名>")
     p_pred.add_argument("--name", default=None,
-                        help="输出文件夹名(默认取图片文件夹名);产物落在 workspace/<名>/")
+                        help="[--datadir] 输出文件夹名(默认取图片文件夹名);产物落在 workspace/<名>/")
     p_pred.add_argument("--prompt", default=None,
-                        help=f"临时覆盖单轮提示词(不传则用文件夹 config.yaml 的 pred.prompt,"
+                        help=f"[--datadir] 临时覆盖单轮提示词(不传则用文件夹 config.yaml 的 pred.prompt,"
                              f"默认 {DEFAULT_PROMPT!r};config 里设了多轮 template 时此项无效)")
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
-                        help="临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
+                        help="[--datadir] 临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
     p_pred.add_argument("--backend", default=None,
                         choices=["openai", "vllm", "mnn", "fake"],
                         help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
@@ -355,15 +375,15 @@ def build_parser() -> argparse.ArgumentParser:
                              "fake(回显,不联网,自检用)")
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
-                             "(临时覆盖 inference.mnn_config_path)")
+                             "(临时覆盖 inference.mnn.config_path)")
     p_pred.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int,
                         default=None,
                         help="backend=mnn 时:图片最长边像素上限(超大图等比缩放;默认 2048;"
-                             "设 0 关闭缩放)。临时覆盖 inference.mnn_image_max_side")
+                             "设 0 关闭缩放)。临时覆盖 inference.mnn.image_max_side")
     p_pred.add_argument("--force", action="store_true",
-                        help="重新生成文件夹内 config.yaml(覆盖你的手改)")
+                        help="[--datadir] 重新生成文件夹内 config.yaml(覆盖你的手改)")
     p_pred.add_argument("--overwrite", action="store_true",
-                        help="无视已有结果整份重跑(覆盖 predictions.jsonl);默认断点续跑只补未完成")
+                        help="[--datadir] 无视已有结果整份重跑(覆盖 predictions.jsonl);默认断点续跑只补未完成")
     _add_inference_args(p_pred)
     _add_workspace_arg(p_pred)
     p_pred.set_defaults(func=_cmd_pred)

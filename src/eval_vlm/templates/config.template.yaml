@@ -3,32 +3,34 @@
 # 首次运行时从本模板渲染到该数据集文件夹;之后微调直接手改这个 config.yaml 再重跑即可。
 # (机器级路径来自全局配置 ~/.eval_vlm/config.yaml。)
 #
-# 产物按模型分目录:run/score/eval/pred 的结果落在 <数据集文件夹>/<inference.model>/,
-# 不同模型对同一数据集互不覆盖(组织为 工作目录/数据集/模型);split 产物(train/test/val)
+# 产物按模型分目录:pred/score/eval 的结果落在 <数据集文件夹>/<模型名>/,
+# 不同模型对同一数据集互不覆盖(openai/vllm/fake 取 inference.openai.model;
+# mnn 取 inference.mnn.config_path 所在目录名);split 产物(train/test/val)
 # 是各模型共享的,落在数据集文件夹本身。
 #
 # CLI 覆盖会「永久写回」本文件(用户参数优先且持久化,不是临时):
-#   --base-url/--model(run/eval/pred)、--scorer(score/eval)、
-#   --backend/--mnn-config/--prompt/--system-prompt(pred)
+#   --base-url/--model(pred/eval -> inference.openai.*)、--scorer(score/eval)、
+#   --backend、--mnn-config/--mnn-image-max-side(pred -> inference.mnn.*)、
+#   --prompt/--system-prompt(pred --datadir -> pred.*)
 #
 # 一份配置覆盖全部命令,每段都标了「谁用」。与你当前命令无关的段保持默认即可,不会有副作用:
-#   data.source / data.mapping / split / eval / scoring  -> split·run·score·eval 使用;pred 忽略
+#   data.source / data.mapping / split / eval / scoring  -> split·pred(--dataset)·score·eval 使用
 #   data.media_root / image_strip_prefix / inference     -> 所有命令共用
-#   pred                                                 -> 仅 pred 使用;run·score 忽略
+#   pred(下方段)                                        -> 仅 pred --datadir 使用
 
 run_name: {{RUN_NAME}}                 # 仅作展示/元信息;实际产物落在本文件所在文件夹
 output_dir: {{OUTPUT_DIR}}             # 工作目录(workspace);仅作元信息
 
 # ---------------------------------------------------------------------------
 # 数据(所有命令)
-#   source / mapping  -> 仅 split·run·score·eval(从 LlamaFactory 数据集 JSON 读样本);pred 留空
+#   source / mapping  -> 仅 split·pred(--dataset)·score·eval(从 LlamaFactory 数据集 JSON 读样本);pred --datadir 留空
 #   media_root        -> 所有命令:相对图片路径相对此目录解析(pred 运行时强制指向 --datadir)
 # ---------------------------------------------------------------------------
 data:
-  source: {{SOURCE}}                   # 数据集 JSON(split 用;run/score 读本文件夹的 test.json);pred 为空
+  source: {{SOURCE}}                   # 数据集 JSON(split 用;pred --dataset/score 读本文件夹的 test.json);pred --datadir 为空
   media_root: {{MEDIA_ROOT}}           # 图片相对路径解析根(机器级;pred = 图片文件夹)
   image_strip_prefix: {{IMAGE_STRIP_PREFIX}}   # 跨机训练绝对前缀,本机不需要则 null(机器级)
-  # 字段映射(仅 split·run·score),对齐 LlamaFactory dataset_info.json。
+  # 字段映射(仅 split·pred --dataset·score),对齐 LlamaFactory dataset_info.json。
   # 默认 mllm_demo 风格(messages + role/content + user/assistant)。
   # 若数据是 conversations + from/value + human/gpt,改成下方注释写法即可,无需改代码。
   mapping:
@@ -63,28 +65,35 @@ split:
   test_out: null
 
 # ---------------------------------------------------------------------------
-# 推理后端(所有命令:run / eval / pred 都用这段)
-# 这里也是「自定义 vLLM API」的地方:全部参数都可手改;--base-url/--model 会永久写回本文件。
-# 注意:model 同时决定产物子目录名(<数据集>/<model>/),换 model = 换结果目录,互不覆盖。
+# 推理后端(所有命令:pred / eval 都用这段)
+# 顶层只选 backend;每个后端的参数归到各自子块,互不冲突、不会「设了却不生效」。
+# 切到哪个后端就只读哪个块。新增后端只需加一个子块。
+#   backend=openai/vllm/fake -> 读 openai 块;产物子目录名取 openai.model
+#   backend=mnn              -> 读 mnn 块;产物子目录名取 mnn.config_path 所在目录名
+# CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*
 # ---------------------------------------------------------------------------
 inference:
   backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显,自检用)
-  base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回;mnn 后端忽略)
-  model: trained-vlm          # 部署时注册的模型名(--model 永久写回;也用作产物子目录名;mnn 后端忽略)
-  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
-  system_prompt: null         # 系统提示(pred 也可在下方 pred.system_prompt 设置,后者运行时映射到这里)
-  max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)
-  max_tokens: 512             # 生成上限(mnn 后端作为 response 的 max_new_tokens)
-  temperature: 0.0
-  request_timeout: 120        # 单请求超时(秒)
-  max_retries: 3              # 失败重试次数(指数退避)
-  image_detail: auto          # OpenAI image_url 的 detail: auto|low|high(mnn 后端忽略)
-  # backend=mnn 专用:训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
-  # 仅 mnn 后端使用;可用 `eval-vlm pred --mnn-config <config.json>` 临时覆盖。
-  mnn_config_path: null       # 例: /root/autodl-tmp/qwen2-vl-mnn/config.json
+  # openai/vllm 后端(也是 fake 自检走的块):
+  openai:
+    base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回)
+    model: trained-vlm        # 部署时注册的模型名(--model 永久写回;也用作产物子目录名)
+    api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+    system_prompt: null       # 系统提示(pred 也可在下方 pred.system_prompt 设置,后者运行时映射到这里)
+    max_concurrency: 8        # 并发请求数
+    max_tokens: 512           # 生成上限
+    temperature: 0.0
+    request_timeout: 120      # 单请求超时(秒)
+    max_retries: 3            # 失败重试次数(指数退避)
+    image_detail: auto        # OpenAI image_url 的 detail: auto|low|high
+  # mnn 本地后端(只列 mnn 真正会用到的项):
+  mnn:
+    config_path: null         # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
+    image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native OOM/segfault;设 0 关闭)(--mnn-image-max-side 永久写回)
+    max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
 
 # ---------------------------------------------------------------------------
-# 多轮评测策略(仅 run·score·eval;pred 忽略本段)
+# 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)
 # 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
 # ---------------------------------------------------------------------------
 eval:
@@ -101,7 +110,7 @@ scoring:
   # turn_scorers: [token_f1, exact_match]
 
 # ---------------------------------------------------------------------------
-# 无标注图片的对话怎么组织(仅 pred;run·score 忽略本段)
+# 无标注图片的对话怎么组织(仅 pred --datadir;其它命令忽略本段)
 # 两种写法二选一:
 #   1) 单轮简写:只设 prompt(+可选 system_prompt)。每张图发一轮 user 消息;
 #      若 prompt 不含 <image>,会自动在最前面加一个。(可用 --prompt 临时覆盖)

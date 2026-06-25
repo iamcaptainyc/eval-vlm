@@ -21,7 +21,7 @@ _UNSAFE_DIR_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
 def safe_model_dirname(model: str) -> str:
-    """把 inference.model 转成合法的文件夹名(用作 数据集/<模型>/ 子目录)。
+    """把 inference.result_name 转成合法的文件夹名(用作 数据集/<模型>/ 子目录)。
 
     模型名常含 '/'(如 Qwen/Qwen2-VL-7B)或 ':' 等,直接做目录名会越界或非法。
     这里把所有非法字符折成 '_',并去掉 Windows 不允许的结尾点/空格;空则回落 'default'。
@@ -75,10 +75,10 @@ class SplitConfig:
 
 
 @dataclass
-class InferenceConfig:
-    backend: str = "openai"
+class OpenAIBackendConfig:
+    """openai / vllm 后端(及 fake 自检)的全部设置,独立成块,与其它后端互不干扰。"""
     base_url: str = "http://localhost:8000/v1"
-    model: str = "trained-vlm"
+    model: str = "trained-vlm"                  # 也用作产物子目录名 <数据集>/<model>/
     api_key_env: str = "OPENAI_API_KEY"
     system_prompt: Optional[str] = None
     max_concurrency: int = 8
@@ -87,15 +87,79 @@ class InferenceConfig:
     request_timeout: float = 120.0
     max_retries: int = 3
     image_detail: str = "auto"
-    # MNN(pymnn)后端专用:训练后转 mnn 的模型目录里 config.json 的路径,
-    # 传给 MNN.llm.create()。仅 backend=mnn 时使用;openai/vllm/fake 忽略。
-    # 可用 pred 的 --mnn-config 临时覆盖。
-    mnn_config_path: Optional[str] = None
-    # MNN 后端:图片最长边的像素上限。超大图(如几千×几千、几十 MB)原样喂进
-    # pymnn 的 vision 编码器会在原生层 OOM/越界 -> Segmentation fault 直接 core dump
-    # 整个进程(Python 捕获不到)。超过此上限的图先等比缩放再推理,从根上避免崩溃。
+
+
+@dataclass
+class MNNBackendConfig:
+    """MNN(pymnn)本地后端的全部设置,独立成块。
+
+    只含 mnn 真正会用到的项(无 base_url/model/并发等无意义字段),
+    避免「切到 mnn 后某些设置其实不生效」的困惑。
+    """
+    # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
+    # 也据此(其所在目录名)决定产物子目录名;可用 pred 的 --mnn-config 临时覆盖。
+    config_path: Optional[str] = None
+    # 图片最长边的像素上限。超大图(如几千×几千、几十 MB)原样喂进 pymnn 的 vision
+    # 编码器会在原生层 OOM/越界 -> Segmentation fault 直接 core dump 整个进程
+    # (Python 捕获不到)。超过此上限的图先等比缩放再推理,从根上避免崩溃。
     # 正常尺寸图不受影响;设 <=0 关闭缩放(回到原样喂入,风险自负)。
-    mnn_image_max_side: int = 2048
+    image_max_side: int = 2048
+    max_tokens: int = 512                       # 作为 response 的 max_new_tokens
+
+
+@dataclass
+class InferenceConfig:
+    """推理设置:顶层只选 backend,各后端的参数归入各自的子块。
+
+    切换 backend 只读对应块,各后端设置互不冲突、不会「设了却不生效」。
+    新增后端只需加一个子块 + 一个分支。
+    """
+    backend: str = "openai"
+    openai: OpenAIBackendConfig = field(default_factory=OpenAIBackendConfig)
+    mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
+
+    @property
+    def active(self) -> Any:
+        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn)。"""
+        if self.backend in ("openai", "vllm", "fake"):
+            return self.openai
+        if self.backend == "mnn":
+            return self.mnn
+        raise ValueError(
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
+        )
+
+    @property
+    def result_name(self) -> str:
+        """产物子目录名(<数据集>/<result_name>/),按后端取其模型标识。
+
+        openai/vllm/fake -> openai.model;mnn -> config_path 所在目录名
+        (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model'。
+        """
+        if self.backend == "mnn":
+            cp = self.mnn.config_path
+            return Path(cp).expanduser().parent.name if cp else "mnn-model"
+        if self.backend in ("openai", "vllm", "fake"):
+            return self.openai.model
+        # 未知后端:与 active 一致地报错,而不是伪装成 openai 给出一个看似正常的目录名。
+        raise ValueError(
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
+        )
+
+    @property
+    def max_tokens(self) -> int:
+        """编排/统计层用的生成上限(取当前后端块的 max_tokens)。"""
+        return self.active.max_tokens
+
+    @property
+    def max_concurrency(self) -> int:
+        """编排层用的并发数(当前后端块若无此项则为 1,如 mnn 串行)。"""
+        return getattr(self.active, "max_concurrency", 1)
+
+    @property
+    def system_prompt(self) -> Optional[str]:
+        """当前后端块的系统提示(无则 None,如 mnn 不支持系统提示)。"""
+        return getattr(self.active, "system_prompt", None)
 
 
 @dataclass
@@ -174,13 +238,14 @@ class Config:
 
     @property
     def run_dir(self) -> Path:
-        """本次 run/score/pred 的产物目录 = 数据集文件夹 / <模型名>。
+        """本次 pred/score/eval 的产物目录 = 数据集文件夹 / <模型名>。
 
-        按 inference.model 分目录,使不同模型对同一数据集的结果互不覆盖
+        按 inference.result_name 分目录(openai/vllm/fake 取 openai.model;mnn 取
+        config_path 所在目录名),使不同模型对同一数据集的结果互不覆盖
         (组织为 工作目录/数据集/模型)。split 产物(train/test/val/split_meta)
         是各模型共享的,落在 dataset_dir,不进这个子目录。
         """
-        return self.dataset_dir / safe_model_dirname(self.inference.model)
+        return self.dataset_dir / safe_model_dirname(self.inference.result_name)
 
     # ---- 产物路径(三步之间的解耦契约) ----
     # split 产物:数据集级,各模型共享 -> 落在 dataset_dir。
@@ -254,7 +319,8 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     type_hints = {f.name: f.type for f in fields(cls)}
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
-              "mapping": Mapping, "tags": Tags}
+              "mapping": Mapping, "tags": Tags,
+              "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

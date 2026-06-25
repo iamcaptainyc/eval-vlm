@@ -193,11 +193,11 @@ def test_per_model_dirs_isolate_results(temp_global):
     assert (folder / "test.json").exists()
 
     # 模型 A
-    cfg.inference.model = "model_a"
+    cfg.inference.openai.model = "model_a"
     run_inference(cfg)
     score_predictions(cfg)
     # 模型 B(同一 cfg,仅换模型名)
-    cfg.inference.model = "model_b"
+    cfg.inference.openai.model = "model_b"
     run_inference(cfg)
     score_predictions(cfg)
 
@@ -217,13 +217,13 @@ def test_set_dataset_value_persists_and_keeps_comments(temp_global):
     ws = temp_global
     folder = workspace.init_dataset(str(SOURCE), ws, media_root=str(FIXTURES))
 
-    workspace.set_dataset_value(folder, "inference.model", "Qwen/Qwen2-VL")
-    workspace.set_dataset_value(folder, "inference.base_url", "http://h:9/v1")
+    workspace.set_dataset_value(folder, "inference.openai.model", "Qwen/Qwen2-VL")
+    workspace.set_dataset_value(folder, "inference.openai.base_url", "http://h:9/v1")
     workspace.set_dataset_value(folder, "scoring.scorer", "token_f1")
 
     cfg = load_dataset_config(folder)
-    assert cfg.inference.model == "Qwen/Qwen2-VL"        # 用户值优先且持久化
-    assert cfg.inference.base_url == "http://h:9/v1"
+    assert cfg.inference.openai.model == "Qwen/Qwen2-VL"  # 用户值优先且持久化
+    assert cfg.inference.openai.base_url == "http://h:9/v1"
     assert cfg.scoring.scorer == "token_f1"
     # 注释保留(整行替换只改值)
     assert "#" in (folder / "config.yaml").read_text(encoding="utf-8")
@@ -233,4 +233,78 @@ def test_set_dataset_value_persists_and_keeps_comments(temp_global):
 
 def test_set_dataset_value_missing_config_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        workspace.set_dataset_value(tmp_path / "nope", "inference.model", "x")
+        workspace.set_dataset_value(tmp_path / "nope", "inference.openai.model", "x")
+
+
+def test_set_dataset_value_three_level_nested(temp_global):
+    """3 层点号键(inference.openai.* / inference.mnn.*)能精确写回到对应子块,互不干扰。"""
+    ws = temp_global
+    folder = workspace.init_dataset(str(SOURCE), ws, media_root=str(FIXTURES))
+
+    workspace.set_dataset_value(folder, "inference.backend", "mnn")
+    workspace.set_dataset_value(folder, "inference.mnn.config_path", "/m/qwen-mnn/config.json")
+    workspace.set_dataset_value(folder, "inference.mnn.image_max_side", 1024)
+    workspace.set_dataset_value(folder, "inference.openai.model", "openai-model")
+
+    cfg = load_dataset_config(folder)
+    assert cfg.inference.backend == "mnn"
+    assert cfg.inference.mnn.config_path == "/m/qwen-mnn/config.json"
+    assert cfg.inference.mnn.image_max_side == 1024
+    # 写 mnn 块没有污染 openai 块
+    assert cfg.inference.openai.model == "openai-model"
+    # mnn 后端产物子目录名取 config.json 所在目录名
+    assert cfg.run_dir == folder / "qwen-mnn"
+    # 注释保留
+    assert "#" in (folder / "config.yaml").read_text(encoding="utf-8")
+
+
+def test_mnn_result_name_falls_back_when_no_config_path():
+    """mnn 后端未设 config_path 时产物子目录名回落 'mnn-model'。"""
+    from eval_vlm.config import Config
+    cfg = Config()
+    cfg.inference.backend = "mnn"
+    assert cfg.inference.result_name == "mnn-model"
+
+
+def test_result_name_unknown_backend_raises():
+    """未知后端:result_name 与 active 一致地报错,不伪装成 openai。"""
+    from eval_vlm.config import Config
+    cfg = Config()
+    cfg.inference.backend = "nope"
+    with pytest.raises(ValueError):
+        _ = cfg.inference.result_name
+
+
+def test_set_dataset_value_reinserts_deleted_subblock(temp_global):
+    """用户手删 openai 子块后,写回 inference.openai.* 应补回**到 inference 块内**
+    (而非追加到文末造成非法 YAML),且能被重新加载。"""
+    import yaml
+
+    ws = temp_global
+    folder = workspace.init_dataset(str(SOURCE), ws, media_root=str(FIXTURES))
+    config_path = folder / "config.yaml"
+
+    # 删掉整个 openai: 子块(连同其缩进子行),保留 inference: 与 mnn:
+    lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept, skipping = [], False
+    for ln in lines:
+        stripped = ln.strip()
+        if stripped.startswith("openai:"):
+            skipping = True
+            continue
+        if skipping:
+            # 子块行(缩进 > 2)或块内注释跳过;遇到下一个缩进<=2 的非空行结束跳过
+            indent = len(ln) - len(ln.lstrip(" "))
+            if stripped == "" or indent > 2:
+                continue
+            skipping = False
+        kept.append(ln)
+    config_path.write_text("".join(kept), encoding="utf-8")
+    assert "openai:" not in config_path.read_text(encoding="utf-8")
+
+    workspace.set_dataset_value(folder, "inference.openai.model", "reinserted")
+
+    # 仍是合法 YAML,且值进了 inference.openai.model
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert data["inference"]["openai"]["model"] == "reinserted"
+    assert load_dataset_config(folder).inference.openai.model == "reinserted"

@@ -10,19 +10,19 @@
 2. `split` 把它**纯分割**成 `train.json` / `test.json`(`val.json` 可选)——三份都是**原样 LlamaFactory 格式**;
 3. 拿 `train.json` 去 **LlamaFactory 训练**模型;
 4. 训练好的模型用 **vLLM 部署成 OpenAI 兼容 API**;
-5. 本项目 `run` + `score` 拿 `test.json` 评测该 API。
+5. 本项目 `pred --dataset` + `score`(或一键 `eval`)拿 `test.json` 评测该 API。
 
 ## 设计:三步解耦
 
 三个步骤是**独立 CLI 命令**,步骤间只通过**文件产物**交接,可在不同机器、不同时间独立运行与重跑:
 
 ```
-完整数据集 JSON ──split──▶ train.json / val.json / test.json ──run──▶ predictions.jsonl ──score──▶ metrics.json
+完整数据集 JSON ─split─▶ train.json / val.json / test.json ─pred --dataset─▶ predictions.jsonl ─score─▶ metrics.json
  (LlamaFactory)            (均为原样 LlamaFactory 格式)        (原始预测+原图地址,可断点续跑)  scored.jsonl / failures.md / summary.md
 ```
 
 - **split 只做纯分割**:每条记录原样写出(答案、对话结构、**图片路径全不动**),`train.json` 直接能喂给 LlamaFactory 训练。
-- `run` 按 LlamaFactory 格式读 `test.json` → 调 API → 拿预测;不关心数据怎么切的。
+- `pred --dataset` 按 LlamaFactory 格式读 `test.json` → 调推理后端 → 拿预测;不关心数据怎么切的。
 - `score` 把预测和标准答案(最后一个 assistant 轮)按 id 对齐打分;不关心预测怎么来的。
 - 推理后端、评分器都**可插拔**:换后端改一行配置,加评分器只需新增一个文件。
 
@@ -57,13 +57,13 @@ pip install -e .
 
 ## 工作目录模型(自包含数据集文件夹)
 
-为免去"每个数据集复制改一份 YAML、run/score 还要回去改配置"的麻烦,本工具采用**工作目录模型**:
+为免去"每个数据集复制改一份 YAML、预测/评分还要回去改配置"的麻烦,本工具采用**工作目录模型**:
 
 - **机器级设置**(工作目录 `workspace`、图片根 `media_root`、跨机前缀 `image_strip_prefix`)放**全局配置** `~/.eval_vlm/config.yaml`(`EVAL_VLM_CONFIG` 环境变量可改路径),所有数据集共享、只配一次。
 - **每个数据集**是 `workspace/<数据集名>/` 一个**自包含文件夹**:`split` 时从内置模板自动生成该数据集的 `config.yaml`,连同 `split_meta.json`、`train/test.json` 落在里面(各模型共享)。
-- **产物按模型分目录**:`run/score/eval/pred` 的结果落在 `workspace/<数据集>/<inference.model>/`(组织为 **工作目录/数据集/模型**)。换模型(改 `inference.model` 或 `--model`)= 换结果目录,**不同模型对同一数据集互不覆盖**;同一模型目录已存在则按断点续跑沿用/补齐。
-- **`--dataset` 两种含义**:`split --dataset <源JSON>` 是**初始化**(在工作目录建同名文件夹);`run/score/eval --dataset <名|路径>` 是**读取**已存在的数据集文件夹(自动找夹内 `config.yaml`)。
-- **用户参数优先且持久化**:`--base-url/--model/--scorer/--backend/--prompt` 等 CLI 覆盖会**永久写回**该数据集的 `config.yaml`(不再是临时),后续命令直接读到新值;当然也可直接手改 `config.yaml`。
+- **产物按模型分目录**:`pred/score/eval` 的结果落在 `workspace/<数据集>/<模型名>/`(组织为 **工作目录/数据集/模型**)。模型名按后端取:openai/vllm/fake 取 `inference.openai.model`,mnn 取 `inference.mnn.config_path` 所在目录名。换模型 = 换结果目录,**不同模型对同一数据集互不覆盖**;同一模型目录已存在则按断点续跑沿用/补齐。
+- **`--dataset` 两种含义**:`split --dataset <源JSON>` 是**初始化**(在工作目录建同名文件夹);`pred/score/eval --dataset <名|路径>` 是**读取**已存在的数据集文件夹(自动找夹内 `config.yaml`)。
+- **用户参数优先且持久化**:`--base-url/--model/--scorer/--backend/--mnn-config/--prompt` 等 CLI 覆盖会**永久写回**该数据集的 `config.yaml`(不再是临时),后续命令直接读到新值;当然也可直接手改 `config.yaml`。
 
 ### 首次设置(一次性)
 
@@ -94,7 +94,7 @@ eval-vlm split --dataset tests/fixtures/llamafactory_demo.json --train 0.6 --tes
 
 # 2) 把该文件夹内 config.yaml 的 inference.backend 改成 fake(离线回显)
 
-# 3) 一键 run + score(--dataset = 数据集名)
+# 3) 一键预测 + 评分(--dataset = 数据集名;eval = pred + score)
 eval-vlm eval --dataset llamafactory_demo
 # 结果在 workspace/llamafactory_demo/
 ```
@@ -107,53 +107,53 @@ eval-vlm split --dataset /root/autodl-tmp/capt/data/emo_v4.json --train 0.95 --t
 
 # 2) 拿 workspace/emo_v4/train.json 去 LlamaFactory 训练;再用 vLLM 部署成 HTTP 服务:
 #    vllm serve /path/to/checkpoint --served-model-name trained-vlm --port 8000
-#    并把 emo_v4/config.yaml 的 inference.base_url / model 改好(或下面用命令行传入,会永久写回)
+#    并把 emo_v4/config.yaml 的 inference.openai.base_url / model 改好(或下面用命令行传入,会永久写回)
 
-# 3) 一键 run + score
+# 3) 一键预测 + 评分(eval = pred + score)
 export OPENAI_API_KEY=EMPTY
 eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model trained-vlm
 ```
 
-> **split 与 run/score 不连续**:split 之后要先训练 + 部署模型,故 `eval` 命令只连续执行 **run + score**,不含 split。
+> **split 与预测/评分不连续**:split 之后要先训练 + 部署模型,故 `eval` 命令只连续执行 **pred + score**,不含 split。
 
 ### 命令一览
 
-| 命令 | `--dataset` 含义 | 作用 |
+| 命令 | `--dataset` / `--datadir` 含义 | 作用 |
 | --- | --- | --- |
 | `config init / show / set <k> <v> / keys` | — | 管理全局配置;`keys` 列出全部可设置键(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`)及不可全局设的数据集级项 |
 | `split --dataset <源JSON>` | 源数据集 JSON 路径 | **初始化**:建文件夹 + 生成 config.yaml + 分割 |
-| `run --dataset <名\|路径>` | 已存在数据集 | 读 test.json → `<数据集>/<model>/predictions.jsonl` |
-| `score --dataset <名\|路径>` | 已存在数据集 | 评分 → `<数据集>/<model>/` 下 metrics/scored/failures/summary |
-| `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **run + score**(不含 split) |
-| `pred --datadir <图片文件夹>` | — | **无标注图片描述**:逐张调 VLM(vLLM API 与对话组织可经文件夹 `config.yaml` 定制),产物落 `workspace/<同名>/<model>/`(不评分) |
+| `pred --dataset <名\|路径>` | 已存在数据集 | 读 test.json → `<数据集>/<模型>/predictions.jsonl`(只预测,不评分;等价旧 `run`) |
+| `pred --datadir <图片文件夹>` | 无标注图片文件夹 | **无标注图片描述**:逐张调 VLM,产物落 `workspace/<同名>/<模型>/`(不评分) |
+| `score --dataset <名\|路径>` | 已存在数据集 | 评分 → `<数据集>/<模型>/` 下 metrics/scored/failures/summary |
+| `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **pred + score**(不含 split) |
+
+> `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
 
 ### split 参数 / CLI 覆盖(永久写回 config.yaml)
 
-> `--base-url/--model/--scorer/--backend/--mnn-config/--prompt/--system-prompt` 会**永久写回**该数据集的 `config.yaml`(用户参数优先且持久化),后续命令直接读到。
+> `--base-url/--model/--scorer/--backend/--mnn-config/--mnn-image-max-side/--prompt/--system-prompt` 会**永久写回**该数据集的 `config.yaml`(用户参数优先且持久化),后续命令直接读到。
 
 | 参数 | 适用命令 | 作用 |
 | --- | --- | --- |
 | `--train / --test / --val` | split | 划分**比例**(如 `--train 0.8 --test 0.2`) |
 | `--seed` / `--stratify-by` | split | 随机种子 / 分层抽样字段 |
-| `--name NAME` | split | 数据集文件夹名(默认取源文件名,不含扩展名) |
-| `--force` | split | 文件夹已存在时重建(覆盖 config.yaml + 重新分割) |
+| `--name NAME` | split / pred --datadir | 数据集/输出文件夹名(默认取源文件名或图片文件夹名) |
+| `--force` | split / pred --datadir | 已存在时重建 config.yaml(split 还会重新分割) |
 | `--train-out / --val-out / --test-out` | split | 把对应产物直接写到任意目录(如 LlamaFactory `data/`) |
-| `--base-url / --model` | run / eval / pred | **写回** `inference.base_url / model`;`model` 同时决定产物子目录名 |
+| `--base-url / --model` | pred / eval | **写回** `inference.openai.base_url / model`;`model` 同时决定 openai 后端产物子目录名 |
 | `--scorer` | score / eval | **写回** `scoring.scorer` |
-| `--datadir DIR` | pred | 待描述的图片文件夹(无需 split/数据集 JSON) |
-| `--name NAME` | pred | 输出文件夹名(默认取图片文件夹名);产物落 `workspace/<名>/<model>/` |
-| `--prompt TEXT` | pred | **写回** `pred.prompt`(默认 `请描述图片`;设了多轮 `template` 时无效) |
-| `--system-prompt TEXT` | pred | **写回** `pred.system_prompt` |
 | `--backend openai\|vllm\|mnn\|fake` | pred | **写回** `inference.backend`(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;fake=回显不联网,自检用) |
-| `--mnn-config FILE` | pred | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(**写回** `inference.mnn_config_path`) |
-| `--force` | pred | 重新生成文件夹内 `config.yaml`(覆盖手改) |
-| `--overwrite` | pred | 无视已有结果整份重跑(覆盖 `predictions.jsonl`);默认断点续跑只补未完成 |
-| `--workspace DIR` | split/run/score/eval/pred | 临时覆盖全局 workspace |
+| `--mnn-config FILE` | pred | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(**写回** `inference.mnn.config_path`;也据其所在目录名定产物子目录) |
+| `--mnn-image-max-side N` | pred | mnn 后端图片最长边像素上限(超大图等比缩放防 native segfault;设 0 关闭)(**写回** `inference.mnn.image_max_side`) |
+| `--prompt TEXT` | pred --datadir | **写回** `pred.prompt`(默认 `请描述图片`;设了多轮 `template` 时无效) |
+| `--system-prompt TEXT` | pred --datadir | **写回** `pred.system_prompt` |
+| `--overwrite` | pred --datadir | 无视已有结果整份重跑(覆盖 `predictions.jsonl`);默认断点续跑只补未完成 |
+| `--workspace DIR` | split/pred/score/eval | 临时覆盖全局 workspace |
 
-### pred(无标注图片描述)
+### pred --datadir(无标注图片描述)
 
-`run`/`score` 面向**带标注的测试集**(数据集 JSON → split → 评分)。当你只有**一堆无标注照片**、
-想让模型逐张描述时,用 `pred`:它不需要 split、没有标准答案、**不评分**,每张图各起一段独立对话:
+`pred --dataset`/`score` 面向**带标注的测试集**(数据集 JSON → split → 评分)。当你只有**一堆无标注照片**、
+想让模型逐张描述时,用 `pred --datadir`:它不需要 split、没有标准答案、**不评分**,每张图各起一段独立对话:
 
 ```
 user:      <image>请描述图片
@@ -184,7 +184,7 @@ eval-vlm pred --datadir ./photos --backend mnn --mnn-config /root/qwen2-vl-mnn/c
 ```bash
 # 一次性指定 MNN 模型 config.json
 eval-vlm pred --datadir ./photos --backend mnn --mnn-config /root/qwen2-vl-mnn/config.json
-# 或在文件夹 config.yaml 的 inference.mnn_config_path 写死后直接:
+# 或在文件夹 config.yaml 的 inference.mnn.config_path 写死后直接:
 eval-vlm pred --datadir ./photos --backend mnn
 ```
 
@@ -195,34 +195,35 @@ eval-vlm pred --datadir ./photos --backend mnn
 **工作原理**(对齐 MNN 官方 pymnn 接口):图片用 `MNN.cv.imread` 原生读为 Var(免 numpy 往返),
 按 `{'text': '<img>image_0</img>…', 'images': [{'data': img, 'height': H, 'width': W}]}` 组织;
 `height`/`width` 由图片自动推导。调用 `model.response(prompt, stream=False, max_new_tokens)`
-**直接返回完整生成文本**(`max_new_tokens` 取 `inference.max_tokens`),无需手写解码循环。
+**直接返回完整生成文本**(`max_new_tokens` 取 `inference.mnn.max_tokens`),无需手写解码循环。
 
-**约束**:pymnn 的 LLM 无批量接口且单个模型对象有状态(KV cache),因此 MNN 后端**强制串行**
-(`max_concurrency` 自动降为 1);仅支持**单图单轮**(`pred` 的默认场景),`base_url`/`model`/
-`api_key` 对它无效,采样参数请在 MNN 自己的 `config.json` 里配。
+**约束**:pymnn 的 LLM 无批量接口且单个模型对象有状态(KV cache),因此 MNN 后端**强制串行**;
+仅支持**单图单轮**(`pred --datadir` 的默认场景)。mnn 块只含它真正会用到的设置
+(`config_path` / `image_max_side` / `max_tokens`),没有 `base_url`/`model`/并发等无意义字段;
+采样参数请在 MNN 自己的 `config.json` 里配。
 
 #### 自定义 vLLM API 与对话组织(`config.yaml`)
 
-`pred` 沿用**自包含文件夹模型**(同 `split`→`run`):**首次运行**在 `<workspace>/<名>/` 生成一份
-`config.yaml`,**再次运行**直接读它;描述产物按模型落 `<workspace>/<名>/<inference.model>/`。想完整定制
+`pred --datadir` 沿用**自包含文件夹模型**(同 `split`→`pred --dataset`):**首次运行**在 `<workspace>/<名>/` 生成一份
+`config.yaml`,**再次运行**直接读它;描述产物按模型落 `<workspace>/<名>/<模型名>/`。想完整定制
 **vLLM API** 或**每张图的对话怎么组织**,可手改这份 `config.yaml`(`--force` 可重新生成,覆盖手改),
 或直接用 CLI flag —— **用户参数会永久写回 `config.yaml`**(用户参数优先且持久化)。
 重新跑想覆盖旧结果用 `--overwrite`(默认断点续跑,只补未完成)。
 
-> 所有命令(`split`/`run`/`score`/`eval`/`pred`)共用**同一个统一模板**,所以 pred 生成的
-> `config.yaml` 也会带 `split` / `eval` / `scoring` 段——它们对 pred 是**惰性的**(每段都标了「谁用」),
-> 留默认即可、无副作用;pred 只读 `data.media_root` / `inference` / `pred` 三处。
+> 所有命令(`split`/`pred`/`score`/`eval`)共用**同一个统一模板**,所以 pred 生成的
+> `config.yaml` 也会带 `split` / `eval` / `scoring` 段——它们对 pred --datadir 是**惰性的**(每段都标了「谁用」),
+> 留默认即可、无副作用;pred --datadir 只读 `data.media_root` / `inference` / `pred` 三处。
 
-- **vLLM API**:`inference:` 块全参可调 —— `base_url` / `model` / `api_key_env` / `max_tokens` /
+- **vLLM API**:`inference.openai:` 块全参可调 —— `base_url` / `model` / `api_key_env` / `max_tokens` /
   `temperature` / `max_concurrency` / `request_timeout` / `max_retries` / `image_detail` / `system_prompt`
-  (`backend=mnn` 时另用 `mnn_config_path`)。
+  (`backend=mnn` 时改用 `inference.mnn:` 块的 `config_path` / `image_max_side` / `max_tokens`)。
 - **对话组织**:`pred:` 块。两种写法二选一:
   - **单轮简写**:只设 `prompt`(+可选 `system_prompt`)。若 `prompt` 不含 `<image>`,自动在最前面加一个。
   - **多轮模板**:设 `template`(`role`/`content` 列表),**覆盖** `prompt`,可加纯文本 `assistant`/`user` 轮做 few-shot 引导。
 
 ```yaml
 pred:
-  system_prompt: 你是专业的图像描述助手        # 映射到 inference.system_prompt
+  system_prompt: 你是专业的图像描述助手        # 映射到当前后端块的 system_prompt(openai)
   template:                                    # 多轮:覆盖 prompt
     - {role: user, content: "我会给你一张图片,请用简体中文、200 字内客观描述。"}
     - {role: assistant, content: "好的,请提供图片。"}
@@ -231,15 +232,15 @@ pred:
 
 > 模板规则(否则构造时即报错):全部轮里 `<image>` **恰好出现 1 次**且**位于某个 `user` 轮**;**最后一轮必须是 `user`**(模型据此作答)。
 
-产物组织为 `<workspace>/<图片文件夹名>/<inference.model>/`(`config.yaml` 在其父级,各模型共享;
+产物组织为 `<workspace>/<图片文件夹名>/<模型名>/`(`config.yaml` 在其父级,各模型共享;
 若图片文件夹路径正是输出文件夹本身会报错,用 `--name` 区分):
 
 | 文件 | 位置 | 内容 |
 | --- | --- | --- |
 | `config.yaml` | `<名>/` | 该次 pred 的自包含配置(首次生成;重跑读取);CLI flag 会写回这里定制 vLLM API 与对话组织 |
-| `predictions.jsonl` | `<名>/<model>/` | 每行一条成功描述,**原样 LlamaFactory 格式**(`messages` + `images`,多轮模板会完整保留各轮),可直接当新数据集复用;额外带 `id`/`latency` 便于追溯。**追加写,支持断点续跑**(已成功图片自动跳过;`--overwrite` 整份重跑) |
-| `failures.jsonl` | `<名>/<model>/` | 每行一条失败记录(`id`/`image`/`error`),供排查与重跑(**仅反映本轮**:每次运行重写) |
-| `pred_meta.json` | `<名>/<model>/` | 运行元信息(模型/后端/对话结构/计数/时间) |
+| `predictions.jsonl` | `<名>/<模型>/` | 每行一条成功描述,**原样 LlamaFactory 格式**(`messages` + `images`,多轮模板会完整保留各轮),可直接当新数据集复用;额外带 `id`/`latency` 便于追溯。**追加写,支持断点续跑**(已成功图片自动跳过;`--overwrite` 整份重跑) |
+| `failures.jsonl` | `<名>/<模型>/` | 每行一条失败记录(`id`/`image`/`error`),供排查与重跑(**仅反映本轮**:每次运行重写) |
+| `pred_meta.json` | `<名>/<模型>/` | 运行元信息(模型/后端/对话结构/计数/时间) |
 
 支持的图片扩展名:`.png/.jpg/.jpeg/.webp/.bmp/.gif/.tif/.tiff`(仅当前层,不递归)。
 
@@ -256,7 +257,7 @@ pred:
 | --- | --- |
 | `data` | 数据源路径、图片根目录、LlamaFactory 字段映射(对齐 `dataset_info.json`) |
 | `split` | `ratio` 或 `count`、`seed`(确定性)、`stratify_by`(分层抽样) |
-| `inference` | 后端、`base_url`、`model`、并发、重试、超时等 |
+| `inference` | `backend` 选后端;`openai:` 块(base_url/model/并发/重试/超时等)与 `mnn:` 块(config_path/image_max_side/max_tokens)各自独立 |
 | `eval` | `targets`(all/last)、`context`(rollout/gold):控制评测哪些轮、上下文来源 |
 | `scoring` | `scorer`(默认,可被 `--scorer` 覆盖)、`turn_scorers`(逐轮指定) |
 
@@ -274,25 +275,25 @@ data:
 
 ## 输出产物
 
-数据集级(各模型共享)落 `<workspace>/<数据集名>/`;模型级(run/score/eval 结果)落
-`<workspace>/<数据集名>/<inference.model>/` —— **不同模型对同一数据集互不覆盖**。
+数据集级(各模型共享)落 `<workspace>/<数据集名>/`;模型级(pred/score/eval 结果)落
+`<workspace>/<数据集名>/<模型名>/` —— **不同模型对同一数据集互不覆盖**。
 
 | 文件 | 位置 | 内容 |
 | --- | --- | --- |
-| `config.yaml` | `<数据集>/` | 该数据集的自包含配置(split 时从内置模板生成;run/score/eval 直接读它;CLI flag 写回这里) |
+| `config.yaml` | `<数据集>/` | 该数据集的自包含配置(split 时从内置模板生成;pred/score/eval 直接读它;CLI flag 写回这里) |
 | `train.json` / `test.json` / `val.json` | `<数据集>/` | 划分出的数据集,**均为原样 LlamaFactory 格式**(val 仅 `val>0` 时产出) |
 | `split_meta.json` | `<数据集>/` | 划分元信息(seed/比例/计数/源哈希/原始下标),用于复现与审计 |
-| `predictions.jsonl` | `<数据集>/<model>/` | 每行一条预测(id/**turn**/prediction/**images**/latency/error),`images` 为原图地址可追溯回原图人工核查;多轮下每样本多行,**追加写,支持断点续跑** |
-| `metrics.json` | `<数据集>/<model>/` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failed_samples`/`num_failed_targets`) |
-| `scored.jsonl` | `<数据集>/<model>/` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...);机器可读全量数据 |
-| `failures.md` | `<数据集>/<model>/` | **exact_match 未命中清单(人类可读)**:仅纳入 exact_match 评分错误的样本,按 `id` 分组列出**全部对话轮**(模型输出 vs 标准答案 + ✓/✗ + 原图地址),供人工核查。非 exact_match(如 token_f1)不计入 |
-| `summary.md` | `<数据集>/<model>/` | 人类可读摘要(含未命中样本/目标轮数) |
-| `run_meta.json` | `<数据集>/<model>/` | 运行元信息(模型/配置/时间/计数),用于复现 |
+| `predictions.jsonl` | `<数据集>/<模型>/` | 每行一条预测(id/**turn**/prediction/**images**/latency/error),`images` 为原图地址可追溯回原图人工核查;多轮下每样本多行,**追加写,支持断点续跑** |
+| `metrics.json` | `<数据集>/<模型>/` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failed_samples`/`num_failed_targets`) |
+| `scored.jsonl` | `<数据集>/<模型>/` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...);机器可读全量数据 |
+| `failures.md` | `<数据集>/<模型>/` | **exact_match 未命中清单(人类可读)**:仅纳入 exact_match 评分错误的样本,按 `id` 分组列出**全部对话轮**(模型输出 vs 标准答案 + ✓/✗ + 原图地址),供人工核查。非 exact_match(如 token_f1)不计入 |
+| `summary.md` | `<数据集>/<模型>/` | 人类可读摘要(含未命中样本/目标轮数) |
+| `run_meta.json` | `<数据集>/<模型>/` | 运行元信息(模型/配置/时间/计数),用于复现 |
 
-**多模型对比**:同一数据集换不同 `inference.model`(改 `config.yaml` 或 `--model`)重跑,结果各进
+**多模型对比**:同一数据集换不同模型(改 `config.yaml` 的 `inference.openai.model`、`--model`,或换 mnn 模型)重跑,结果各进
 `<数据集>/<模型>/`,可并列对比、互不覆盖。
 
-**断点续跑**:`run` 会跳过该模型目录 `predictions.jsonl` 中已成功的 id,只补缺失/失败的——大测试集中断后重跑无需从头。
+**断点续跑**:`pred --dataset` 会跳过该模型目录 `predictions.jsonl` 中已成功的 id,只补缺失/失败的——大测试集中断后重跑无需从头。
 
 ## 扩展评分器
 
@@ -328,5 +329,5 @@ src/eval_vlm/
 ├── workspace.py         # 工作目录模型:全局配置 + 数据集初始化/定位 + 模板渲染
 ├── templates/
 │   └── config.template.yaml       # 统一配置模板(所有命令共用;split/pred 首次运行渲染)
-└── cli.py               # config / split / run / score / eval / pred
+└── cli.py               # config / split / pred / score / eval
 ```

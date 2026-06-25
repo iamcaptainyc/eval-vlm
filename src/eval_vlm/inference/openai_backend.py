@@ -48,22 +48,22 @@ class OpenAIBackend(InferenceBackend):
         except ImportError as e:  # pragma: no cover
             raise ImportError("需要安装 openai: pip install openai") from e
 
-        ic = cfg.inference
-        api_key = os.environ.get(ic.api_key_env) or "EMPTY"
+        oc = cfg.inference.openai
+        api_key = os.environ.get(oc.api_key_env) or "EMPTY"
         self.client = OpenAI(
-            base_url=ic.base_url,
+            base_url=oc.base_url,
             api_key=api_key,
-            timeout=ic.request_timeout,
+            timeout=oc.request_timeout,
             max_retries=0,  # 重试由本类自己控制(带退避)
         )
 
     def _build_messages(
         self, context: list[Turn], images: list[str], sample_id: str
     ) -> list[dict[str, Any]]:
-        ic = self.cfg.inference
+        oc = self.cfg.inference.openai
         messages: list[dict[str, Any]] = []
-        if ic.system_prompt:
-            messages.append({"role": "system", "content": ic.system_prompt})
+        if oc.system_prompt:
+            messages.append({"role": "system", "content": oc.system_prompt})
 
         # 图片按出现顺序消费;<image> 占位符替换为图片块。
         img_queue = list(images)
@@ -85,7 +85,7 @@ class OpenAIBackend(InferenceBackend):
                     url = _resolve_image_url(img_queue.pop(0), self.cfg)
                     content_parts.append({
                         "type": "image_url",
-                        "image_url": {"url": url, "detail": ic.image_detail},
+                        "image_url": {"url": url, "detail": oc.image_detail},
                     })
             if not content_parts:
                 content_parts.append({"type": "text", "text": ""})
@@ -99,7 +99,7 @@ class OpenAIBackend(InferenceBackend):
         sample_id: str,
         expected: Optional[str] = None,
     ) -> Prediction:
-        ic = self.cfg.inference
+        oc = self.cfg.inference.openai
         start = time.time()
         last_err: Exception | None = None
         try:
@@ -107,25 +107,25 @@ class OpenAIBackend(InferenceBackend):
         except Exception as e:  # 构造阶段失败(如缺图)
             return Prediction(id=sample_id, error=f"build_messages: {e}")
 
-        for attempt in range(ic.max_retries + 1):
+        for attempt in range(oc.max_retries + 1):
             try:
                 resp = self.client.chat.completions.create(
-                    model=ic.model,
+                    model=oc.model,
                     messages=messages,
-                    max_tokens=ic.max_tokens,
-                    temperature=ic.temperature,
+                    max_tokens=oc.max_tokens,
+                    temperature=oc.temperature,
                 )
                 text = resp.choices[0].message.content or ""
                 return Prediction(
                     id=sample_id,
                     prediction=text,
                     latency=round(time.time() - start, 3),
-                    raw={"model": getattr(resp, "model", ic.model),
+                    raw={"model": getattr(resp, "model", oc.model),
                          "finish_reason": resp.choices[0].finish_reason},
                 )
             except Exception as e:  # noqa: BLE001 - 捕获所有以便重试/记录
                 last_err = e
-                if attempt < ic.max_retries:
+                if attempt < oc.max_retries:
                     time.sleep(min(2 ** attempt, 10))
         return Prediction(
             id=sample_id,

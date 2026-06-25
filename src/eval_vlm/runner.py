@@ -134,9 +134,9 @@ def run_inference(cfg: Config) -> dict:
 
     stats = {
         "run_name": cfg.run_name,
-        "model": cfg.inference.model,
+        "model": cfg.inference.result_name,
         "backend": cfg.inference.backend,
-        "base_url": cfg.inference.base_url,
+        "base_url": getattr(cfg.inference.active, "base_url", None),
         "eval_targets": cfg.eval.targets,
         "eval_context": cfg.eval.context,
         "test_size": len(samples),

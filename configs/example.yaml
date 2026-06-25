@@ -3,15 +3,16 @@
 # 实际使用走「工作目录模型」(见 README):
 #   eval-vlm config set workspace <dir>                      # 机器级,一次性
 #   eval-vlm split --dataset <源JSON> --train 0.95 --test 0.05  # 在 workspace 下建文件夹 + 生成同结构 config.yaml
-#   eval-vlm eval  --dataset <数据集名>                       # 一键 run + score
-# 所有命令(split/run/score/eval/pred)共用同一个内置模板
+#   eval-vlm eval  --dataset <数据集名>                       # 一键 预测 + score
+# 所有命令(split/pred/score/eval)共用同一个内置模板
 # (src/eval_vlm/templates/config.template.yaml)自动生成;每段都标了「谁用」,
 # 与当前命令无关的段保持默认即可(惰性、无副作用)。之后微调直接手改
 # <workspace>/<名>/config.yaml。本文件仅供查阅各字段。
 #
-# 产物按模型分目录:run/score/eval/pred 结果落 <数据集>/<inference.model>/,不同模型互不覆盖;
+# 产物按模型分目录:pred/score/eval 结果落 <数据集>/<模型名>/,不同模型互不覆盖
+# (openai/vllm/fake 取 inference.openai.model;mnn 取 inference.mnn.config_path 所在目录名);
 # split 产物(train/test/val)各模型共享,落数据集文件夹本身。
-# CLI 覆盖永久写回 config.yaml(用户参数优先):--base-url/--model/--scorer/--backend/--prompt 等。
+# CLI 覆盖永久写回 config.yaml(用户参数优先):--base-url/--model/--scorer/--backend/--mnn-config/--prompt 等。
 
 run_name: emotion_open11200_dataset_regen_v1            # 输出落到 <output_dir>/<run_name>/
 output_dir: outputs
@@ -47,7 +48,7 @@ data:
 # 数据划分(step 1: split)
 # 把源 JSON 纯分割成 train / test(+可选 val),三份都是原样 LlamaFactory 格式:
 #   train.json -> 直接拿去 LlamaFactory 训练
-#   test.json  -> 本项目评测(run/score 按 LlamaFactory 格式读取)
+#   test.json  -> 本项目评测(pred --dataset/score 按 LlamaFactory 格式读取)
 #   val.json   -> 仅当 val > 0 时产出
 # ---------------------------------------------------------------------------
 split:
@@ -64,26 +65,31 @@ split:
   test_out: null
 
 # ---------------------------------------------------------------------------
-# 推理后端(step 2: run)
+# 推理后端(step 2: pred / eval)
+# 顶层只选 backend;每个后端参数归入各自子块,互不冲突、不会「设了却不生效」。
+#   backend=openai/vllm/fake -> 读 openai 块,产物子目录名取 openai.model
+#   backend=mnn              -> 读 mnn 块,产物子目录名取 mnn.config_path 所在目录名
 # ---------------------------------------------------------------------------
 inference:
   backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显, 不联网)
-  base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(--base-url 永久写回;mnn 后端忽略)
-  model: trained-vlm          # 部署时注册的模型名(--model 永久写回;也用作产物子目录名 <数据集>/<model>/;mnn 后端忽略)
-  api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填;mnn 后端忽略)
-  system_prompt: null         # 可选系统提示
-  max_concurrency: 8          # 并发请求数(mnn 后端有状态,自动降为 1 串行)
-  max_tokens: 512             # 生成上限(mnn 后端作为 response 的 max_new_tokens)
-  temperature: 0.0
-  request_timeout: 120        # 单请求超时(秒)
-  max_retries: 3              # 失败重试次数(指数退避)
-  image_detail: auto          # OpenAI image_url 的 detail 字段: auto|low|high(mnn 后端忽略)
-  # backend=mnn 专用:训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
-  # 仅 mnn 后端使用;可用 `eval-vlm pred --mnn-config <config.json>` 临时覆盖。
-  mnn_config_path: null       # 例: /root/autodl-tmp/qwen2-vl-mnn/config.json
+  openai:                     # openai/vllm 后端(fake 自检也走此块)
+    base_url: http://localhost:8000/v1   # vLLM / SGLang / LlamaFactory api 部署的服务地址(--base-url 永久写回)
+    model: trained-vlm        # 部署时注册的模型名(--model 永久写回;也用作产物子目录名 <数据集>/<model>/)
+    api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
+    system_prompt: null       # 可选系统提示
+    max_concurrency: 8        # 并发请求数
+    max_tokens: 512           # 生成上限
+    temperature: 0.0
+    request_timeout: 120      # 单请求超时(秒)
+    max_retries: 3            # 失败重试次数(指数退避)
+    image_detail: auto        # OpenAI image_url 的 detail 字段: auto|low|high
+  mnn:                        # mnn 本地后端(只列其真正会用到的项)
+    config_path: null         # 训练后转 mnn 的模型目录里 config.json 路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
+    image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native segfault;设 0 关闭)(--mnn-image-max-side 永久写回)
+    max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
 
 # ---------------------------------------------------------------------------
-# 多轮评测策略(step 2/3 共用)
+# 多轮评测策略(pred --dataset / eval / score 共用)
 # 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
 # ---------------------------------------------------------------------------
 eval:
@@ -100,7 +106,7 @@ scoring:
   # turn_scorers: [token_f1, exact_match]
 
 # ---------------------------------------------------------------------------
-# 无标注图片的对话怎么组织(仅 pred:eval-vlm pred --datadir <图片夹>;run/score 忽略)
+# 无标注图片的对话怎么组织(仅 pred --datadir:eval-vlm pred --datadir <图片夹>;其它命令忽略)
 # 单轮简写:只设 prompt(不含 <image> 时自动前置);或取消注释 template 写多轮(覆盖 prompt)。
 # 规则:全部轮里 <image> 恰好 1 次且在 user 轮;最后一轮必须是 user。
 # ---------------------------------------------------------------------------

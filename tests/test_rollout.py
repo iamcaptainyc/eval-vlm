@@ -26,7 +26,7 @@ def _install_capturing_backend(monkeypatch):
 def test_rollout_uses_model_own_first_turn(tworound_config, monkeypatch):
     cfg = tworound_config
     cfg.eval.context = "rollout"
-    cfg.inference.max_concurrency = 1   # 串行,断言更稳
+    cfg.inference.openai.max_concurrency = 1   # 串行,断言更稳
 
     src = json.loads(cfg.source_path.read_text(encoding="utf-8"))
     gold_descriptions = {rec["messages"][1]["content"] for rec in src}
@@ -49,7 +49,7 @@ def test_rollout_uses_model_own_first_turn(tworound_config, monkeypatch):
 def test_gold_context_uses_dataset_first_turn(tworound_config, monkeypatch):
     cfg = tworound_config
     cfg.eval.context = "gold"
-    cfg.inference.max_concurrency = 1
+    cfg.inference.openai.max_concurrency = 1
 
     src = json.loads(cfg.source_path.read_text(encoding="utf-8"))
     gold_descriptions = {rec["messages"][1]["content"] for rec in src}

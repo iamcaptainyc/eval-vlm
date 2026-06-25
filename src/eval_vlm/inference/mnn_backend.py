@@ -69,10 +69,10 @@ class MNNBackend(InferenceBackend):
                 "-DMNN_BUILD_LLM_OMNI=ON),或 `pip install MNN`。"
             ) from e
 
-        config_path = cfg.inference.mnn_config_path
+        config_path = cfg.inference.mnn.config_path
         if not config_path:
             raise ValueError(
-                "backend=mnn 需要 inference.mnn_config_path(转换产物目录里的 "
+                "backend=mnn 需要 inference.mnn.config_path(转换产物目录里的 "
                 "config.json 路径);请在数据集 config.yaml 设置,或用 "
                 "`eval-vlm pred --mnn-config <config.json>` 临时指定。"
             )
@@ -94,7 +94,7 @@ class MNNBackend(InferenceBackend):
         2. 超大图保护:分辨率过高(如 21MB PNG)会撑爆视觉编码器原生内存 -> segfault。
            策略:原生格式先 imread 读出 Var,再查 shape;超限则回退 Pillow 缩放+重读。
         """
-        max_side = self.cfg.inference.mnn_image_max_side
+        max_side = self.cfg.inference.mnn.image_max_side
 
         if img_path.suffix.lower() in _IMREAD_NATIVE_OK:
             var = self._cv.imread(str(img_path))
@@ -239,7 +239,7 @@ class MNNBackend(InferenceBackend):
         sample_id: str,
         expected: Optional[str] = None,
     ) -> Prediction:
-        ic = self.cfg.inference
+        mc = self.cfg.inference.mnn
         start = time.time()
         try:
             if len(images) != 1:
@@ -273,7 +273,7 @@ class MNNBackend(InferenceBackend):
                 except Exception:  # noqa: BLE001 - reset 不可用则依赖 reuse_kv=false 默认
                     pass
                 # stream=False -> 返回完整生成文本;自适应兼容新旧绑定签名。
-                text_out = self._respond(prompt, ic.max_tokens)
+                text_out = self._respond(prompt, mc.max_tokens)
                 raw = self._collect_stats()
                 return Prediction(
                     id=sample_id,

@@ -80,8 +80,8 @@ def _mnn_cfg(tmp_path) -> Config:
     (imgs / "a.jpg").write_bytes(b"")        # cv.imread 被 mock,空文件足够通过 exists()
     cfg = Config()
     cfg.inference.backend = "mnn"
-    cfg.inference.mnn_config_path = str(tmp_path / "model" / "config.json")
-    cfg.inference.max_tokens = 128
+    cfg.inference.mnn.config_path = str(tmp_path / "model" / "config.json")
+    cfg.inference.mnn.max_tokens = 128
     cfg.data.media_root = str(imgs)
     return cfg
 
@@ -266,10 +266,10 @@ def test_mnn_missing_config_path_raises(fake_mnn, tmp_path):
     from eval_vlm.inference.mnn_backend import MNNBackend
 
     cfg = _mnn_cfg(tmp_path)
-    cfg.inference.mnn_config_path = None
+    cfg.inference.mnn.config_path = None
     with pytest.raises(ValueError) as e:
         MNNBackend(cfg)
-    assert "mnn_config_path" in str(e.value)
+    assert "config_path" in str(e.value)
 
 
 def test_mnn_missing_image_records_error(fake_mnn, tmp_path):
@@ -349,7 +349,7 @@ def test_parser_pred_mnn_flags():
 
     parser = build_parser()
     args = parser.parse_args([
-        "pred", "-d", "imgs", "--backend", "mnn",
+        "pred", "--datadir", "imgs", "--backend", "mnn",
         "--mnn-config", "/m/config.json",
     ])
     assert args.func is _cmd_pred
@@ -357,5 +357,5 @@ def test_parser_pred_mnn_flags():
     assert args.mnn_config == "/m/config.json"
 
     # vllm 别名也能解析
-    args2 = parser.parse_args(["pred", "-d", "imgs", "--backend", "vllm"])
+    args2 = parser.parse_args(["pred", "--datadir", "imgs", "--backend", "vllm"])
     assert args2.backend == "vllm" and args2.mnn_config is None

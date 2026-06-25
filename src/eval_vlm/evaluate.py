@@ -111,7 +111,7 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None) -> dict:
 
     metrics = {
         "run_name": cfg.run_name,
-        "model": cfg.inference.model,
+        "model": cfg.inference.result_name,
         "scored_at": datetime.now(timezone.utc).isoformat(),
         "eval_targets": cfg.eval.targets,
         "eval_context": cfg.eval.context,

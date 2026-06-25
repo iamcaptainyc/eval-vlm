@@ -92,11 +92,12 @@ def test_parser_pred_prompt_default_none_and_flags():
     parser = build_parser()
     args = parser.parse_args(["pred", "--datadir", "imgs"])
     assert args.func is _cmd_pred
+    assert args.dataset is None
     assert args.prompt is None and args.system_prompt is None
     assert args.backend is None and args.force is False and args.overwrite is False
 
     args2 = parser.parse_args([
-        "pred", "-d", "imgs", "--prompt", "P", "--system-prompt", "S",
+        "pred", "--datadir", "imgs", "--prompt", "P", "--system-prompt", "S",
         "--backend", "fake", "--force", "--overwrite",
         "--base-url", "http://h/v1", "--model", "m",
     ])
@@ -116,9 +117,9 @@ def _run_pred(ws: Path, imgs: Path, **kw):
     """构造 argparse.Namespace 直接调 _cmd_pred(默认 fake 后端)。"""
     import argparse
     ns = argparse.Namespace(
-        datadir=str(imgs), name=None, prompt=None, system_prompt=None,
+        datadir=str(imgs), dataset=None, name=None, prompt=None, system_prompt=None,
         backend="fake", force=False, overwrite=False, mnn_config=None,
-        base_url=None, model=None, workspace=str(ws),
+        mnn_image_max_side=None, base_url=None, model=None, workspace=str(ws),
     )
     for k, v in kw.items():
         setattr(ns, k, v)
@@ -272,5 +273,39 @@ def test_pred_persists_model_into_config(temp_global):
     ws, imgs = temp_global
     _run_pred(ws, imgs, model="vlm_v2")
     cfg_text = (ws / imgs.name / "config.yaml").read_text(encoding="utf-8")
-    assert "vlm_v2" in cfg_text                             # 写回 inference.model
+    assert "vlm_v2" in cfg_text                             # 写回 inference.openai.model
     assert (ws / imgs.name / "vlm_v2" / "predictions.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
+# pred --dataset:对已有数据集 test.json 推理(取代旧 run),不评分
+# ---------------------------------------------------------------------------
+def test_pred_dataset_runs_inference_without_scoring(tmp_path, monkeypatch):
+    """pred --dataset 对数据集 test.json 推理,产出 predictions.jsonl 但不产 metrics.json。"""
+    import argparse
+
+    from eval_vlm import workspace
+    from eval_vlm.cli import _cmd_pred
+    from eval_vlm.config import load_dataset_config
+    from eval_vlm.data.splitter import split_dataset
+
+    fixtures = Path(__file__).parent / "fixtures"
+    monkeypatch.setenv("EVAL_VLM_CONFIG", str(tmp_path / "g.yaml"))
+    ws = tmp_path / "ws"
+    folder = workspace.init_dataset(
+        str(fixtures / "llamafactory_demo.json"), ws,
+        media_root=str(fixtures), split_overrides={"train": 0.6, "test": 0.4},
+    )
+    workspace.set_dataset_value(folder, "inference.backend", "fake")
+    split_dataset(load_dataset_config(folder))
+
+    ns = argparse.Namespace(
+        dataset="llamafactory_demo", datadir=None, workspace=str(ws),
+        base_url=None, model=None, backend=None, mnn_config=None,
+        mnn_image_max_side=None, prompt=None, system_prompt=None,
+    )
+    assert _cmd_pred(ns) == 0
+
+    run_dir = folder / "trained-vlm"                        # fake -> openai.model 默认
+    assert (run_dir / "predictions.jsonl").exists()
+    assert not (run_dir / "metrics.json").exists()          # pred 不评分

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from eval_vlm import workspace
-from eval_vlm.cli import build_parser, _cmd_split, _cmd_run, _cmd_score, _cmd_eval
+from eval_vlm.cli import build_parser, _cmd_split, _cmd_pred, _cmd_score, _cmd_eval
 from eval_vlm.config import load_dataset_config
 from eval_vlm.data.splitter import split_dataset
 
@@ -59,17 +59,27 @@ def test_parser_eval_routes_and_overrides():
     assert args.scorer == "token_f1"
 
 
-def test_parser_run_and_score_require_dataset():
+def test_parser_pred_and_score_require_target():
     parser = build_parser()
-    assert parser.parse_args(["run", "--dataset", "x"]).func is _cmd_run
+    # pred 取代旧 run:--dataset 走数据集预测
+    assert parser.parse_args(["pred", "--dataset", "x"]).func is _cmd_pred
     assert parser.parse_args(["score", "--dataset", "x"]).func is _cmd_score
+
+
+def test_pred_requires_exactly_one_target():
+    """pred 的 --dataset / --datadir 互斥且必填其一。"""
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["pred"])                                   # 都不给
+    with pytest.raises(SystemExit):
+        parser.parse_args(["pred", "--dataset", "x", "--datadir", "y"])  # 同时给
 
 
 def test_config_flag_removed():
     """旧的 --config 已移除:传入应报错退出。"""
     parser = build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args(["run", "--config", "x.yaml"])
+        parser.parse_args(["pred", "--dataset", "x", "--config", "x.yaml"])
 
 
 def test_eval_cli_persists_model_and_uses_model_dir(tmp_path, monkeypatch):
@@ -92,4 +102,4 @@ def test_eval_cli_persists_model_and_uses_model_dir(tmp_path, monkeypatch):
     assert (folder / "cli_model" / "predictions.jsonl").exists()
     assert (folder / "cli_model" / "metrics.json").exists()
     # 重新加载确认持久化生效
-    assert load_dataset_config(folder).inference.model == "cli_model"
+    assert load_dataset_config(folder).inference.openai.model == "cli_model"

@@ -209,9 +209,12 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
             f"(支持扩展名: {', '.join(sorted(IMAGE_EXTS))})"
         )
 
-    # system_prompt 运行时映射到 inference,复用后端既有系统消息处理。
+    # system_prompt 运行时映射到当前后端块,复用后端既有系统消息处理
+    # (后端块若不支持系统提示——如 mnn——则跳过,不产生「设了不生效」的死配置)。
     if cfg.pred.system_prompt is not None:
-        cfg.inference.system_prompt = cfg.pred.system_prompt
+        active = cfg.inference.active
+        if hasattr(active, "system_prompt"):
+            active.system_prompt = cfg.pred.system_prompt
     # 对话上下文每张图通用,循环外构造一次(并发线程间只读共享)。
     context = build_context(cfg.pred, prompt_override=prompt)
 
@@ -319,9 +322,9 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
 
     stats = {
         "datadir": str(datadir),
-        "model": cfg.inference.model,
+        "model": cfg.inference.result_name,
         "backend": cfg.inference.backend,
-        "base_url": cfg.inference.base_url,
+        "base_url": getattr(cfg.inference.active, "base_url", None),
         # 对话结构:单轮记 prompt;多轮记轮数(prompt 为 null)。便于复现与排查。
         "prompt": None if cfg.pred.template else (
             prompt if prompt is not None else cfg.pred.prompt),

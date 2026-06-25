@@ -60,10 +60,13 @@ _KEY_SPECS: tuple[tuple[str, str, Any, str], ...] = (
 _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
     ("data.mapping.*",
      "字段映射(messages/images/role/content 等),对齐你的数据集格式"),
-    ("inference.backend / base_url / model / api_key_env",
-     "推理后端、部署地址、模型名、api key 环境变量(--base-url/--model/--backend 会永久写回本文件)"),
-    ("inference.max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail / system_prompt",
-     "推理参数"),
+    ("inference.backend",
+     "推理后端 openai/vllm/mnn/fake;切换后只读对应块设置(--backend 永久写回)"),
+    ("inference.openai.* (base_url / model / api_key_env / system_prompt / "
+     "max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail)",
+     "openai/vllm 后端设置(--base-url/--model 永久写回 openai.base_url/model)"),
+    ("inference.mnn.* (config_path / image_max_side / max_tokens)",
+     "mnn 后端设置(--mnn-config/--mnn-image-max-side 永久写回);产物目录名取 config_path 所在目录名"),
     ("eval.targets / eval.context",
      "评测哪些 assistant 轮(all|last)、用什么上下文(rollout|gold)"),
     ("scoring.scorer / scoring.turn_scorers",
@@ -164,7 +167,7 @@ def describe_settable_keys() -> str:
         out.append(f"  {name}")
         out.append(f"      {desc}")
     out.append("")
-    out.append("提示:split 比例命令行参数 > 全局 split.* > 内置默认;run/score/eval/pred 的 "
+    out.append("提示:split 比例命令行参数 > 全局 split.* > 内置默认;pred/score/eval 的 "
                "--base-url/--model/--scorer 等会永久写回该数据集 config.yaml(用户参数优先且持久化)。")
     return "\n".join(out)
 
@@ -409,17 +412,66 @@ def init_pred_config(
     return config_path
 
 
-# 可由 CLI 临时参数永久写回数据集 config.yaml 的键(用户参数优先于模板/文件原值)。
-# (CLI flag -> config.yaml 的点号键)
-_OVERRIDE_KEYS: dict[str, str] = {
-    "base_url": "inference.base_url",
-    "model": "inference.model",
-    "backend": "inference.backend",
-    "mnn_config_path": "inference.mnn_config_path",
-    "scorer": "scoring.scorer",
-    "pred_prompt": "pred.prompt",
-    "pred_system_prompt": "pred.system_prompt",
-}
+def _set_dotted_value(text: str, dotted_key: str, value: Any) -> str:
+    """把任意层级点号键(如 inference.openai.base_url)的值写回 YAML,保留行尾注释。
+
+    依赖本程序生成配置的固定缩进(每层 2 空格):逐层定位 `parent:` 块头并收窄
+    搜索范围,最后在最内层块里整行替换叶子键的值。中途缺失的块/键会自动按缩进插入,
+    因此即便用户精简过 config.yaml(删掉某段)也能补齐。单层键退化为顶层替换。
+    """
+    parts = dotted_key.split(".")
+    if len(parts) == 1:
+        return _update_yaml_value(text, parts[0], value)
+
+    literal = _yaml_scalar(value)
+    lines = text.splitlines(keepends=True)
+    start, end, indent = 0, len(lines), 0
+
+    # 逐层下钻定位父块,收窄 [start, end) 到该块的行范围。
+    for depth, part in enumerate(parts[:-1]):
+        header_re = re.compile(rf"^{' ' * indent}{re.escape(part)}:[ \t]*(#.*)?\r?\n?$")
+        idx = next((i for i in range(start, end) if header_re.match(lines[i])), None)
+        if idx is None:
+            # 该层块不存在:从当前缩进起,把「剩余各层块头 + 叶子」整段补进**当前父块末尾**
+            # (end:顶层块缺失时 end=len(lines) 即文末;子块被手删时 end=父块尾,补回父块内)。
+            remaining = parts[depth:]
+            tail_lines = [
+                f"{' ' * (indent + 2 * k)}{seg}:\n" for k, seg in enumerate(remaining[:-1])
+            ]
+            tail_lines.append(
+                f"{' ' * (indent + 2 * (len(remaining) - 1))}{remaining[-1]}: {literal}\n"
+            )
+            # 插入点前一行若无换行结尾(文件末尾无换行),补一个,避免与新块连成一行。
+            if end > 0 and lines[end - 1] != "" and not lines[end - 1].endswith("\n"):
+                lines[end - 1] = lines[end - 1] + "\n"
+            lines[end:end] = tail_lines
+            return "".join(lines)
+        # 块体 = 紧随块头、缩进比块头更深的连续行(空行跳过)。
+        j = idx + 1
+        while j < end:
+            ln = lines[j]
+            if ln.strip() == "":
+                j += 1
+                continue
+            cur_indent = len(ln) - len(ln.lstrip(" "))
+            if cur_indent <= indent:
+                break
+            j += 1
+        start, end, indent = idx + 1, j, indent + 2
+
+    # 在最内层块里替换(或插入)叶子键。
+    child = parts[-1]
+    child_re = re.compile(
+        rf"^({' ' * indent}){re.escape(child)}:[ \t]*([^#\n\r]*?)([ \t]*#[^\n\r]*)?(\r?\n?)$"
+    )
+    for i in range(start, end):
+        m = child_re.match(lines[i])
+        if m:
+            comment, eol = m.group(3) or "", m.group(4) or "\n"
+            lines[i] = f"{m.group(1)}{child}: {literal}{comment}{eol}"
+            return "".join(lines)
+    lines.insert(end, f"{' ' * indent}{child}: {literal}\n")
+    return "".join(lines)
 
 
 def set_dataset_value(folder: Path, dotted_key: str, value: Any) -> Path:
@@ -427,17 +479,13 @@ def set_dataset_value(folder: Path, dotted_key: str, value: Any) -> Path:
 
     用于「用户在命令行显式提供的设置(如 --model/--base-url)应永久生效」:
     写回后,该数据集的后续命令都读到新值,实现「用户参数优先且持久化」。
-    支持点号嵌套键(如 inference.model / scoring.scorer / pred.prompt)与顶层键。
-    block/子键缺失时会自动插入(见 _set_nested_value)。
+    支持任意层级点号嵌套键(如 inference.openai.model / inference.mnn.config_path /
+    scoring.scorer)与顶层键。块/子键缺失时会自动插入(见 _set_dotted_value)。
     """
     config_path = Path(folder) / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"数据集文件夹缺少 config.yaml: {config_path}")
     text = config_path.read_text(encoding="utf-8")
-    if "." in dotted_key:
-        parent, child = dotted_key.split(".", 1)
-        text = _set_nested_value(text, parent, child, value)
-    else:
-        text = _update_yaml_value(text, dotted_key, value)
+    text = _set_dotted_value(text, dotted_key, value)
     config_path.write_text(text, encoding="utf-8")
     return config_path
