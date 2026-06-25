@@ -255,6 +255,7 @@ def _cmd_pred(args: argparse.Namespace) -> int:
                            overwrite=getattr(args, "overwrite", False))
     print(f"[pred] 完成 {stats['newly_completed']} 张描述,失败 {stats['errors']} 张,"
           f"跳过(已完成) {stats['skipped_already_done']} 张 -> {stats['predictions_path']}")
+    print(f"[pred] 人类可读视图 -> {cfg.run_dir / 'predictions.txt'}")
     if stats["errors"]:
         print(f"[pred] 注意:有 {stats['errors']} 张失败(已记录到 failures.jsonl,可重跑补齐)。")
     return 0

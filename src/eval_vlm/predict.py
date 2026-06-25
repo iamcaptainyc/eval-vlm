@@ -143,6 +143,52 @@ def _to_record(image_name: str, context: list[Turn], pred: Prediction) -> dict:
     }
 
 
+def _render_txt_block(rec: dict) -> str:
+    """把一条 LlamaFactory 记录渲染成人类可读文本块(predictions.txt 用)。
+
+        【图像名】xxx.jpg
+        【对话】:
+            user: ...
+            assistant: ...
+
+    <image> 占位符对人类阅读是噪音(图片名已在标题里),去掉只留提问文本。
+    """
+    lines = [f"【图像名】{rec.get('id', '')}", "【对话】:"]
+    for m in rec.get("messages", []):
+        content = str(m.get("content", "")).replace("<image>", "").strip()
+        lines.append(f"\t{m.get('role', '')}: {content}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _rebuild_txt_from_jsonl(jsonl_path: Path, txt_path: Path) -> None:
+    """据 predictions.jsonl 整份重建人类可读的 predictions.txt(权威视图)。
+
+    txt 是 jsonl 的纯派生视图:每次跑完按最终 jsonl 重渲染一次,保证两者一致
+    (覆盖续跑、--overwrite、以及本特性之前已有的 jsonl)。jsonl 不在则不生成。
+    """
+    if not jsonl_path.exists():
+        return
+    blocks: list[str] = []
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("error") is None and "id" in rec:
+                blocks.append(_render_txt_block(rec))
+    with txt_path.open("w", encoding="utf-8") as tf:
+        tf.write("".join(blocks))
+        tf.flush()
+        try:
+            os.fsync(tf.fileno())
+        except OSError:
+            pass
+
+
 def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                    overwrite: bool = False) -> dict:
     """遍历 datadir 内所有图片,按 cfg.pred 组织对话调用 VLM 描述并落盘。返回统计。
@@ -173,6 +219,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
     out_dir.mkdir(parents=True, exist_ok=True)
     pred_path = cfg.predictions_path
     fail_path = out_dir / "failures.jsonl"
+    txt_path = out_dir / "predictions.txt"      # jsonl 的人类可读视图
 
     # overwrite:无视已有结果整份重跑;否则断点续跑跳过已成功项。
     done = set() if overwrite else _done_images(pred_path)
@@ -213,18 +260,27 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
             except OSError:                       # 某些文件系统不支持 fsync,flush 已够进程级崩溃
                 pass
 
-        def _record(pred: Prediction, ok_fh, fail_fh) -> None:
+        def _record(pred: Prediction, ok_fh, fail_fh, txt_fh) -> None:
             nonlocal n_ok, n_err
             if pred.error:
                 n_err += 1
                 _append(fail_fh, {"id": pred.id, "image": pred.id, "error": pred.error})
             else:
                 n_ok += 1
-                _append(ok_fh, _to_record(pred.id, context, pred))
+                rec = _to_record(pred.id, context, pred)
+                _append(ok_fh, rec)
+                # 同步写人类可读视图(崩溃也保留本轮已生成的);跑完再整份重建保证一致。
+                txt_fh.write(_render_txt_block(rec))
+                txt_fh.flush()
+                try:
+                    os.fsync(txt_fh.fileno())
+                except OSError:
+                    pass
 
         # predictions:续跑追加写(安全),overwrite 时截断重写;failures 每次重写(只反映本轮未完成项)。
         with pred_path.open("w" if overwrite else "a", encoding="utf-8") as ok_fh, \
-                fail_path.open("w", encoding="utf-8") as fail_fh:
+                fail_path.open("w", encoding="utf-8") as fail_fh, \
+                txt_path.open("w" if overwrite else "a", encoding="utf-8") as txt_fh:
             try:
                 if max_workers == 1:
                     # 串行后端(如 MNN):同一线程「算一条 -> 立即写盘」,不经线程池。
@@ -235,7 +291,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                     pbar = tqdm(todo, total=len(todo), desc="describe", unit="image")
                     for p in pbar:
                         pbar.set_postfix_str(p.name)   # 崩溃时进度条停留的就是肇事图片
-                        _record(_describe_one(backend, p.name, context), ok_fh, fail_fh)
+                        _record(_describe_one(backend, p.name, context), ok_fh, fail_fh, txt_fh)
                 else:
                     # 线程安全后端:并发推理,每条完成即写盘。
                     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -246,7 +302,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                         try:
                             for fut in tqdm(as_completed(futures), total=len(futures),
                                             desc="describe", unit="image"):
-                                _record(fut.result(), ok_fh, fail_fh)
+                                _record(fut.result(), ok_fh, fail_fh, txt_fh)
                         except KeyboardInterrupt:
                             # 取消尚未开始的任务,避免 shutdown 把整队列跑完却不写盘。
                             for fut in futures:
@@ -257,6 +313,9 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                 print(f"\n[pred] 已中断:本轮成功 {n_ok} 张、失败 {n_err} 张均已落盘 "
                       f"-> {pred_path};重跑同一命令即可断点续跑补齐剩余。", flush=True)
     backend.close()
+    # txt 是 jsonl 的人类可读视图:据最终 jsonl 整份重建,保证两者完全一致
+    # (覆盖续跑累积、--overwrite、以及本特性之前已有的 jsonl)。
+    _rebuild_txt_from_jsonl(pred_path, txt_path)
 
     stats = {
         "datadir": str(datadir),

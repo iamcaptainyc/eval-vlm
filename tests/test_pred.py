@@ -209,6 +209,35 @@ def test_pred_record_roundtrips_as_llamafactory(temp_global):
     assert all(s.images and any("<image>" in t.content for t in s.turns) for s in samples)
 
 
+def test_pred_writes_human_readable_txt(temp_global):
+    """除 predictions.jsonl 外,生成人类可读的 predictions.txt:每图一段
+    【图像名】+【对话】(user/assistant 缩进,<image> 占位符去掉)。"""
+    ws, imgs = temp_global
+    _run_pred(ws, imgs)
+    out = _pred_out(ws, imgs)
+    txt = (out / "predictions.txt").read_text(encoding="utf-8")
+
+    # 3 张图 -> 3 个【图像名】块
+    assert txt.count("【图像名】") == 3
+    assert "【对话】:" in txt
+    # 文件名出现在标题里
+    assert "【图像名】a.jpg" in txt
+    # user/assistant 轮均渲染,且 <image> 占位符被去掉(不污染阅读)
+    assert "\tuser:" in txt and "\tassistant:" in txt
+    assert "<image>" not in txt
+
+
+def test_pred_txt_stays_consistent_on_resume(temp_global):
+    """续跑时 predictions.txt 仍据最终 jsonl 整份重建,条目数与 jsonl 一致(不重复)。"""
+    ws, imgs = temp_global
+    _run_pred(ws, imgs)
+    _run_pred(ws, imgs)                                     # 再跑(全部已完成 -> 跳过)
+    out = _pred_out(ws, imgs)
+    n_jsonl = len((out / "predictions.jsonl").read_text(encoding="utf-8").splitlines())
+    n_txt = (out / "predictions.txt").read_text(encoding="utf-8").count("【图像名】")
+    assert n_jsonl == n_txt == 3
+
+
 def test_pred_resume_skips_done(temp_global):
     """断点续跑:已成功的图片再次运行被跳过(不重复追加)。"""
     ws, imgs = temp_global
