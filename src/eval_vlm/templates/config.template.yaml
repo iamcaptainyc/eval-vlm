@@ -91,18 +91,25 @@ inference:
     config_path: null         # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
     image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native OOM/segfault;设 0 关闭)(--mnn-image-max-side 永久写回)
     max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
-    # 防「满屏换行」退化:小模型(如 0.8B)纯贪心解码遇到「没把握」的图会陷入 \n\n\n… 复读到 max_tokens。
-    # 默认改用 MNN penalty 采样器:按重复惩罚压低已出现 token(含换行)的 logits,再贪心选词
-    # (输出仍确定、便于评测复现),从而打断复读。这些项加载后经 set_config 下发给 pymnn,键名对齐 MNN llmconfig。
-    sampler_type: penalty     # 采样器:penalty=按惩罚改分后再选词。设为 '' 则完全不下发、沿用模型 config.json 自带采样
-    penalty_sampler: greedy   # penalty 改分后的选词方式:greedy=确定;temperature=带随机
-    repetition_penalty: 1.1   # >1 惩罚已出现 token,<=1 关闭;复读仍严重可调到 1.2~1.3
-    presence_penalty: 0.0     # >0 对出现过的 token 一次性惩罚(通常留 0)
-    frequency_penalty: 0.0    # >0 按出现频次惩罚(通常留 0)
-    penalty_window: 0         # 计惩罚只看最近 N 个 token;0=整段历史
-    temperature: null         # 仅带随机的采样器下生效;null=用 MNN 默认(1.0)
-    top_k: null               # null=用 MNN 默认(40),仅随机采样时有意义
-    top_p: null               # null=用 MNN 默认(0.9)
+    # 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线,无需碰 sampler_type)。
+    # 小模型(如 0.8B)纯贪心解码遇到「没把握」的图会陷入 \n\n\n… 复读到 max_tokens;
+    # 默认「仅开重复惩罚 1.1 + 确定性选词」即可止住复读且结果可复现。规则:
+    #   penalty(下面任一惩罚>0)→ 加重复惩罚步;top_k/top_p 设值 → 加对应截断步;
+    #   temperature>0 → 随机采样(不可复现);temperature 留空/<=0 → argmax(确定、可复现)。
+    repetition_penalty: 1.1   # >1 惩罚已出现 token(含换行);<=1 关闭。复读顽固可调 1.3~1.5
+    frequency_penalty: 0.0    # >0 按出现次数累加惩罚(专治同一符号刷屏);0 关闭
+    presence_penalty: 0.0     # >0 对出现过的 token 一次性惩罚;0 关闭
+    penalty_window: 0         # 惩罚只回看最近 N 个 token;0=整段历史
+    temperature: null         # null/<=0=确定性 argmax(可复现);>0=温度随机采样
+    top_k: null               # 设值启用 top-k 截断;仅随机采样(temperature>0)有意义
+    top_p: null               # 设值启用 nucleus 截断;仅随机采样(temperature>0)有意义
+    # 想要标准的 topK+topP 生成式采样(自然多样),取消下面注释即可(结果每次不同):
+    # temperature: 0.7
+    # top_k: 40
+    # top_p: 0.9
+    # 高级逃生口:sampler_config 非空则原样下发 MNN 原生键(sampler_type/mixed_samplers…)、跳过上面翻译;
+    #   设为 {} 则一概不下发、沿用模型 config.json 自带采样。
+    sampler_config: null
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)

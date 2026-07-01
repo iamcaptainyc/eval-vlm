@@ -201,22 +201,105 @@ eval-vlm pred --datadir ./photos --backend mnn
 仅支持**单图单轮**(`pred --datadir` 的默认场景)。mnn 块只含它真正会用到的设置
 (`config_path` / `image_max_side` / `max_tokens` + 下面的采样项),没有 `base_url`/`model`/并发等无意义字段。
 
-**防「满屏换行」退化(采样设置)**:小模型(如 0.8B)用纯贪心解码时,遇到「没把握」的图常陷入
-`\n\n\n…` 退化循环,整屏换行直到撞 `max_tokens`。MNN 后端**默认改用 penalty 采样器**:先按重复惩罚
-压低已出现 token(含换行)的 logits,再**贪心选词**——输出仍是**确定性**的(便于评测复现),但能打断
-复读。相关项(经 `set_config` 在加载后下发给 pymnn,键名对齐 MNN `llmconfig`):
+##### 采样设置:防「满屏换行」退化 + 采样参数详解
+
+小模型(如 0.8B)用纯贪心解码时,遇到「没把握」的图常陷入 `\n\n\n…` 退化循环,整屏换行直到撞
+`max_tokens`。MNN 后端**默认「开重复惩罚 + 确定性选词」**:选词前按重复惩罚压低已出现 token(含换行)
+的 logits,再取 argmax——输出仍是**确定性**的(便于评测复现),但能打断复读。
+
+**接口是 value-gated 的**:你只按值开关下面的旋钮,后端自动翻译成 MNN 的采样管线(`set_config` 下发),
+**无需关心 MNN 的 `sampler_type` / `mixed_samplers`**(这些 MNN 内部机制由后端处理;pymnn 只暴露通用
+`set_config(dict)`,采样语义由 C++ 引擎解释)。翻译规则一句话:
+
+- 任一惩罚开(`repetition_penalty>1` / `frequency_penalty>0` / `presence_penalty>0`)→ 加重复惩罚步;
+- `top_k` / `top_p` 设值 → 加对应截断步;
+- `temperature>0` → 末步**随机采样**(不可复现);`temperature` 留空/`<=0` → 末步 **argmax**(确定、可复现)。
 
 | `inference.mnn` 项 | 默认 | 说明 |
 | --- | --- | --- |
-| `sampler_type` | `penalty` | 采样器类型;`penalty`=按惩罚改分后再选词。设为 `""` 则**完全不下发**,沿用模型 `config.json` 自带采样 |
-| `penalty_sampler` | `greedy` | penalty 改分后的选词方式(`greedy`=确定;`temperature`=带随机) |
-| `repetition_penalty` | `1.1` | `>1` 惩罚已出现 token,`<=1` 关闭。复读仍严重可调到 `1.2`~`1.3` |
-| `presence_penalty` / `frequency_penalty` | `0.0` | 额外的出现/频次惩罚,通常留 0 即可 |
+| `repetition_penalty` | `1.1` | `>1` 惩罚已出现 token(含换行),`<=1` 关闭。复读顽固可调到 `1.3`~`1.5` |
+| `frequency_penalty` | `0.0` | `>0` 按出现**次数**累加惩罚,专治同一符号刷屏 |
+| `presence_penalty` | `0.0` | `>0` 对出现过的 token 一次性惩罚 |
 | `penalty_window` | `0` | 计惩罚只看最近 N 个 token;`0`=整段历史 |
-| `temperature` / `top_k` / `top_p` | 空 | 仅带随机的采样器下生效;留空则用 MNN 默认(1.0 / 40 / 0.9) |
+| `temperature` | 空 | 空/`<=0`=确定性 argmax(可复现);`>0`=温度随机采样 |
+| `top_k` / `top_p` | 空 | 设值则启用 top-k / nucleus 截断;**仅随机采样(`temperature>0`)有意义** |
+| `sampler_config` | 空 | 高级逃生口:非空 dict 原样下发 MNN 原生键(`sampler_type`/`mixed_samplers`…)、跳过翻译;`{}`=不下发,沿用模型 `config.json` 自带采样 |
 
-> 仍满屏换行?多半是**转换层的 EOS / chat template 不匹配**(模型不发结束符),先调高 `repetition_penalty`
-> 兜住症状,再回头核对转换时的对话模板是否与训练一致。
+**先搞懂:模型每步怎么「选下一个字」。** 模型每步对词表里每个 token 打一个原始分数(logit),从分数到吐哪个字分两阶段:
+① **改分/过滤**(`repetition_penalty`/`top_k`/`top_p` 在这一步动 logits 或砍候选);② **选词**——argmax(取最高分,输入相同则输出相同、**可复现**)或 temperature(转成概率后**按概率随机抽**、**不可复现**)。
+
+<details>
+<summary><b>逐参数详解 + 数值示例</b>(点开)</summary>
+
+**`temperature`(采样的「胆子」,仅随机采样时生效)** — 把 logits 缩放后再 softmax。同一批 logits `\n=8.0, 美=6.0, 这=5.0` 转成概率:
+
+| 温度 | \n | 美 | 这 |
+| --- | --- | --- | --- |
+| `0.5`(尖) | 0.98 | 0.02 | 0.00 |
+| `1.0` | 0.84 | 0.11 | 0.04 |
+| `2.0`(平) | 0.63 | 0.23 | 0.14 |
+
+低温趋近 argmax,高温更随机(也更易胡说)。留空/`<=0` 则用 argmax(确定)。
+
+**`top_k`(只在前 K 名里选)** — 只留 logit 最高的 K 个候选,其余概率清零再归一。`top_k=1` 等价 argmax。仅随机采样时有意义(和 argmax 组合等于没截断)。
+
+**`top_p`(nucleus 核采样,按累积概率截断)** — 候选按概率从高到低累加,加到 ≥ p 即停、后面全砍,候选集大小**自适应**。例:`top_p=0.9`,`美0.6→这0.25→图0.1` 累加 0.6→0.85→0.95≥0.9 停,只在 `{美,这,图}` 里选。常与 `top_k` 合用。
+
+**重复惩罚三兄弟(治「满屏 \n」的核心)** — 选词前压低历史里出现过的 token 分数,三者叠加:
+
+| 参数 | 方式 | 公式(对历史出现过的 token) |
+| --- | --- | --- |
+| `repetition_penalty` | 乘法,**只按出没出现过** | 正 logit → `logit / penalty`(出现几次都只除一次) |
+| `presence_penalty` | 加法,**一次性** | `logit − presence` |
+| `frequency_penalty` | 加法,**按次数累加** | `logit − frequency × 出现次数` |
+
+**例**:已吐 5 个 `\n`,当前 logits `\n=8.0`、`美=6.0`(未在历史出现),argmax 选:
+
+| 设置 | \n 新分 | 美 | argmax 选谁 |
+| --- | --- | --- | --- |
+| 全关 | 8.0 | 6.0 | **\n** → 继续复读 |
+| `repetition_penalty=1.1` | 7.27 | 6.0 | **\n** → 太温和,仍复读 |
+| `repetition_penalty=1.5` | 5.33 | 6.0 | **美** → 打破 ✅ |
+| `frequency_penalty=0.5` | 5.5 | 6.0 | **美** → 打破 ✅ |
+
+要点:`repetition_penalty` **只除一次、力度弱**(\n 刷 5 次和 1 次同罚),顽固复读要往 `1.3~1.5` 调;`frequency_penalty` **刷得越多罚越狠**,最对症刷屏。
+
+**`penalty_window`(惩罚回看多远)** — `0`=整段历史;`N>0`=只看最近 N 个 token(长文本时避免久前正常词被一直压)。短描述任务 `0` 即可。
+
+**底层怎么翻译到 MNN**(仅供好奇):MNN 的 `sampler_type` 是硬派发——非 `mixed` 模式流水线里只有那一个采样步骤(如 `penalty` 模式下 `top_k`/`top_p` 步骤根本不存在)。为回避这个反直觉点,后端**一律用 `sampler_type: mixed` 并显式列出所需步骤**,末步用 `greedy`(确定)或 `temperature`(随机)。默认即 `mixed_samplers: [penalty, greedy]`。
+
+</details>
+
+**两套常用配置(按目的选):**
+
+**A. 评测 / 要复现 + 稳稳止住换行(最推荐,也是默认加强版)** — 确定性输出,同图每次结果一致:
+
+```yaml
+inference:
+  mnn:
+    repetition_penalty: 1.3       # 比默认 1.1 有力
+    frequency_penalty: 0.5        # 专治刷屏
+    # temperature 留空 => argmax,确定可复现
+```
+
+**B. 标准 topK+topP 生成式采样(自然多样)** — 设了 `temperature>0` 即切随机采样,后端自动把 penalty/topK/topP 串进管线:
+
+```yaml
+inference:
+  mnn:
+    repetition_penalty: 1.1
+    temperature: 0.7
+    top_k: 40
+    top_p: 0.9
+```
+
+流程:罚重复 → 只留前 40 → 再留累积 0.9 的核 → temp0.7 随机抽。有多样性又抗重复,但结果每次可能不同(采样天然如此)。
+
+> 想完全用模型自己 `config.json` 里的采样、或手动指定 MNN 原生键?用逃生口 `sampler_config`:
+> 填 `{}` 表示后端不下发任何采样配置;填 `{sampler_type: ..., mixed_samplers: [...]}` 则原样下发、跳过上面的翻译。
+
+> 仍满屏换行?多半是**转换层的 EOS / chat template 不匹配**(模型不发结束符),先调高 `repetition_penalty`/`frequency_penalty`
+> 兜住症状,再回头核对转换时的对话模板是否与训练一致。采样惩罚只治标,治不了「模型根本不发结束符」。
 
 #### 自定义 vLLM API 与对话组织(`config.yaml`)
 

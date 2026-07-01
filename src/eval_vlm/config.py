@@ -106,22 +106,24 @@ class MNNBackendConfig:
     image_max_side: int = 2048
     max_tokens: int = 512                       # 作为 response 的 max_new_tokens
 
-    # --- 采样 / 重复抑制 ---------------------------------------------------
-    # 小模型(如 0.8B)用纯贪心解码时,遇到「没把握」的图易陷入 "\n\n\n…" 退化循环,
-    # 整屏换行直到撞上 max_tokens。这里默认改用 MNN 的 penalty 采样器:先按重复惩罚
-    # 压低已出现 token(含换行)的 logits,再**贪心选词**——输出仍是确定性的(适合
-    # 评测复现),但能打断复读。各项在后端 __init__ 时经 set_config 下发给 pymnn。
-    # 设 sampler_type="" 则完全不下发、沿用模型 config.json 自带的采样设置。
-    # 键名对齐 MNN llmconfig(sampler.cpp:stepPenalty 仅在含 penalty 且 repetition_penalty>1 时生效)。
-    sampler_type: str = "penalty"               # penalty/greedy/mixed/temperature/topK/topP…;""=不覆盖
-    penalty_sampler: str = "greedy"             # penalty 改分后的选词方式(greedy=确定;temperature=带随机)
-    repetition_penalty: float = 1.1             # >1 惩罚已出现 token,<=1 关闭惩罚
-    presence_penalty: float = 0.0               # >0 对出现过的 token 一次性惩罚
-    frequency_penalty: float = 0.0              # >0 按出现频次惩罚
-    penalty_window: int = 0                     # 计惩罚只看最近 N 个 token;0=整段历史
-    temperature: Optional[float] = None         # 仅带随机的采样器下生效;None=用 MNN 默认(1.0)
-    top_k: Optional[int] = None                 # None=用 MNN 默认(40),仅随机采样时有意义
-    top_p: Optional[float] = None               # None=用 MNN 默认(0.9)
+    # --- 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线)---
+    # 无需关心 MNN 的 sampler_type / mixed_samplers:后端据下面哪些值被打开,自动拼装
+    # MNN 的 mixed 流水线(见 mnn_backend._apply_sampler_config)。规则一句话:
+    #   penalty(repetition/frequency/presence 任一开)→ 加 penalty 步;
+    #   top_k / top_p 设值 → 加对应截断步;
+    #   temperature>0 → 末步随机采样;temperature 未设/<=0 → 末步 argmax(确定、可复现)。
+    # 小模型(如 0.8B)贪心解码遇到「没把握」的图易陷入 "\n\n\n…" 复读到 max_tokens;
+    # 默认「仅开重复惩罚 1.1 + 确定性选词」即可止住复读且结果可复现。各项 __init__ 时经 set_config 下发。
+    repetition_penalty: float = 1.1     # >1 惩罚已出现 token(含换行);<=1 关闭。复读顽固可调 1.3~1.5
+    frequency_penalty: float = 0.0      # >0 按出现次数累加惩罚(专治同一符号刷屏);0 关闭
+    presence_penalty: float = 0.0       # >0 对出现过的 token 一次性惩罚;0 关闭
+    penalty_window: int = 0             # 惩罚只回看最近 N 个 token;0=整段历史
+    temperature: Optional[float] = None # None/<=0 => 确定性 argmax(可复现);>0 => 温度随机采样
+    top_k: Optional[int] = None         # 设值则启用 top-k 截断(只在前 K 个候选里选);仅随机采样(temperature>0)有意义
+    top_p: Optional[float] = None       # 设值则启用 nucleus 截断(累积概率到 p);仅随机采样(temperature>0)有意义
+    # 高级逃生口:非空 dict 会**原样**下发给 MNN set_config、跳过上面的自动翻译(可直接写
+    # sampler_type / mixed_samplers 等 MNN 原生键);设为 {} 则一概不下发、沿用模型 config.json 自带采样。
+    sampler_config: Optional[dict] = None
 
 
 @dataclass

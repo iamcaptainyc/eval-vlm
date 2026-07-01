@@ -164,33 +164,62 @@ class MNNBackend(InferenceBackend):
                 pass
         return False
 
-    def _apply_sampler_config(self) -> None:
-        """下发采样/重复抑制设置,缓解小模型贪心解码陷入 "\\n\\n\\n…" 退化循环。
+    def _build_sampler_config(self) -> Optional[dict]:
+        """把 value-gated 旋钮翻译成 MNN 的采样配置 dict(None 表示不下发)。
 
-        默认 sampler_type=penalty + penalty_sampler=greedy:按重复惩罚压低已出现
-        token(含换行)的 logits 后再贪心选词——输出仍确定(便于评测复现),但能打断
-        复读。``sampler_type`` 为空则一概不下发,沿用模型 config.json 自带采样设置。
-        全 best-effort(见 _push_config):个别 pymnn 版本不认某键时静默忽略。
+        用户只按值开关(repetition_penalty>1、top_k 设值、temperature>0…),这里据此
+        拼装 MNN 的 mixed 流水线并回避其两个反直觉点:① 非 mixed 模式下 top_k/top_p 不进
+        流水线;② mixed 默认的 mixed_samplers 不含 penalty(不抗复读)。故一律用
+        sampler_type=mixed 显式列出所需步骤;末步用 greedy(确定/可复现)或 temperature(随机)。
+
+        逃生口:cfg.sampler_config 非 None 时原样返回(跳过翻译),空 dict {} => None(不下发)。
         """
         mc = self.cfg.inference.mnn
-        if not mc.sampler_type:
-            return
-        cfg: dict = {
-            "sampler_type": mc.sampler_type,
-            "penalty_sampler": mc.penalty_sampler,
-            "repetition_penalty": mc.repetition_penalty,
-            "presence_penalty": mc.presence_penalty,
-            "frequency_penalty": mc.frequency_penalty,
-            "penalty_window": mc.penalty_window,
-        }
-        # 仅带随机的采样器才用到这几项;设了才下发,避免无谓覆盖 MNN 默认值。
-        if mc.temperature is not None:
-            cfg["temperature"] = mc.temperature
+
+        # 高级逃生口:原样下发用户给的 MNN 原生键;{} 视作「不下发,沿用模型 config.json」。
+        if mc.sampler_config is not None:
+            return dict(mc.sampler_config) or None
+
+        penalty_on = (
+            (mc.repetition_penalty or 0) > 1.0
+            or (mc.frequency_penalty or 0) > 0.0
+            or (mc.presence_penalty or 0) > 0.0
+        )
+        random_sample = mc.temperature is not None and mc.temperature > 0.0
+
+        steps: list[str] = []
+        if penalty_on:
+            steps.append("penalty")
+        if mc.top_k is not None:
+            steps.append("topK")
+        if mc.top_p is not None:
+            steps.append("topP")
+        steps.append("temperature" if random_sample else "greedy")  # 末步定选词方式
+
+        cfg: dict = {"sampler_type": "mixed", "mixed_samplers": steps}
+        if penalty_on:
+            cfg["repetition_penalty"] = mc.repetition_penalty
+            cfg["frequency_penalty"] = mc.frequency_penalty
+            cfg["presence_penalty"] = mc.presence_penalty
+            cfg["penalty_window"] = mc.penalty_window
         if mc.top_k is not None:
             cfg["top_k"] = mc.top_k          # MNN 向后兼容 top_k -> topK
         if mc.top_p is not None:
             cfg["top_p"] = mc.top_p          # MNN 向后兼容 top_p -> topP
-        self._push_config(cfg)
+        if random_sample:
+            cfg["temperature"] = mc.temperature
+        return cfg
+
+    def _apply_sampler_config(self) -> None:
+        """下发采样/重复抑制设置,缓解小模型贪心解码陷入 "\\n\\n\\n…" 退化循环。
+
+        默认「仅开重复惩罚 1.1 + 确定性选词」:按重复惩罚压低已出现 token(含换行)的
+        logits 后再 argmax——输出确定(便于评测复现)且能打断复读。具体键由
+        _build_sampler_config 从 value-gated 旋钮翻译得出。全 best-effort(见 _push_config)。
+        """
+        cfg = self._build_sampler_config()
+        if cfg:
+            self._push_config(cfg)
 
     def _apply_max_tokens_via_config(self, max_tokens: int) -> None:
         """旧绑定 response 不收 max_new_tokens 时,尽力经 config 设置生成上限。

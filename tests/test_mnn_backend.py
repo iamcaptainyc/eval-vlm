@@ -264,68 +264,96 @@ def test_mnn_matches_latest_pymnn_wrapper(fake_mnn, tmp_path):
     assert pred.raw["pixels_mp"] == 0.18
 
 
-def test_mnn_applies_sampler_config_on_init(fake_mnn, tmp_path):
-    """默认启用 penalty 采样器抑制小模型的 "\\n\\n\\n…" 退化:__init__ 时经 set_config
-    下发 sampler_type/penalty_sampler/repetition_penalty 等;temperature/top_k/top_p
-    默认 None 不下发(沿用 MNN 默认)。"""
+class _CfgModel:
+    """记录 set_config 下发内容的假模型,用于验证采样配置翻译。"""
+
+    def __init__(self):
+        self.pushed: list = []
+
+    def load(self):
+        return True
+
+    def reset(self):
+        pass
+
+    def response(self, prompt, stream=False):
+        return "ok"
+
+    def set_config(self, config):
+        self.pushed.append(config)
+        return True
+
+
+def _sampler_sent(cfg, tmp_path):
+    """在给定 cfg 下构造后端并触发采样配置下发,返回下发的 dict 列表。"""
     from eval_vlm.inference.mnn_backend import MNNBackend
 
-    pushed: list = []
-
-    class _CfgModel:
-        def load(self):
-            return True
-
-        def reset(self):
-            pass
-
-        def response(self, prompt, stream=False):
-            return "ok"
-
-        def set_config(self, config):
-            pushed.append(config)
-            return True
-
-    cfg = _mnn_cfg(tmp_path)
     backend = MNNBackend(cfg)
     backend.model = _CfgModel()
     backend._apply_sampler_config()
+    return backend.model.pushed
+
+
+def test_mnn_default_sampler_is_penalty_plus_greedy(fake_mnn, tmp_path):
+    """默认(repetition_penalty=1.1、temperature 未设):翻译成 mixed=[penalty, greedy]——
+    重复惩罚打断 \\n 复读 + 确定性 argmax(可复现)。top_k/top_p/temperature 不下发。"""
+    cfg = _mnn_cfg(tmp_path)
+    pushed = _sampler_sent(cfg, tmp_path)
 
     assert len(pushed) == 1
     sent = pushed[0]
-    assert sent["sampler_type"] == "penalty"
-    assert sent["penalty_sampler"] == "greedy"
+    assert sent["sampler_type"] == "mixed"
+    assert sent["mixed_samplers"] == ["penalty", "greedy"]
     assert sent["repetition_penalty"] == 1.1
     assert sent["penalty_window"] == 0
-    # 未设置的随机采样项不下发,避免覆盖 MNN 默认。
     assert "temperature" not in sent and "top_k" not in sent and "top_p" not in sent
 
 
-def test_mnn_sampler_config_disabled_when_type_empty(fake_mnn, tmp_path):
-    """sampler_type="" 时完全不下发采样配置,沿用模型 config.json 自带设置。"""
-    from eval_vlm.inference.mnn_backend import MNNBackend
-
-    pushed: list = []
-
-    class _CfgModel:
-        def load(self):
-            return True
-
-        def reset(self):
-            pass
-
-        def response(self, prompt, stream=False):
-            return "ok"
-
-        def set_config(self, config):
-            pushed.append(config)
-            return True
-
+def test_mnn_value_gated_standard_sampling(fake_mnn, tmp_path):
+    """设了 temperature>0 + top_k + top_p → 翻译成标准 topK+topP+temperature 采样,
+    并自动带上 penalty(默认 1.1 仍开)。末步为 temperature(随机)。"""
     cfg = _mnn_cfg(tmp_path)
-    cfg.inference.mnn.sampler_type = ""
-    backend = MNNBackend(cfg)
-    backend.model = _CfgModel()
-    backend._apply_sampler_config()
+    cfg.inference.mnn.temperature = 0.7
+    cfg.inference.mnn.top_k = 40
+    cfg.inference.mnn.top_p = 0.9
+    pushed = _sampler_sent(cfg, tmp_path)
+
+    assert len(pushed) == 1
+    sent = pushed[0]
+    assert sent["sampler_type"] == "mixed"
+    assert sent["mixed_samplers"] == ["penalty", "topK", "topP", "temperature"]
+    assert sent["temperature"] == 0.7
+    assert sent["top_k"] == 40 and sent["top_p"] == 0.9
+    assert sent["repetition_penalty"] == 1.1
+
+
+def test_mnn_penalty_off_yields_bare_greedy(fake_mnn, tmp_path):
+    """全部惩罚关闭(repetition_penalty<=1、无 freq/presence)且无 temperature →
+    mixed=[greedy],不下发任何 penalty 键(纯确定性 argmax)。"""
+    cfg = _mnn_cfg(tmp_path)
+    cfg.inference.mnn.repetition_penalty = 1.0
+    pushed = _sampler_sent(cfg, tmp_path)
+
+    assert len(pushed) == 1
+    sent = pushed[0]
+    assert sent["mixed_samplers"] == ["greedy"]
+    assert "repetition_penalty" not in sent and "penalty" not in sent["mixed_samplers"]
+
+
+def test_mnn_sampler_config_escape_hatch_verbatim(fake_mnn, tmp_path):
+    """sampler_config 非空:原样下发 MNN 原生键,跳过 value-gated 翻译。"""
+    cfg = _mnn_cfg(tmp_path)
+    cfg.inference.mnn.sampler_config = {"sampler_type": "greedy"}
+    pushed = _sampler_sent(cfg, tmp_path)
+
+    assert pushed == [{"sampler_type": "greedy"}]
+
+
+def test_mnn_sampler_config_empty_dict_disables(fake_mnn, tmp_path):
+    """sampler_config={} 视作「不下发」→ 完全沿用模型 config.json 自带采样。"""
+    cfg = _mnn_cfg(tmp_path)
+    cfg.inference.mnn.sampler_config = {}
+    pushed = _sampler_sent(cfg, tmp_path)
 
     assert pushed == []
 
