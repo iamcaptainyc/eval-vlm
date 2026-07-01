@@ -127,24 +127,6 @@ class MNNBackendConfig:
 
 
 @dataclass
-class CMNNBackendConfig(MNNBackendConfig):
-    """cmnn(C++ 批量 MNN)后端设置。
-
-    功能与 mnn 一致(多模态单图 + 同一套 value-gated 采样/重复抑制旋钮 +
-    图片缩放),故直接继承 MNNBackendConfig 的全部字段;区别只在**执行方式**:
-    cmnn 走原生 C++ 库,起 num_workers 个 Llm 实例 + 线程池并行处理整批
-    (绕开 pymnn 的 GIL 串行瓶颈)。多出两个旋钮:
-
-      num_workers — 原生库内并发的 Llm 实例数(=真并行度)。受显存/内存约束:
-                    每个实例各自持有一份 KV cache(权重尽量共享)。
-      batch_size  — 编排层一次交给原生库的请求条数(分块喂,便于增量落盘/断点续跑);
-                    宜 >= num_workers 以喂满所有实例。
-    """
-    num_workers: int = 4
-    batch_size: int = 16
-
-
-@dataclass
 class InferenceConfig:
     """推理设置:顶层只选 backend,各后端的参数归入各自的子块。
 
@@ -154,36 +136,33 @@ class InferenceConfig:
     backend: str = "openai"
     openai: OpenAIBackendConfig = field(default_factory=OpenAIBackendConfig)
     mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
-    cmnn: CMNNBackendConfig = field(default_factory=CMNNBackendConfig)
 
     @property
     def active(self) -> Any:
-        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;cmnn -> cmnn)。"""
+        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn)。"""
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai
         if self.backend == "mnn":
             return self.mnn
-        if self.backend == "cmnn":
-            return self.cmnn
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, cmnn, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
         )
 
     @property
     def result_name(self) -> str:
         """产物子目录名(<数据集>/<result_name>/),按后端取其模型标识。
 
-        openai/vllm/fake -> openai.model;mnn/cmnn -> config_path 所在目录名
-        (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 '<backend>-model'。
+        openai/vllm/fake -> openai.model;mnn -> config_path 所在目录名
+        (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model'。
         """
-        if self.backend in ("mnn", "cmnn"):
-            cp = self.active.config_path
-            return Path(cp).expanduser().parent.name if cp else f"{self.backend}-model"
+        if self.backend == "mnn":
+            cp = self.mnn.config_path
+            return Path(cp).expanduser().parent.name if cp else "mnn-model"
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai.model
         # 未知后端:与 active 一致地报错,而不是伪装成 openai 给出一个看似正常的目录名。
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, cmnn, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
         )
 
     @property
@@ -360,8 +339,7 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
               "mapping": Mapping, "tags": Tags,
-              "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
-              "cmnn": CMNNBackendConfig}
+              "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

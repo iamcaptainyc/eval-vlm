@@ -53,49 +53,6 @@ _INTERNAL_PLACEHOLDER = "<image>"
 _IMREAD_NATIVE_OK = {".jpg", ".jpeg", ".png", ".bmp", ".ppm", ".pgm"}
 
 
-def translate_sampler_config(mc) -> Optional[dict]:
-    """把 value-gated 采样旋钮翻译成 MNN 的采样配置 dict(None 表示不下发)。
-
-    mc 为任意带这些属性的后端配置块(MNNBackendConfig / CMNNBackendConfig 通用):
-    repetition_penalty / frequency_penalty / presence_penalty / penalty_window /
-    temperature / top_k / top_p / sampler_config。逻辑详见 MNNBackend._build_sampler_config
-    的 docstring(mnn 与 cmnn 共用同一套翻译,故抽成模块函数)。
-    """
-    # 高级逃生口:原样下发用户给的 MNN 原生键;{} 视作「不下发,沿用模型 config.json」。
-    if mc.sampler_config is not None:
-        return dict(mc.sampler_config) or None
-
-    penalty_on = (
-        (mc.repetition_penalty or 0) > 1.0
-        or (mc.frequency_penalty or 0) > 0.0
-        or (mc.presence_penalty or 0) > 0.0
-    )
-    random_sample = mc.temperature is not None and mc.temperature > 0.0
-
-    steps: list[str] = []
-    if penalty_on:
-        steps.append("penalty")
-    if mc.top_k is not None:
-        steps.append("topK")
-    if mc.top_p is not None:
-        steps.append("topP")
-    steps.append("temperature" if random_sample else "greedy")  # 末步定选词方式
-
-    cfg: dict = {"sampler_type": "mixed", "mixed_samplers": steps}
-    if penalty_on:
-        cfg["repetition_penalty"] = mc.repetition_penalty
-        cfg["frequency_penalty"] = mc.frequency_penalty
-        cfg["presence_penalty"] = mc.presence_penalty
-        cfg["penalty_window"] = mc.penalty_window
-    if mc.top_k is not None:
-        cfg["top_k"] = mc.top_k          # MNN 向后兼容 top_k -> topK
-    if mc.top_p is not None:
-        cfg["top_p"] = mc.top_p          # MNN 向后兼容 top_p -> topP
-    if random_sample:
-        cfg["temperature"] = mc.temperature
-    return cfg
-
-
 class MNNBackend(InferenceBackend):
     # 单个有状态 Llm 对象,绝不能并发调用。
     thread_safe = False
@@ -125,17 +82,10 @@ class MNNBackend(InferenceBackend):
         # 乐观假设新版绑定 response 接受 max_new_tokens;首次 TypeError 后置 False,
         # 之后不再尝试三参调用(见 _respond)。
         self._response_takes_max_tokens = True
-        # 生成长度超过 max_tokens 的一次性告警开关(见 complete):说明该 pymnn 构建
-        # 未采纳 max_new_tokens,只打印一次避免刷屏。
-        self._warned_over_limit = False
         self.model = llm.create(str(config_path))
         self.model.load()
         # 下发采样/重复抑制设置,缓解小模型贪心解码的「满屏换行」退化(见 _apply_sampler_config)。
         self._apply_sampler_config()
-        # 主动把生成上限写进 MNN 配置。pymnn 的 response 常只有两参(prompt, stream)、
-        # 无法按参直传 max_new_tokens,set_config 是唯一运行时通道;generate() 在未按参
-        # 传值时会读 mConfig->max_new_tokens()。故加载后立即下发,不再只依赖首次 TypeError 的懒加载。
-        self._apply_max_tokens_via_config(cfg.inference.mnn.max_tokens)
 
     # ------------------------------------------------------------------
     def _imread(self, img_path: Path):
@@ -217,15 +167,48 @@ class MNNBackend(InferenceBackend):
     def _build_sampler_config(self) -> Optional[dict]:
         """把 value-gated 旋钮翻译成 MNN 的采样配置 dict(None 表示不下发)。
 
-        用户只按值开关(repetition_penalty>1、top_k 设值、temperature>0…),据此
+        用户只按值开关(repetition_penalty>1、top_k 设值、temperature>0…),这里据此
         拼装 MNN 的 mixed 流水线并回避其两个反直觉点:① 非 mixed 模式下 top_k/top_p 不进
         流水线;② mixed 默认的 mixed_samplers 不含 penalty(不抗复读)。故一律用
         sampler_type=mixed 显式列出所需步骤;末步用 greedy(确定/可复现)或 temperature(随机)。
 
         逃生口:cfg.sampler_config 非 None 时原样返回(跳过翻译),空 dict {} => None(不下发)。
-        实际翻译逻辑抽到模块函数 translate_sampler_config(mnn/cmnn 共用)。
         """
-        return translate_sampler_config(self.cfg.inference.mnn)
+        mc = self.cfg.inference.mnn
+
+        # 高级逃生口:原样下发用户给的 MNN 原生键;{} 视作「不下发,沿用模型 config.json」。
+        if mc.sampler_config is not None:
+            return dict(mc.sampler_config) or None
+
+        penalty_on = (
+            (mc.repetition_penalty or 0) > 1.0
+            or (mc.frequency_penalty or 0) > 0.0
+            or (mc.presence_penalty or 0) > 0.0
+        )
+        random_sample = mc.temperature is not None and mc.temperature > 0.0
+
+        steps: list[str] = []
+        if penalty_on:
+            steps.append("penalty")
+        if mc.top_k is not None:
+            steps.append("topK")
+        if mc.top_p is not None:
+            steps.append("topP")
+        steps.append("temperature" if random_sample else "greedy")  # 末步定选词方式
+
+        cfg: dict = {"sampler_type": "mixed", "mixed_samplers": steps}
+        if penalty_on:
+            cfg["repetition_penalty"] = mc.repetition_penalty
+            cfg["frequency_penalty"] = mc.frequency_penalty
+            cfg["presence_penalty"] = mc.presence_penalty
+            cfg["penalty_window"] = mc.penalty_window
+        if mc.top_k is not None:
+            cfg["top_k"] = mc.top_k          # MNN 向后兼容 top_k -> topK
+        if mc.top_p is not None:
+            cfg["top_p"] = mc.top_p          # MNN 向后兼容 top_p -> topP
+        if random_sample:
+            cfg["temperature"] = mc.temperature
+        return cfg
 
     def _apply_sampler_config(self) -> None:
         """下发采样/重复抑制设置,缓解小模型贪心解码陷入 "\\n\\n\\n…" 退化循环。
@@ -320,25 +303,6 @@ class MNNBackend(InferenceBackend):
         text = img_turns[0].content.replace(_INTERNAL_PLACEHOLDER, "<img>image_0</img>", 1)
         return text
 
-    @staticmethod
-    def _is_degenerate(text: str) -> tuple[bool, str]:
-        """判断输出是否退化(几乎全是空白/换行刷屏),返回 (是否退化, 原因简述)。
-
-        小模型对某些图不发 EOS 时会一路刷 \\n/空格到上限。这类文本对描述任务毫无意义,
-        应判为失败(记入 failures、可重跑),而非当作有效描述写进可复用数据集。
-        判据:去空白后为空;或输出较长(>=64 字符)且空白占比 >90%(夹带极少实义字符的刷屏)。
-        正常多段描述的空白占比远低于此,不会误伤。
-        """
-        if not text:
-            return False, ""          # 空串交由上层按普通空结果处理,不算退化
-        if not text.strip():
-            return True, "输出全为空白字符"
-        n = len(text)
-        ws = sum(1 for c in text if c.isspace())
-        if n >= 64 and ws / n > 0.9:
-            return True, f"输出 {ws}/{n} 字符为空白(疑似换行刷屏)"
-        return False, ""
-
     def complete(
         self,
         context: list[Turn],
@@ -382,39 +346,10 @@ class MNNBackend(InferenceBackend):
                 # stream=False -> 返回完整生成文本;自适应兼容新旧绑定签名。
                 text_out = self._respond(prompt, mc.max_tokens)
                 raw = self._collect_stats()
-                latency = round(time.time() - start, 3)
-
-                # 超限告警(仅一次):生成长度超过 max_tokens,说明该 pymnn 构建未采纳
-                # max_new_tokens(应在模型 config.json 里设 max_new_tokens,或升级 MNN)。
-                gen_len = raw.get("gen_seq_len")
-                if (isinstance(gen_len, int) and gen_len > mc.max_tokens
-                        and not self._warned_over_limit):
-                    self._warned_over_limit = True
-                    import warnings
-                    warnings.warn(
-                        f"[mnn] 本次生成 {gen_len} token 超过 max_tokens={mc.max_tokens},"
-                        f"说明当前 pymnn/MNN 构建未采纳 max_new_tokens 上限。请在模型转换产物的 "
-                        f"config.json 里显式设置 \"max_new_tokens\": {mc.max_tokens}(加载时读入),"
-                        f"或升级到支持该项的 MNN 版本;否则退化样本会一直生成到上下文上限。",
-                        stacklevel=1,
-                    )
-
-                # 退化输出(几乎全空白/换行刷屏):小模型对某些图不发 EOS 所致。判为失败
-                # 记入 failures,而非当作有效描述污染可复用数据集(见 _is_degenerate)。
-                degenerate, why = self._is_degenerate(text_out or "")
-                if degenerate:
-                    tok = f",共 {gen_len} token" if isinstance(gen_len, int) else ""
-                    return Prediction(
-                        id=sample_id,
-                        latency=latency,
-                        error=f"degenerate_output: {why}{tok}(疑似模型未发 EOS)",
-                        raw=raw,
-                    )
-
                 return Prediction(
                     id=sample_id,
                     prediction=text_out or "",
-                    latency=latency,
+                    latency=round(time.time() - start, 3),
                     raw=raw,
                 )
             except Exception as e:  # noqa: BLE001 - 捕获以记录而非中断整批

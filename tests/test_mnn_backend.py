@@ -358,67 +358,6 @@ def test_mnn_sampler_config_empty_dict_disables(fake_mnn, tmp_path):
     assert pushed == []
 
 
-def test_mnn_pushes_max_tokens_via_config_at_init(fake_mnn, tmp_path):
-    """response 只有两参、无法按参直传时,后端在 __init__ 就经 set_config 主动下发
-    max_new_tokens(而非只靠首次 TypeError 的懒加载),保证生成上限落进 MNN 配置。"""
-    from eval_vlm.inference.mnn_backend import MNNBackend
-
-    model = _CfgModel()
-    sys.modules["MNN.llm"].create = lambda path, *a, **k: model
-
-    cfg = _mnn_cfg(tmp_path)          # max_tokens=128
-    MNNBackend(cfg)                   # __init__ 触发采样 + max_tokens 下发
-
-    assert {"max_new_tokens": 128} in model.pushed
-    assert any(c.get("sampler_type") == "mixed" for c in model.pushed)  # 采样也在 init 下发
-
-
-def test_mnn_is_degenerate_helper():
-    from eval_vlm.inference.mnn_backend import MNNBackend
-
-    assert MNNBackend._is_degenerate("\n" * 100)[0] is True
-    assert MNNBackend._is_degenerate("   \n\t  ")[0] is True     # 全空白
-    assert MNNBackend._is_degenerate("")[0] is False            # 空串不算退化(交上层)
-    assert MNNBackend._is_degenerate("这是一段正常的图片描述,包含足够多的实义字符。")[0] is False
-    # 多段正常描述里夹少量换行不误伤
-    assert MNNBackend._is_degenerate("第一段描述内容。\n\n第二段描述内容,继续补充细节。")[0] is False
-
-
-def test_mnn_degenerate_output_recorded_as_error(fake_mnn, tmp_path):
-    """满屏换行这类退化输出:判为失败(error 含 degenerate_output)、prediction 为空,
-    以免当作有效描述写进可复用数据集。"""
-    from eval_vlm.inference.mnn_backend import MNNBackend
-
-    cfg = _mnn_cfg(tmp_path)
-    backend = MNNBackend(cfg)
-    backend.model.response = lambda content, stream=0, max_new_tokens=-1: "\n" * 200
-
-    ctx = [Turn(role="user", content="<image>请描述图片")]
-    pred = backend.complete(ctx, ["a.jpg"], "a.jpg")
-
-    assert pred.prediction == ""
-    assert pred.error is not None and "degenerate_output" in pred.error
-
-
-def test_mnn_over_limit_warns_once(fake_mnn, tmp_path, recwarn):
-    """gen_seq_len 超过 max_tokens 时告警一次(提示该构建未采纳 max_new_tokens)。"""
-    from eval_vlm.inference.mnn_backend import MNNBackend
-
-    cfg = _mnn_cfg(tmp_path)          # max_tokens=128
-    backend = MNNBackend(cfg)
-    # 返回正常文本(非退化),但统计里 gen_seq_len 远超 max_tokens。
-    backend.model.response = lambda content, stream=0, max_new_tokens=-1: "正常的一段描述文本。"
-    backend.model.get_context = lambda: {"gen_seq_len": 999, "prompt_len": 7}
-
-    ctx = [Turn(role="user", content="<image>请描述图片")]
-    p1 = backend.complete(ctx, ["a.jpg"], "a.jpg")
-    p2 = backend.complete(ctx, ["a.jpg"], "a.jpg")
-
-    assert p1.error is None and p2.error is None            # 只告警,不算失败
-    msgs = [str(w.message) for w in recwarn.list if "max_new_tokens" in str(w.message)]
-    assert len(msgs) == 1                                   # 仅一次,不刷屏
-
-
 def test_mnn_missing_config_path_raises(fake_mnn, tmp_path):
     from eval_vlm.inference.mnn_backend import MNNBackend
 
