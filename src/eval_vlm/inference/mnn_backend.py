@@ -84,6 +84,8 @@ class MNNBackend(InferenceBackend):
         self._response_takes_max_tokens = True
         self.model = llm.create(str(config_path))
         self.model.load()
+        # 下发采样/重复抑制设置,缓解小模型贪心解码的「满屏换行」退化(见 _apply_sampler_config)。
+        self._apply_sampler_config()
 
     # ------------------------------------------------------------------
     def _imread(self, img_path: Path):
@@ -141,6 +143,55 @@ class MNNBackend(InferenceBackend):
             except OSError:
                 pass
 
+    def _push_config(self, cfg: dict) -> bool:
+        """尽力把一组配置经 set_config 下发给 pymnn,兼容新旧绑定签名。
+
+        新版包装 ``set_config`` 收 **dict**(内部自行 json.dumps);裸 C 绑定收 json
+        字符串。两种都试(先 dict 后字符串),任一成功即返回 True。模型无 set_config
+        或全失败则返回 False。best-effort:不认的键 pymnn 侧静默忽略,不影响推理。
+        """
+        if not cfg:
+            return False
+        fn = getattr(self.model, "set_config", None)
+        if not callable(fn):
+            return False
+        import json
+        for arg in (cfg, json.dumps(cfg)):
+            try:
+                fn(arg)
+                return True
+            except Exception:  # noqa: BLE001 - 签名不符就换下一种
+                pass
+        return False
+
+    def _apply_sampler_config(self) -> None:
+        """下发采样/重复抑制设置,缓解小模型贪心解码陷入 "\\n\\n\\n…" 退化循环。
+
+        默认 sampler_type=penalty + penalty_sampler=greedy:按重复惩罚压低已出现
+        token(含换行)的 logits 后再贪心选词——输出仍确定(便于评测复现),但能打断
+        复读。``sampler_type`` 为空则一概不下发,沿用模型 config.json 自带采样设置。
+        全 best-effort(见 _push_config):个别 pymnn 版本不认某键时静默忽略。
+        """
+        mc = self.cfg.inference.mnn
+        if not mc.sampler_type:
+            return
+        cfg: dict = {
+            "sampler_type": mc.sampler_type,
+            "penalty_sampler": mc.penalty_sampler,
+            "repetition_penalty": mc.repetition_penalty,
+            "presence_penalty": mc.presence_penalty,
+            "frequency_penalty": mc.frequency_penalty,
+            "penalty_window": mc.penalty_window,
+        }
+        # 仅带随机的采样器才用到这几项;设了才下发,避免无谓覆盖 MNN 默认值。
+        if mc.temperature is not None:
+            cfg["temperature"] = mc.temperature
+        if mc.top_k is not None:
+            cfg["top_k"] = mc.top_k          # MNN 向后兼容 top_k -> topK
+        if mc.top_p is not None:
+            cfg["top_p"] = mc.top_p          # MNN 向后兼容 top_p -> topP
+        self._push_config(cfg)
+
     def _apply_max_tokens_via_config(self, max_tokens: int) -> None:
         """旧绑定 response 不收 max_new_tokens 时,尽力经 config 设置生成上限。
 
@@ -150,17 +201,8 @@ class MNNBackend(InferenceBackend):
         if not max_tokens or max_tokens <= 0:
             return
         n = int(max_tokens)
-        fn = getattr(self.model, "set_config", None)
-        if callable(fn):
-            import json
-            # 新版包装 set_config 收 dict(内部 json.dumps);裸 C 绑定收 json 字符串。
-            # 两种都试,先 dict 后字符串。
-            for arg in ({"max_new_tokens": n}, json.dumps({"max_new_tokens": n})):
-                try:
-                    fn(arg)
-                    return
-                except Exception:  # noqa: BLE001 - 签名不符就换下一种
-                    pass
+        if self._push_config({"max_new_tokens": n}):
+            return
         fn = getattr(self.model, "set_max_new_tokens", None)
         if callable(fn):
             try:

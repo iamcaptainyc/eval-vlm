@@ -255,11 +255,79 @@ def test_mnn_matches_latest_pymnn_wrapper(fake_mnn, tmp_path):
     assert len(backend.model.response_calls) == 1
     assert backend.model.response_calls[0][1] is False
     assert backend._response_takes_max_tokens is False
-    # max_tokens 经 set_config 以 dict 形式下发。
+    # 此处 model 在 __init__ 后才换成 _WrapperModel,故采样配置(在 __init__ 时下发到
+    # 原 fake model)不计入这里;_WrapperModel 只收到 complete 退化后下发的 max_new_tokens。
+    # 采样/重复抑制设置的下发由 test_mnn_applies_sampler_config_on_init 覆盖。
     assert backend.model.set_config_args == [{"max_new_tokens": 128}]
     # 统计从 context 属性对象收集(非 get_context dict)。
     assert pred.raw["prompt_len"] == 11 and pred.raw["decode_us"] == 8000
     assert pred.raw["pixels_mp"] == 0.18
+
+
+def test_mnn_applies_sampler_config_on_init(fake_mnn, tmp_path):
+    """默认启用 penalty 采样器抑制小模型的 "\\n\\n\\n…" 退化:__init__ 时经 set_config
+    下发 sampler_type/penalty_sampler/repetition_penalty 等;temperature/top_k/top_p
+    默认 None 不下发(沿用 MNN 默认)。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    pushed: list = []
+
+    class _CfgModel:
+        def load(self):
+            return True
+
+        def reset(self):
+            pass
+
+        def response(self, prompt, stream=False):
+            return "ok"
+
+        def set_config(self, config):
+            pushed.append(config)
+            return True
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)
+    backend.model = _CfgModel()
+    backend._apply_sampler_config()
+
+    assert len(pushed) == 1
+    sent = pushed[0]
+    assert sent["sampler_type"] == "penalty"
+    assert sent["penalty_sampler"] == "greedy"
+    assert sent["repetition_penalty"] == 1.1
+    assert sent["penalty_window"] == 0
+    # 未设置的随机采样项不下发,避免覆盖 MNN 默认。
+    assert "temperature" not in sent and "top_k" not in sent and "top_p" not in sent
+
+
+def test_mnn_sampler_config_disabled_when_type_empty(fake_mnn, tmp_path):
+    """sampler_type="" 时完全不下发采样配置,沿用模型 config.json 自带设置。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    pushed: list = []
+
+    class _CfgModel:
+        def load(self):
+            return True
+
+        def reset(self):
+            pass
+
+        def response(self, prompt, stream=False):
+            return "ok"
+
+        def set_config(self, config):
+            pushed.append(config)
+            return True
+
+    cfg = _mnn_cfg(tmp_path)
+    cfg.inference.mnn.sampler_type = ""
+    backend = MNNBackend(cfg)
+    backend.model = _CfgModel()
+    backend._apply_sampler_config()
+
+    assert pushed == []
 
 
 def test_mnn_missing_config_path_raises(fake_mnn, tmp_path):

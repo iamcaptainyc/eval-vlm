@@ -91,6 +91,18 @@ inference:
     config_path: null         # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
     image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native OOM/segfault;设 0 关闭)(--mnn-image-max-side 永久写回)
     max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
+    # 防「满屏换行」退化:小模型(如 0.8B)纯贪心解码遇到「没把握」的图会陷入 \n\n\n… 复读到 max_tokens。
+    # 默认改用 MNN penalty 采样器:按重复惩罚压低已出现 token(含换行)的 logits,再贪心选词
+    # (输出仍确定、便于评测复现),从而打断复读。这些项加载后经 set_config 下发给 pymnn,键名对齐 MNN llmconfig。
+    sampler_type: penalty     # 采样器:penalty=按惩罚改分后再选词。设为 '' 则完全不下发、沿用模型 config.json 自带采样
+    penalty_sampler: greedy   # penalty 改分后的选词方式:greedy=确定;temperature=带随机
+    repetition_penalty: 1.1   # >1 惩罚已出现 token,<=1 关闭;复读仍严重可调到 1.2~1.3
+    presence_penalty: 0.0     # >0 对出现过的 token 一次性惩罚(通常留 0)
+    frequency_penalty: 0.0    # >0 按出现频次惩罚(通常留 0)
+    penalty_window: 0         # 计惩罚只看最近 N 个 token;0=整段历史
+    temperature: null         # 仅带随机的采样器下生效;null=用 MNN 默认(1.0)
+    top_k: null               # null=用 MNN 默认(40),仅随机采样时有意义
+    top_p: null               # null=用 MNN 默认(0.9)
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)

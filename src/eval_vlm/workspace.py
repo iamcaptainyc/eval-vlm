@@ -65,8 +65,10 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
     ("inference.openai.* (base_url / model / api_key_env / system_prompt / "
      "max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail)",
      "openai/vllm 后端设置(--base-url/--model 永久写回 openai.base_url/model)"),
-    ("inference.mnn.* (config_path / image_max_side / max_tokens)",
-     "mnn 后端设置(--mnn-config/--mnn-image-max-side 永久写回);产物目录名取 config_path 所在目录名"),
+    ("inference.mnn.* (config_path / image_max_side / max_tokens / "
+     "sampler_type / repetition_penalty / penalty_sampler / presence_penalty / "
+     "frequency_penalty / penalty_window / temperature / top_k / top_p)",
+     "mnn 后端设置(--mnn-config/--mnn-image-max-side 永久写回);采样项防小模型满屏换行退化;产物目录名取 config_path 所在目录名"),
     ("eval.targets / eval.context",
      "评测哪些 assistant 轮(all|last)、用什么上下文(rollout|gold)"),
     ("scoring.scorer / scoring.turn_scorers",

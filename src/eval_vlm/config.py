@@ -106,6 +106,23 @@ class MNNBackendConfig:
     image_max_side: int = 2048
     max_tokens: int = 512                       # 作为 response 的 max_new_tokens
 
+    # --- 采样 / 重复抑制 ---------------------------------------------------
+    # 小模型(如 0.8B)用纯贪心解码时,遇到「没把握」的图易陷入 "\n\n\n…" 退化循环,
+    # 整屏换行直到撞上 max_tokens。这里默认改用 MNN 的 penalty 采样器:先按重复惩罚
+    # 压低已出现 token(含换行)的 logits,再**贪心选词**——输出仍是确定性的(适合
+    # 评测复现),但能打断复读。各项在后端 __init__ 时经 set_config 下发给 pymnn。
+    # 设 sampler_type="" 则完全不下发、沿用模型 config.json 自带的采样设置。
+    # 键名对齐 MNN llmconfig(sampler.cpp:stepPenalty 仅在含 penalty 且 repetition_penalty>1 时生效)。
+    sampler_type: str = "penalty"               # penalty/greedy/mixed/temperature/topK/topP…;""=不覆盖
+    penalty_sampler: str = "greedy"             # penalty 改分后的选词方式(greedy=确定;temperature=带随机)
+    repetition_penalty: float = 1.1             # >1 惩罚已出现 token,<=1 关闭惩罚
+    presence_penalty: float = 0.0               # >0 对出现过的 token 一次性惩罚
+    frequency_penalty: float = 0.0              # >0 按出现频次惩罚
+    penalty_window: int = 0                     # 计惩罚只看最近 N 个 token;0=整段历史
+    temperature: Optional[float] = None         # 仅带随机的采样器下生效;None=用 MNN 默认(1.0)
+    top_k: Optional[int] = None                 # None=用 MNN 默认(40),仅随机采样时有意义
+    top_p: Optional[float] = None               # None=用 MNN 默认(0.9)
+
 
 @dataclass
 class InferenceConfig:

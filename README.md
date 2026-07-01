@@ -199,8 +199,24 @@ eval-vlm pred --datadir ./photos --backend mnn
 
 **约束**:pymnn 的 LLM 无批量接口且单个模型对象有状态(KV cache),因此 MNN 后端**强制串行**;
 仅支持**单图单轮**(`pred --datadir` 的默认场景)。mnn 块只含它真正会用到的设置
-(`config_path` / `image_max_side` / `max_tokens`),没有 `base_url`/`model`/并发等无意义字段;
-采样参数请在 MNN 自己的 `config.json` 里配。
+(`config_path` / `image_max_side` / `max_tokens` + 下面的采样项),没有 `base_url`/`model`/并发等无意义字段。
+
+**防「满屏换行」退化(采样设置)**:小模型(如 0.8B)用纯贪心解码时,遇到「没把握」的图常陷入
+`\n\n\n…` 退化循环,整屏换行直到撞 `max_tokens`。MNN 后端**默认改用 penalty 采样器**:先按重复惩罚
+压低已出现 token(含换行)的 logits,再**贪心选词**——输出仍是**确定性**的(便于评测复现),但能打断
+复读。相关项(经 `set_config` 在加载后下发给 pymnn,键名对齐 MNN `llmconfig`):
+
+| `inference.mnn` 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `sampler_type` | `penalty` | 采样器类型;`penalty`=按惩罚改分后再选词。设为 `""` 则**完全不下发**,沿用模型 `config.json` 自带采样 |
+| `penalty_sampler` | `greedy` | penalty 改分后的选词方式(`greedy`=确定;`temperature`=带随机) |
+| `repetition_penalty` | `1.1` | `>1` 惩罚已出现 token,`<=1` 关闭。复读仍严重可调到 `1.2`~`1.3` |
+| `presence_penalty` / `frequency_penalty` | `0.0` | 额外的出现/频次惩罚,通常留 0 即可 |
+| `penalty_window` | `0` | 计惩罚只看最近 N 个 token;`0`=整段历史 |
+| `temperature` / `top_k` / `top_p` | 空 | 仅带随机的采样器下生效;留空则用 MNN 默认(1.0 / 40 / 0.9) |
+
+> 仍满屏换行?多半是**转换层的 EOS / chat template 不匹配**(模型不发结束符),先调高 `repetition_penalty`
+> 兜住症状,再回头核对转换时的对话模板是否与训练一致。
 
 #### 自定义 vLLM API 与对话组织(`config.yaml`)
 
@@ -216,7 +232,7 @@ eval-vlm pred --datadir ./photos --backend mnn
 
 - **vLLM API**:`inference.openai:` 块全参可调 —— `base_url` / `model` / `api_key_env` / `max_tokens` /
   `temperature` / `max_concurrency` / `request_timeout` / `max_retries` / `image_detail` / `system_prompt`
-  (`backend=mnn` 时改用 `inference.mnn:` 块的 `config_path` / `image_max_side` / `max_tokens`)。
+  (`backend=mnn` 时改用 `inference.mnn:` 块的 `config_path` / `image_max_side` / `max_tokens` / 采样项)。
 - **对话组织**:`pred:` 块。两种写法二选一:
   - **单轮简写**:只设 `prompt`(+可选 `system_prompt`)。若 `prompt` 不含 `<image>`,自动在最前面加一个。
   - **多轮模板**:设 `template`(`role`/`content` 列表),**覆盖** `prompt`,可加纯文本 `assistant`/`user` 轮做 few-shot 引导。
@@ -257,7 +273,7 @@ pred:
 | --- | --- |
 | `data` | 数据源路径、图片根目录、LlamaFactory 字段映射(对齐 `dataset_info.json`) |
 | `split` | `ratio` 或 `count`、`seed`(确定性)、`stratify_by`(分层抽样) |
-| `inference` | `backend` 选后端;`openai:` 块(base_url/model/并发/重试/超时等)与 `mnn:` 块(config_path/image_max_side/max_tokens)各自独立 |
+| `inference` | `backend` 选后端;`openai:` 块(base_url/model/并发/重试/超时等)与 `mnn:` 块(config_path/image_max_side/max_tokens/采样项)各自独立 |
 | `eval` | `targets`(all/last)、`context`(rollout/gold):控制评测哪些轮、上下文来源 |
 | `scoring` | `scorer`(默认,可被 `--scorer` 覆盖)、`turn_scorers`(逐轮指定) |
 
