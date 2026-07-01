@@ -73,7 +73,7 @@ split:
 # CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显,自检用)
+  backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn,串行) | cmnn(本地 C++ 原生库,批量并行) | fake(回显,自检用)
   # openai/vllm 后端(也是 fake 自检走的块):
   openai:
     base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回)
@@ -109,6 +109,24 @@ inference:
     # top_p: 0.9
     # 高级逃生口:sampler_config 非空则原样下发 MNN 原生键(sampler_type/mixed_samplers…)、跳过上面翻译;
     #   设为 {} 则一概不下发、沿用模型 config.json 自带采样。
+    sampler_config: null
+  # cmnn 本地后端(C++ 原生库批量推理):功能同 mnn(多模态单图 + 同一套采样/缩放旋钮),
+  # 区别是走 C++ 起 num_workers 个 Llm 实例 + 线程池并行整批,绕开 pymnn 的 GIL 串行瓶颈。
+  # 下面除 num_workers/batch_size 外的项含义与 mnn 块完全一致(--cmnn-config 永久写回)。
+  cmnn:
+    config_path: null         # 转换产物目录里 config.json 的路径(--cmnn-config 永久写回;也据其所在目录名定产物子目录)
+    num_workers: 4            # 原生库内并发的 Llm 实例数(=真并行度);受内存约束,每实例各持一份 KV cache(--cmnn-num-workers 永久写回)
+    batch_size: 16            # 一次交给原生库的请求条数(分块喂,便于增量落盘/断点续跑;宜 >= num_workers)(--cmnn-batch-size 永久写回)
+    image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native OOM/segfault;设 0 关闭)
+    max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
+    # 采样 / 重复抑制:与 mnn 块同一套 value-gated 旋钮(含义见上方 mnn 注释)。
+    repetition_penalty: 1.1
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+    penalty_window: 0
+    temperature: null
+    top_k: null
+    top_p: null
     sampler_config: null
 
 # ---------------------------------------------------------------------------

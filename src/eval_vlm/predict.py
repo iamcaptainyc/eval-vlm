@@ -27,7 +27,7 @@ from tqdm import tqdm
 from .config import Config, PredConfig
 from .data.schema import Prediction, Turn
 from .inference import build_backend, worker_count
-from .inference.base import InferenceBackend
+from .inference.base import BatchItem, InferenceBackend
 from .results import store
 
 # 识别为图片的扩展名(大小写不敏感)。
@@ -285,7 +285,28 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                 fail_path.open("w", encoding="utf-8") as fail_fh, \
                 txt_path.open("w" if overwrite else "a", encoding="utf-8") as txt_fh:
             try:
-                if max_workers == 1:
+                if backend.supports_batch:
+                    # 批量后端(如 cmnn):把待描述图片**分块**交给后端,由其在原生层
+                    # 并行处理整块(N 个 Llm 实例线程池,无 GIL)。分块的意义是增量落盘/
+                    # 断点续跑:每块跑完即 flush+fsync,原生层 segfault 至多丢当前这一块,
+                    # 其余已落盘可续跑。块大小取后端配置 batch_size(宜 >= num_workers 喂满实例)。
+                    batch_size = max(1, getattr(cfg.inference.active, "batch_size", 1))
+                    pbar = tqdm(todo, total=len(todo), desc="describe", unit="image")
+                    for start_i in range(0, len(todo), batch_size):
+                        chunk = todo[start_i:start_i + batch_size]
+                        batch = [
+                            BatchItem(context=context, images=[p.name], sample_id=p.name)
+                            for p in chunk
+                        ]
+                        preds = backend.complete_batch(batch)   # 后端保证等长同序
+                        for p, pred in zip(chunk, preds):
+                            pred.turn = len(context)            # 同 _describe_one:填轮下标/原图
+                            pred.images = [p.name]
+                            _record(pred, ok_fh, fail_fh, txt_fh)
+                            pbar.update(1)
+                            pbar.set_postfix_str(p.name)
+                    pbar.close()
+                elif max_workers == 1:
                     # 串行后端(如 MNN):同一线程「算一条 -> 立即写盘」,不经线程池。
                     # 这对 MNN 尤其关键:pymnn 原生推理基本不释放 GIL,旧的线程池写法里
                     # worker 线程会连续跑完多张、主线程的写盘循环却抢不到调度,一旦某张在

@@ -132,6 +132,9 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("backend", "inference.backend"),
     ("mnn_config", "inference.mnn.config_path"),
     ("mnn_image_max_side", "inference.mnn.image_max_side"),
+    ("cmnn_config", "inference.cmnn.config_path"),
+    ("cmnn_num_workers", "inference.cmnn.num_workers"),
+    ("cmnn_batch_size", "inference.cmnn.batch_size"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -369,9 +372,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
                         help="[--datadir] 临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
     p_pred.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "fake"],
+                        choices=["openai", "vllm", "mnn", "cmnn", "fake"],
                         help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
-                             "mnn(本地 pymnn 推理转换后的 mnn 模型,需 --mnn-config)| "
+                             "mnn(本地 pymnn 推理转换后的 mnn 模型,串行,需 --mnn-config)| "
+                             "cmnn(本地 C++ 原生库批量推理,多实例并行,功能同 mnn,需 --cmnn-config)| "
                              "fake(回显,不联网,自检用)")
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
@@ -380,6 +384,17 @@ def build_parser() -> argparse.ArgumentParser:
                         default=None,
                         help="backend=mnn 时:图片最长边像素上限(超大图等比缩放;默认 2048;"
                              "设 0 关闭缩放)。临时覆盖 inference.mnn.image_max_side")
+    p_pred.add_argument("--cmnn-config", dest="cmnn_config", default=None,
+                        help="backend=cmnn 时:转换产物目录里 config.json 的路径"
+                             "(临时覆盖 inference.cmnn.config_path)")
+    p_pred.add_argument("--cmnn-num-workers", dest="cmnn_num_workers", type=int,
+                        default=None,
+                        help="backend=cmnn 时:原生库内并发的 Llm 实例数(=真并行度;默认 4)。"
+                             "临时覆盖 inference.cmnn.num_workers")
+    p_pred.add_argument("--cmnn-batch-size", dest="cmnn_batch_size", type=int,
+                        default=None,
+                        help="backend=cmnn 时:一次交给原生库的请求条数(分块喂,便于增量落盘;"
+                             "默认 16,宜 >= num_workers)。临时覆盖 inference.cmnn.batch_size")
     p_pred.add_argument("--force", action="store_true",
                         help="[--datadir] 重新生成文件夹内 config.yaml(覆盖你的手改)")
     p_pred.add_argument("--overwrite", action="store_true",

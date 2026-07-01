@@ -61,7 +61,7 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
     ("data.mapping.*",
      "字段映射(messages/images/role/content 等),对齐你的数据集格式"),
     ("inference.backend",
-     "推理后端 openai/vllm/mnn/fake;切换后只读对应块设置(--backend 永久写回)"),
+     "推理后端 openai/vllm/mnn/cmnn/fake;切换后只读对应块设置(--backend 永久写回)"),
     ("inference.openai.* (base_url / model / api_key_env / system_prompt / "
      "max_concurrency / max_tokens / temperature / request_timeout / max_retries / image_detail)",
      "openai/vllm 后端设置(--base-url/--model 永久写回 openai.base_url/model)"),
@@ -69,6 +69,9 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
      "repetition_penalty / frequency_penalty / presence_penalty / penalty_window / "
      "temperature / top_k / top_p / sampler_config)",
      "mnn 后端设置(--mnn-config/--mnn-image-max-side 永久写回);采样项 value-gated 防小模型满屏换行退化;产物目录名取 config_path 所在目录名"),
+    ("inference.cmnn.* (config_path / num_workers / batch_size / image_max_side / "
+     "max_tokens / repetition_penalty / … / sampler_config)",
+     "cmnn 后端设置(C++ 原生库批量推理,功能同 mnn;--cmnn-config/--cmnn-num-workers/--cmnn-batch-size 永久写回)"),
     ("eval.targets / eval.context",
      "评测哪些 assistant 轮(all|last)、用什么上下文(rollout|gold)"),
     ("scoring.scorer / scoring.turn_scorers",

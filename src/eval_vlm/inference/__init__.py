@@ -10,7 +10,8 @@ def build_backend(cfg: Config) -> InferenceBackend:
 
     可选:
       openai / vllm — OpenAI 兼容 HTTP API(vLLM/SGLang/LlamaFactory 部署);vllm 是 openai 的别名。
-      mnn           — 本地 MNN(pymnn)推理:训练后转 mnn 的模型,无需起服务。
+      mnn           — 本地 MNN(pymnn)推理:训练后转 mnn 的模型,串行,无需起服务。
+      cmnn          — 本地 MNN(C++ 原生库)**批量**推理:多实例线程池并行,功能同 mnn。
       fake          — 离线回显,自检/演示用。
     """
     name = cfg.inference.backend
@@ -20,10 +21,13 @@ def build_backend(cfg: Config) -> InferenceBackend:
     if name == "mnn":
         from .mnn_backend import MNNBackend
         return MNNBackend(cfg)
+    if name == "cmnn":
+        from .cmnn_backend import CMNNBackend
+        return CMNNBackend(cfg)
     if name == "fake":
         from .fake_backend import FakeBackend
         return FakeBackend(cfg)
-    raise ValueError(f"未知推理后端: {name!r}(可选: openai, vllm, mnn, fake)")
+    raise ValueError(f"未知推理后端: {name!r}(可选: openai, vllm, mnn, cmnn, fake)")
 
 
 def worker_count(backend: InferenceBackend, max_concurrency: int) -> int:
