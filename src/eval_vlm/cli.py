@@ -23,6 +23,7 @@ CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持
     --backend                pred 写回 inference.backend
     --mnn-config / --mnn-image-max-side   pred 写回 inference.mnn.config_path / image_max_side
     --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
+    --label-extract-url / --label-extract-token  pred 写回 label_extract.base_url / auth_token
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ from .config import Config, DEFAULT_PROMPT, load_dataset_config
 from .data.splitter import split_dataset
 from .runner import run_inference
 from .predict import predict_folder
+from .label_extract import run_label_extract
 from .evaluate import score_predictions
 from .scoring import available_scorers
 from . import workspace
@@ -93,13 +95,13 @@ def _cmd_split(args: argparse.Namespace) -> int:
         force=args.force,
     )
     cfg = load_dataset_config(folder)
-    # 自定义产物位置(临时覆盖,可直接写到 LlamaFactory data/)。
-    if args.train_out:
-        cfg.split.train_out = args.train_out
-    if args.val_out:
-        cfg.split.val_out = args.val_out
-    if args.test_out:
-        cfg.split.test_out = args.test_out
+    # 自定义产物位置(临时覆盖,可直接写到 LlamaFactory data/):
+    # 带路径=写该路径;光杆旗标=落到全局 <份>_out_dir/<数据集名>_<份>.json。
+    for kind in ("train", "val", "test"):
+        out = workspace.resolve_split_out(
+            getattr(args, f"{kind}_out"), kind, folder.name, global_cfg)
+        if out:
+            setattr(cfg.split, f"{kind}_out", out)
 
     meta = split_dataset(cfg)
     counts = meta["counts"]
@@ -135,6 +137,8 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
+    ("label_extract_url", "label_extract.base_url"),
+    ("label_extract_token", "label_extract.auth_token"),
 )
 
 
@@ -156,6 +160,21 @@ def _persist_overrides(folder: Path, args: argparse.Namespace) -> list[str]:
 def _report_persist(tag: str, persisted: list[str], folder: Path) -> None:
     if persisted:
         print(f"[{tag}] 已将 {', '.join(persisted)} 写回 {folder / 'config.yaml'}(永久生效)")
+
+
+def _maybe_label_extract(cfg: Config, args: argparse.Namespace) -> None:
+    """若 --label-extract:描述完成后读 predictions.jsonl,调远程服务抽取标签落 label.jsonl。
+
+    抽取失败按用户设定记 error 跳过、不中断整批(见 label_extract.run_label_extract)。
+    """
+    if not getattr(args, "label_extract", False):
+        return
+    stats = run_label_extract(cfg, overwrite=getattr(args, "overwrite", False))
+    print(f"[label-extract] 完成 {stats['newly_completed']} 条,失败 {stats['errors']} 条,"
+          f"跳过(已完成) {stats['skipped_already_done']} 条 -> {stats['labels_path']}")
+    if stats["errors"]:
+        print(f"[label-extract] 注意:有 {stats['errors']} 条抽取失败"
+              f"(已记录 label_failures.jsonl,可重跑补齐)。")
 
 
 def _do_run(cfg: Config, tag: str = "pred") -> dict:
@@ -192,6 +211,7 @@ def _pred_dataset(args: argparse.Namespace) -> int:
     _report_persist("pred", persisted, folder)
     print(f"[pred] 数据集预测,模型目录(按模型名区分)-> {cfg.run_dir}")
     _do_run(cfg)
+    _maybe_label_extract(cfg, args)
     return 0
 
 
@@ -279,6 +299,7 @@ def _pred_datadir(args: argparse.Namespace) -> int:
     print(f"[pred] 人类可读视图 -> {cfg.run_dir / 'predictions.txt'}")
     if stats["errors"]:
         print(f"[pred] 注意:有 {stats['errors']} 张失败(已记录到 failures.jsonl,可重跑补齐)。")
+    _maybe_label_extract(cfg, args)
     return 0
 
 
@@ -329,9 +350,13 @@ def build_parser() -> argparse.ArgumentParser:
                          help="随机种子(可复现);不传则用全局配置 split.seed")
     p_split.add_argument("--stratify-by", dest="stratify_by", default=None,
                          help="分层抽样字段名(如标签字段);不传则用全局配置 split.stratify_by")
-    p_split.add_argument("--train-out", default=None, help="覆盖 train.json 输出路径")
-    p_split.add_argument("--val-out", default=None, help="覆盖 val.json 输出路径")
-    p_split.add_argument("--test-out", default=None, help="覆盖 test.json 输出路径")
+    p_split.add_argument("--train-out", nargs="?", const="", default=None,
+                         help="覆盖 train 输出:带路径=写该路径;不带路径(光杆旗标)="
+                              "写到全局 train_out_dir/<数据集名>_train.json")
+    p_split.add_argument("--val-out", nargs="?", const="", default=None,
+                         help="覆盖 val 输出:带路径=写该路径;不带路径=写到全局 val_out_dir/<数据集名>_val.json")
+    p_split.add_argument("--test-out", nargs="?", const="", default=None,
+                         help="覆盖 test 输出:带路径=写该路径;不带路径=写到全局 test_out_dir/<数据集名>_test.json")
     p_split.add_argument("--force", action="store_true", help="数据集文件夹已存在时重建(覆盖 config.yaml)")
     _add_workspace_arg(p_split)
     p_split.set_defaults(func=_cmd_split)
@@ -384,6 +409,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="[--datadir] 重新生成文件夹内 config.yaml(覆盖你的手改)")
     p_pred.add_argument("--overwrite", action="store_true",
                         help="[--datadir] 无视已有结果整份重跑(覆盖 predictions.jsonl);默认断点续跑只补未完成")
+    p_pred.add_argument("--label-extract", dest="label_extract", action="store_true",
+                        help="描述完成后,把每张图的描述发给远程标签服务抽取结构化标签,"
+                             "结果存 label.jsonl(每行 {image, labels});失败记 label_failures.jsonl 可重跑。"
+                             "--overwrite 同时整份重抽标签")
+    p_pred.add_argument("--label-extract-url", dest="label_extract_url", default=None,
+                        help="临时覆盖标签服务地址 base_url(永久写回 label_extract.base_url)")
+    p_pred.add_argument("--label-extract-token", dest="label_extract_token", default=None,
+                        help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
     _add_inference_args(p_pred)
     _add_workspace_arg(p_pred)
     p_pred.set_defaults(func=_cmd_pred)

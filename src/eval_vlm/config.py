@@ -225,6 +225,30 @@ class PredConfig:
 
 
 @dataclass
+class LabelExtractConfig:
+    """描述完成后调远程服务抽取结构化标签(pred --datadir --label-extract 用)。
+
+    参照 app 的 LabelExtractService:POST {base_url}{path},Authorization 头带 bearer
+    token,请求体 {"text": <描述>};响应体 code==200 时,data.labels.cn 为「类目 ->
+    标签列表」,值为 ["无"] 表示该类目无内容。本工具只取 cn 里非「无」的标签,按类目/
+    列表顺序扁平合并成一个列表存入 label.jsonl(见 label_extract.parse_cn_labels)。
+    """
+    base_url: str = "https://canghai-agent-api-test.aijidou.com/"
+    path: str = "api/v1/vlm/label-extract"
+    # Authorization 头的完整值(含 bearer 前缀)。这是 app 里的测试 token,会过期;
+    # 过期后用 --label-extract-token 覆盖(永久写回本字段),或直接改这里。
+    auth_token: str = (
+        "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJ1c2VyX2lkIjoyLCJleHAiOjE3ODMzMjM4NDJ9."
+        "ggJb41tshiLZ-cmNEobWf9BygqlYynFmfj5OPEQARqs"
+    )
+    request_timeout: float = 30.0
+    max_retries: int = 3
+    max_concurrency: int = 4          # 抽取是纯 I/O,可并发(与推理后端是否串行无关)
+    none_label: str = "无"            # cn 中表示「无该类目」的占位值,过滤掉
+
+
+@dataclass
 class Config:
     run_name: str = "default_run"
     output_dir: str = "outputs"
@@ -234,6 +258,7 @@ class Config:
     eval: EvalConfig = field(default_factory=EvalConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     pred: PredConfig = field(default_factory=PredConfig)
+    label_extract: LabelExtractConfig = field(default_factory=LabelExtractConfig)
 
     # 配置文件所在目录,用于把相对路径解析成绝对路径。
     config_dir: Path = field(default_factory=lambda: Path.cwd())
@@ -315,6 +340,16 @@ class Config:
     def run_meta_path(self) -> Path:
         return self.run_dir / "run_meta.json"
 
+    @property
+    def labels_path(self) -> Path:
+        """label-extract 成功结果:每行 {image, labels}(与 predictions.jsonl 同目录)。"""
+        return self.run_dir / "label.jsonl"
+
+    @property
+    def label_failures_path(self) -> Path:
+        """label-extract 失败记录:每行 {image, error},供排查/重跑。"""
+        return self.run_dir / "label_failures.jsonl"
+
     def _resolve(self, p: str | os.PathLike[str]) -> Path:
         """相对路径相对当前工作目录(CWD)解析,绝对路径原样返回。
 
@@ -338,6 +373,7 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     type_hints = {f.name: f.type for f in fields(cls)}
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
+              "label_extract": LabelExtractConfig,
               "mapping": Mapping, "tags": Tags,
               "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig}
     for key, value in (data or {}).items():

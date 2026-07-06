@@ -18,12 +18,24 @@ from typing import Any, Optional
 import yaml
 
 # 全局配置的机器级顶层键(及默认值)。
-_TOP_KEYS = ("workspace", "media_root", "image_strip_prefix")
+_TOP_KEYS = ("workspace", "media_root", "image_strip_prefix",
+             "train_out_dir", "val_out_dir", "test_out_dir")
 _GLOBAL_DEFAULTS = {
     "workspace": "~/eval_vlm_workspace",
     "media_root": ".",
     "image_strip_prefix": None,
+    # 光杆旗标 --train-out/--val-out/--test-out 的默认落地目录:设了目录后,
+    # `eval-vlm split -d xxx.json --train-out`(不带路径)= 把 train 产物写到
+    # <该目录>/xxx_train.json(xxx=数据集名)。留空则该旗标只能带完整路径用。
+    "train_out_dir": None,
+    "val_out_dir": None,
+    "test_out_dir": None,
 }
+
+# 允许显式设为 null 的顶层键(其余顶层键不能为空)。
+_TOP_NULLABLE = frozenset(
+    {"image_strip_prefix", "train_out_dir", "val_out_dir", "test_out_dir"}
+)
 
 # split 默认值(嵌套在全局配置 split: 块下;不传 --train/--test 等时使用)。
 # 同时作为 init_dataset 的内置兜底,保证唯一真源。
@@ -44,6 +56,12 @@ _KEY_SPECS: tuple[tuple[str, str, Any, str], ...] = (
      "图片相对路径解析根(写进每个数据集的 config.yaml)"),
     ("image_strip_prefix", "字符串|null", _GLOBAL_DEFAULTS["image_strip_prefix"],
      "跨机训练要剥除的绝对路径前缀;本机不需要则设为 null"),
+    ("train_out_dir", "路径|null", _GLOBAL_DEFAULTS["train_out_dir"],
+     "光杆旗标 --train-out 的落地目录;设了后该旗标 = <目录>/<数据集名>_train.json"),
+    ("val_out_dir", "路径|null", _GLOBAL_DEFAULTS["val_out_dir"],
+     "光杆旗标 --val-out 的落地目录;设了后该旗标 = <目录>/<数据集名>_val.json"),
+    ("test_out_dir", "路径|null", _GLOBAL_DEFAULTS["test_out_dir"],
+     "光杆旗标 --test-out 的落地目录;设了后该旗标 = <目录>/<数据集名>_test.json"),
     ("split.train", "float", _SPLIT_DEFAULTS["train"],
      "默认训练集比例(不传 --train 时用)"),
     ("split.test", "float", _SPLIT_DEFAULTS["test"],
@@ -74,7 +92,8 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
     ("scoring.scorer / scoring.turn_scorers",
      "评分器与逐轮评分器(scorer 可用 --scorer 临时覆盖)"),
     ("split.train_out / val_out / test_out",
-     "三份产物的输出路径(可用 --train-out/--val-out/--test-out 临时覆盖)"),
+     "三份产物的输出路径(可用 --train-out/--val-out/--test-out 临时覆盖:带路径=该路径;"
+     "光杆旗标=落到全局 train_out_dir/val_out_dir/test_out_dir 下并自动命名 <数据集名>_<份>.json)"),
 )
 
 _DEFAULT_GLOBAL_TEXT = """\
@@ -85,6 +104,14 @@ _DEFAULT_GLOBAL_TEXT = """\
 workspace: ~/eval_vlm_workspace   # 所有数据集文件夹的父目录(split 在此创建 <数据集名>/)
 media_root: .                     # 图片相对路径解析根(写进每个数据集的 config.yaml)
 image_strip_prefix: null          # 跨机训练绝对前缀,本机不需要则 null
+
+# 光杆旗标 --train-out/--val-out/--test-out 的默认落地目录(不带路径时用)。
+# 设了目录后:eval-vlm split -d xxx.json --train-out
+#   -> 把 train 产物写到 <train_out_dir>/xxx_train.json(xxx=数据集名)。
+# 留 null 则这些旗标必须带完整路径。改法:eval-vlm config set train_out_dir <目录>
+train_out_dir: null               # 例:/root/autodl-tmp/LlamaFactory/data
+val_out_dir: null
+test_out_dir: null
 
 # split 默认比例/参数:不传 --train/--test/--val/--seed/--stratify-by 时用这里的值。
 # 命令行参数优先级更高。改法:eval-vlm config set split.train 0.9
@@ -175,8 +202,8 @@ def describe_settable_keys() -> str:
 
 
 def _coerce_top(key: str, value: Optional[str]) -> Any:
-    """顶层键类型转换:image_strip_prefix 允许 None,其余转字符串。"""
-    if key == "image_strip_prefix":
+    """顶层键类型转换:可空键(前缀/各 *_out_dir)允许 None,其余转字符串。"""
+    if key in _TOP_NULLABLE:
         return value                           # None 或字符串
     if value is None:
         raise ValueError(f"{key} 不能设为空")
@@ -278,6 +305,32 @@ def resolve_workspace(cli_override: Optional[str], global_cfg: dict[str, Any]) -
     """工作目录:命令行 --workspace 优先,否则全局配置 workspace。"""
     raw = cli_override if cli_override else global_cfg.get("workspace", _GLOBAL_DEFAULTS["workspace"])
     return Path(str(raw)).expanduser().resolve()
+
+
+def resolve_split_out(
+    value: Optional[str], kind: str, ds_name: str, global_cfg: dict[str, Any]
+) -> Optional[str]:
+    """把 --train-out/--val-out/--test-out 的取值解析成最终输出路径(或 None)。
+
+    kind ∈ {"train","val","test"}。value 语义(来自 argparse nargs="?"):
+      None -> 未提供该参数,不覆盖(返回 None,落默认 <数据集>/<份>.json)。
+      ""   -> 光杆旗标(如 `--train-out`,不带路径):落到全局 <kind>_out_dir 下,
+              自动命名 <数据集名>_<kind>.json(消除手工改名 + 复制到 LlamaFactory data/)。
+      其它  -> 用户显式给的完整路径,原样返回(向后兼容旧用法)。
+    """
+    if value is None:
+        return None
+    if value != "":
+        return value                           # 显式路径:原样
+    key = f"{kind}_out_dir"
+    out_dir = global_cfg.get(key)
+    if not out_dir:
+        raise ValueError(
+            f"--{kind}-out 作为旗标(不带路径)使用需先设置全局 {key}:\n"
+            f"       eval-vlm config set {key} <目录>\n"
+            f"    或直接给出完整路径:--{kind}-out <路径>"
+        )
+    return str(Path(str(out_dir)).expanduser() / f"{ds_name}_{kind}.json")
 
 
 def resolve_dataset_dir(name_or_path: str, workspace: Path) -> Path:

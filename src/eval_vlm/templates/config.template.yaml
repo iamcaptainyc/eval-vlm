@@ -144,3 +144,21 @@ pred:
   #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}
   #   - {role: assistant, content: "好的,请提供图片。"}
   #   - {role: user, content: "<image>请描述这张图片"}
+
+# ---------------------------------------------------------------------------
+# 标签抽取(仅 pred --datadir --label-extract;其它命令忽略本段)
+# 描述完成后,把每张图的描述 POST 给远程标签服务({base_url}{path},请求体 {"text":描述}),
+# 解析响应 data.labels.cn 里非「无」的中文标签,扁平合并写到 label.jsonl(每行 {image, labels});
+# 失败记 label_failures.jsonl,不中断整批,可重跑补齐。断点续跑跳过已完成,--overwrite 整份重抽。
+# CLI 覆盖永久写回:--label-extract-url -> base_url;--label-extract-token -> auth_token。
+# ---------------------------------------------------------------------------
+label_extract:
+  base_url: https://canghai-agent-api-test.aijidou.com/   # 服务根地址(--label-extract-url 永久写回)
+  path: api/v1/vlm/label-extract                           # 接口路径
+  # Authorization 头完整值(含 bearer 前缀)。测试 token 会过期,过期后用
+  # --label-extract-token 覆盖(永久写回),或直接改这里。
+  auth_token: bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJleHAiOjE3ODMzMjM4NDJ9.ggJb41tshiLZ-cmNEobWf9BygqlYynFmfj5OPEQARqs
+  request_timeout: 30         # 单请求超时(秒)
+  max_retries: 3              # 失败重试次数(指数退避)
+  max_concurrency: 4          # 抽取并发(纯 I/O,与推理后端是否串行无关)
+  none_label: 无              # cn 中表示「无该类目」的占位值,过滤掉

@@ -33,6 +33,51 @@ def test_split_custom_output_paths(messages_config, tmp_path):
     assert train and "messages" in train[0]
 
 
+def test_parser_train_out_flag_vs_path():
+    """--train-out 支持两种形态:光杆旗标(const="")与显式路径。"""
+    parser = build_parser()
+    bare = parser.parse_args(["split", "-d", "x.json", "--train-out"])
+    assert bare.train_out == ""                              # 光杆旗标 -> const
+    withpath = parser.parse_args(["split", "-d", "x.json", "--train-out", "/p/t.json"])
+    assert withpath.train_out == "/p/t.json"
+    none = parser.parse_args(["split", "-d", "x.json"])
+    assert none.train_out is None                            # 未提供
+
+
+def test_resolve_split_out_semantics(tmp_path):
+    """resolve_split_out:None->None;显式路径原样;光杆旗标->全局目录/<名>_<份>.json。"""
+    assert workspace.resolve_split_out(None, "train", "emo", {}) is None
+    assert workspace.resolve_split_out("/a/b.json", "train", "emo", {}) == "/a/b.json"
+    cfg = {"train_out_dir": str(tmp_path / "lf")}
+    got = workspace.resolve_split_out("", "train", "emo", cfg)
+    assert Path(got) == tmp_path / "lf" / "emo_train.json"
+    # 光杆旗标但未设全局目录 -> 报错(main() 会转成 [error])
+    with pytest.raises(ValueError):
+        workspace.resolve_split_out("", "train", "emo", {})
+
+
+def test_split_train_out_flag_autonames(tmp_path, monkeypatch):
+    """光杆 --train-out:train 产物落到全局 train_out_dir/<数据集名>_train.json。"""
+    monkeypatch.setenv("EVAL_VLM_CONFIG", str(tmp_path / "g.yaml"))
+    ws = tmp_path / "ws"
+    lf = tmp_path / "lf_data"
+    workspace.set_global_value("workspace", str(ws))
+    workspace.set_global_value("train_out_dir", str(lf))
+
+    ns = argparse.Namespace(
+        dataset=str(FIXTURES / "llamafactory_demo.json"), name=None,
+        train=0.6, test=0.4, val=None, seed=None, stratify_by=None,
+        train_out="", val_out=None, test_out=None,          # 光杆 --train-out
+        force=False, workspace=str(ws),
+    )
+    assert _cmd_split(ns) == 0
+    out = lf / "llamafactory_demo_train.json"
+    assert out.exists()                                      # 自动命名 + 落到全局目录
+    assert json.loads(out.read_text(encoding="utf-8"))      # 非空
+    # 默认数据集文件夹内不再产出 train.json(已重定向)
+    assert not (ws / "llamafactory_demo" / "train.json").exists()
+
+
 def test_parser_split_ratios():
     """split: --train/--test 设置比例,路由到 _cmd_split。"""
     parser = build_parser()
