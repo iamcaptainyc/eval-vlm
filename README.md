@@ -199,7 +199,32 @@ eval-vlm pred --datadir ./photos --backend mnn
 
 **约束**:pymnn 的 LLM 无批量接口且单个模型对象有状态(KV cache),因此 MNN 后端**强制串行**;
 仅支持**单图单轮**(`pred --datadir` 的默认场景)。mnn 块只含它真正会用到的设置
-(`config_path` / `image_max_side` / `max_tokens` + 下面的采样项),没有 `base_url`/`model`/并发等无意义字段。
+(`config_path` / 图片预处理项 / `max_tokens` / `system_prompt` + 下面的采样项),
+没有 `base_url`/`model`/并发等无意义字段。
+
+##### 图片预处理:对齐 LlamaFactory 训练时的规则(效果对不上 llamaboard 先查这里)
+
+LlamaFactory 训练时(`mm_plugin._preprocess_image`)会先把图片**限制总像素**再交给模型:
+超过 `image_max_pixels`(默认 **768×768**)按 `sqrt` 因子等比缩小、低于 `image_min_pixels`
+(默认 32×32)放大、最小边钳 28、长宽比 >200 钳到 180 倍。而 MNN 引擎自身**只按 28 对齐取整、
+不限总像素**——一张 1920×1080 的行车图直喂会产生约 **3.5 倍于训练分布的视觉 token**,注意力被
+稀释,答案自然丢失训练要点(这正是「llamaboard 答得很好、转 mnn 后重点全无」的最常见根因)。
+
+MNN 后端默认按同一套规则预处理(见下表),转换后模型的视觉输入与训练时一致:
+
+| `inference.mnn` 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `image_max_pixels` | `589824`(=768×768) | 总像素上限,同 LlamaFactory 训练默认;训练时若改过 `image_max_pixels`,这里也要改成一样 |
+| `image_min_pixels` | `1024`(=32×32) | 总像素下限,同 LlamaFactory 训练默认 |
+| `image_max_side` | `2048` | 最长边兜底(防 native OOM/segfault);经 `image_max_pixels` 后一般不触发 |
+| `system_prompt` | 空 | 经 `set_config` 下发、由 MNN 引擎拼进对话模板。训练若带 system 轮(LlamaFactory qwen2_vl 模板默认 `You are a helpful assistant.`),这里保持一致;空=沿用模型 `config.json` |
+
+> 其余两条链路本工具已与训练对齐,无需配置:**提示词**——`<image>` 占位符转成
+> `<img>image_0</img>` 后,MNN 引擎的 `apply_chat_template` 会套用转换时导出的对话模板
+> (`<|im_start|>user\n…`),与 LlamaFactory qwen2_vl 模板一致;**颜色通道**——`MNN.cv.imread`
+> 读出 BGR,引擎内部 `COLOR_BGR2RGB` 转回 RGB,与训练一致。
+> 若对齐后仍差距明显,剩下的是**量化损失**(如 HQQ 4bit):用转换工具的更高位宽
+> (8bit / 不量化)重转一次对比即可确认。
 
 ##### 采样设置:防「满屏换行」退化 + 采样参数详解
 

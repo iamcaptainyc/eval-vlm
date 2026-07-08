@@ -86,62 +86,84 @@ class MNNBackend(InferenceBackend):
         self.model.load()
         # 下发采样/重复抑制设置,缓解小模型贪心解码的「满屏换行」退化(见 _apply_sampler_config)。
         self._apply_sampler_config()
+        # 下发系统提示(若配置):MNN 引擎 apply_chat_template 时会把它拼进对话模板,
+        # 与训练时(LlamaFactory 模板的 system 轮)保持一致。空串视同未设。
+        if mc_system_prompt := self.cfg.inference.mnn.system_prompt:
+            if not self._push_config({"system_prompt": mc_system_prompt}):
+                import warnings
+                warnings.warn(
+                    "[mnn] system_prompt 下发失败(引擎无 set_config 或调用被拒),"
+                    "将沿用模型 config.json 自带的系统提示——与训练可能不一致。",
+                    stacklevel=2,
+                )
 
     # ------------------------------------------------------------------
-    def _imread(self, img_path: Path):
-        """安全地把图片读成 MNN Var(HWC, uint8, BGR),兼容 .webp 等格式 + 超大图缩放。
+    def _target_size(self, width: int, height: int) -> tuple[int, int]:
+        """按 LlamaFactory mm_plugin 的训练时预处理规则计算目标尺寸(宽, 高)。
 
-        1. 格式兼容:stb_image 不认 .webp/.gif 等,打不开会返回非法 Var -> segfault。
-           策略:不认的格式先用 Pillow 解码转临时 PNG 再 imread。
-        2. 超大图保护:分辨率过高(如 21MB PNG)会撑爆视觉编码器原生内存 -> segfault。
-           策略:原生格式先 imread 读出 Var,再查 shape;超限则回退 Pillow 缩放+重读。
+        依次应用(与 LlamaFactory _preprocess_image + Qwen2VLPlugin 相同):
+          1. 总像素 > image_max_pixels -> 按 sqrt 因子等比缩小(默认 768*768,
+             训练时的关键步骤:不做的话高分辨率图会产生远多于训练分布的视觉 token,
+             推理效果明显偏离训练);
+          2. 总像素 < image_min_pixels -> 按 sqrt 因子等比放大(默认 32*32);
+          3. 任一边 < 28 -> 该边钳到 28(Qwen2-VL 的 patch 下限);
+          4. 长宽比 > 200 -> 长边钳到短边×180(极端长图保护);
+          5. 最长边 > image_max_side -> 等比缩小(本工具的 native OOM 兜底)。
+        MNN 引擎随后自会把宽高对齐到 28 的倍数(qwen2VisionProcess),无需在此处理。
         """
-        max_side = self.cfg.inference.mnn.image_max_side
+        mc = self.cfg.inference.mnn
+        if width <= 0 or height <= 0:
+            raise ValueError(f"非法图片尺寸 {width}x{height}")
+        w, h = float(width), float(height)
+        if mc.image_max_pixels > 0 and w * h > mc.image_max_pixels:
+            factor = (mc.image_max_pixels / (w * h)) ** 0.5
+            w, h = w * factor, h * factor
+        if mc.image_min_pixels > 0 and w * h < mc.image_min_pixels:
+            factor = (mc.image_min_pixels / (w * h)) ** 0.5
+            w, h = w * factor, h * factor
+        w, h = max(w, 28.0), max(h, 28.0)
+        if w / h > 200.0:
+            w = h * 180.0
+        elif h / w > 200.0:
+            h = w * 180.0
+        if mc.image_max_side > 0 and max(w, h) > mc.image_max_side:
+            factor = mc.image_max_side / max(w, h)
+            w, h = w * factor, h * factor
+            # 兜底缩放可能把极端长图的短边压到 28 以下(MNN 按 28 对齐,过短会
+            # 取整到 0 个 patch -> native 崩溃),重新钳一次。
+            w, h = max(w, 28.0), max(h, 28.0)
+        return max(int(w), 1), max(int(h), 1)
 
-        if img_path.suffix.lower() in _IMREAD_NATIVE_OK:
-            var = self._cv.imread(str(img_path))
-            if max_side <= 0:
-                return var
-            shape = list(var.shape)
-            if len(shape) >= 2 and max(shape[0], shape[1]) <= max_side:
-                return var
-            # 超限:用 Pillow 缩放后重新 imread
-            from PIL import Image
-            h, w = int(shape[0]), int(shape[1])
-            ratio = max_side / max(h, w)
-            new_w, new_h = int(w * ratio), int(h * ratio)
+    def _imread(self, img_path: Path):
+        """把图片按训练时的预处理规则读成 MNN Var(HWC, uint8, BGR)。
+
+        - 目标尺寸由 _target_size 决定(对齐 LlamaFactory 训练预处理 + OOM 兜底);
+        - 尺寸无需变化且是原生支持格式(.jpg/.png 等)-> 直接 MNN.cv.imread 快路;
+        - 需要缩放或非原生格式(.webp/.gif 等 stb_image 不认,打不开会返回非法
+          Var -> segfault)-> Pillow 解码/缩放后转临时 PNG 再 imread。
+          缩放用 BICUBIC,与 LlamaFactory mm_plugin 的 resize 一致。
+        """
+        from PIL import Image
+
+        with Image.open(img_path) as im:
+            src_w, src_h = im.size
+            dst_w, dst_h = self._target_size(src_w, src_h)
+            need_resize = (dst_w, dst_h) != (src_w, src_h)
+            if not need_resize and img_path.suffix.lower() in _IMREAD_NATIVE_OK:
+                return self._cv.imread(str(img_path))
+            im = im.convert("RGB")
+            if need_resize:
+                im = im.resize((dst_w, dst_h), Image.BICUBIC)
             fd, tmp = tempfile.mkstemp(suffix=".png")
             os.close(fd)
             try:
-                with Image.open(img_path) as im:
-                    im = im.resize((new_w, new_h), Image.LANCZOS)
-                    im.convert("RGB").save(tmp, format="PNG")
+                im.save(tmp, format="PNG")
                 return self._cv.imread(tmp)
             finally:
                 try:
                     os.remove(tmp)
                 except OSError:
                     pass
-
-        # 非原生格式(.webp/.gif/.tiff 等):一律走 Pillow 解码 + 可选缩放
-        from PIL import Image
-
-        fd, tmp = tempfile.mkstemp(suffix=".png")
-        os.close(fd)
-        try:
-            with Image.open(img_path) as im:
-                if max_side > 0:
-                    w, h = im.size
-                    if max(w, h) > max_side:
-                        ratio = max_side / max(w, h)
-                        im = im.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
-                im.convert("RGB").save(tmp, format="PNG")
-            return self._cv.imread(tmp)
-        finally:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
 
     def _push_config(self, cfg: dict) -> bool:
         """尽力把一组配置经 set_config 下发给 pymnn,兼容新旧绑定签名。

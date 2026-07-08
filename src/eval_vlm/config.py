@@ -99,11 +99,24 @@ class MNNBackendConfig:
     # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create()。
     # 也据此(其所在目录名)决定产物子目录名;可用 pred 的 --mnn-config 临时覆盖。
     config_path: Optional[str] = None
-    # 图片最长边的像素上限。超大图(如几千×几千、几十 MB)原样喂进 pymnn 的 vision
-    # 编码器会在原生层 OOM/越界 -> Segmentation fault 直接 core dump 整个进程
-    # (Python 捕获不到)。超过此上限的图先等比缩放再推理,从根上避免崩溃。
-    # 正常尺寸图不受影响;设 <=0 关闭缩放(回到原样喂入,风险自负)。
+    # --- 图片预处理(对齐 LlamaFactory 训练时的 mm_plugin 规则)---
+    # 训练时 LlamaFactory 先把总像素超过 image_max_pixels 的图按 sqrt 因子缩小
+    # (默认 768*768=589824),再交给 HF processor;MNN 引擎自身只按 28 对齐取整、
+    # 不限总像素。不做这步缩小,高分辨率图会喂给视觉编码器远多于训练分布的 token,
+    # 推理结果明显偏离训练效果(丢失训练要点)。<=0 关闭。
+    image_max_pixels: int = 768 * 768
+    # 总像素下限(同 LlamaFactory 默认 32*32=1024,过小的图按 sqrt 因子放大)。<=0 关闭。
+    image_min_pixels: int = 32 * 32
+    # 图片最长边的像素上限(本工具的 native OOM 兜底,与训练预处理无关)。超大图
+    # (如几千×几千、几十 MB)原样喂进 pymnn 的 vision 编码器会在原生层 OOM/越界
+    # -> Segmentation fault 直接 core dump 整个进程(Python 捕获不到)。超过此上限
+    # 的图先等比缩放再推理。正常经 image_max_pixels 缩小后不会触发;设 <=0 关闭。
     image_max_side: int = 2048
+    # 系统提示:经 set_config 下发给 MNN 引擎,由其 apply_chat_template 拼进对话
+    # 模板。训练若带 system(LlamaFactory qwen2_vl 模板默认
+    # "You are a helpful assistant."),推理也应保持一致,否则小模型行为易漂移。
+    # None/空串 = 不下发,沿用模型 config.json 自带的 system_prompt。
+    system_prompt: Optional[str] = None
     max_tokens: int = 512                       # 作为 response 的 max_new_tokens
 
     # --- 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线)---
@@ -177,7 +190,7 @@ class InferenceConfig:
 
     @property
     def system_prompt(self) -> Optional[str]:
-        """当前后端块的系统提示(无则 None,如 mnn 不支持系统提示)。"""
+        """当前后端块的系统提示(openai 走系统消息;mnn 经 set_config 下发)。"""
         return getattr(self.active, "system_prompt", None)
 
 

@@ -89,7 +89,12 @@ inference:
   # mnn 本地后端(只列 mnn 真正会用到的项):
   mnn:
     config_path: null         # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
-    image_max_side: 2048      # 图片最长边像素上限(超大图等比缩放防 native OOM/segfault;设 0 关闭)(--mnn-image-max-side 永久写回)
+    # 图片预处理(对齐 LlamaFactory 训练时的 mm_plugin 规则;不对齐会导致视觉 token 数
+    # 偏离训练分布,推理效果明显变差):
+    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 LlamaFactory);超过按 sqrt 因子等比缩小;<=0 关闭
+    image_min_pixels: 1024    # 总像素下限(默认 32*32,同 LlamaFactory);不足按 sqrt 因子等比放大;<=0 关闭
+    image_max_side: 2048      # 最长边像素上限(native OOM 兜底;经 image_max_pixels 后一般不触发;设 0 关闭)(--mnn-image-max-side 永久写回)
+    system_prompt: null       # 系统提示,经 set_config 下发、由 MNN 引擎拼进对话模板;应与训练一致(LlamaFactory qwen2_vl 模板默认 "You are a helpful assistant.");null=沿用模型 config.json
     max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
     # 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线,无需碰 sampler_type)。
     # 小模型(如 0.8B)纯贪心解码遇到「没把握」的图会陷入 \n\n\n… 复读到 max_tokens;

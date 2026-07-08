@@ -75,9 +75,12 @@ def fake_mnn(monkeypatch):
 
 
 def _mnn_cfg(tmp_path) -> Config:
+    from PIL import Image
+
     imgs = tmp_path / "imgs"
     imgs.mkdir()
-    (imgs / "a.jpg").write_bytes(b"")        # cv.imread 被 mock,空文件足够通过 exists()
+    # 真实小图:新版 _imread 用 Pillow 打开原图取尺寸(对齐训练预处理),空文件会打不开。
+    Image.new("RGB", (420, 420), (10, 20, 30)).save(imgs / "a.jpg", format="JPEG")
     cfg = Config()
     cfg.inference.backend = "mnn"
     cfg.inference.mnn.config_path = str(tmp_path / "model" / "config.json")
@@ -155,7 +158,7 @@ def test_mnn_webp_transcodes_via_pillow(fake_mnn, tmp_path):
 
 
 def test_mnn_jpg_uses_native_imread_directly(fake_mnn, tmp_path):
-    """原生支持的扩展名(.jpg)直接走 imread 快路,不经 Pillow 转码。"""
+    """原生支持且无需缩放的图(.jpg,尺寸在训练预处理范围内)直接走 imread 快路。"""
     from eval_vlm.inference.mnn_backend import MNNBackend
 
     cfg = _mnn_cfg(tmp_path)
@@ -174,6 +177,100 @@ def test_mnn_jpg_uses_native_imread_directly(fake_mnn, tmp_path):
     assert pred.error is None
     # 直接拿到原始 .jpg 路径,无临时 png。
     assert calls and calls[0].lower().endswith("a.jpg")
+
+
+def test_mnn_target_size_matches_llamafactory_rules(fake_mnn, tmp_path):
+    """_target_size 复刻 LlamaFactory mm_plugin 的训练预处理:
+    超 image_max_pixels 按 sqrt 因子缩小、低于 image_min_pixels 放大、
+    最小边钳 28、极端长宽比钳 180 倍、image_max_side 兜底。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)
+
+    # 1920x1080 = 2073600 px > 768*768 -> factor=sqrt(589824/2073600)=0.5333…
+    w, h = backend._target_size(1920, 1080)
+    assert (w, h) == (1024, 576)
+    # 范围内的图不动。
+    assert backend._target_size(420, 420) == (420, 420)
+    # 过小的图放大到 image_min_pixels(32*32):8x8 -> 32x32。
+    assert backend._target_size(8, 8) == (32, 32)
+    # 最小边钳 28:100x16(1600px 在 min/max 之间)-> 高钳到 28。
+    assert backend._target_size(100, 16) == (100, 28)
+    # 长宽比 > 200 -> 长边钳到短边×180(先经 max_pixels 缩小后判断)。
+    w, h = backend._target_size(30000, 100)
+    assert w / h <= 200
+    # image_max_side 兜底缩放后短边重新钳 28(否则 MNN 按 28 对齐会取整到 0 个 patch)。
+    cfg.inference.mnn.image_max_pixels = 0
+    cfg.inference.mnn.image_min_pixels = 0
+    w, h = backend._target_size(30000, 150)
+    assert max(w, h) <= cfg.inference.mnn.image_max_side and min(w, h) >= 28
+    # 关闭各限制(<=0)则原样返回。
+    cfg.inference.mnn.image_max_side = 0
+    assert backend._target_size(5000, 5000) == (5000, 5000)
+
+
+def test_mnn_downscales_oversized_image_like_training(fake_mnn, tmp_path):
+    """超过 image_max_pixels 的大图:经 Pillow 按训练规则缩小后转临时 PNG 再 imread,
+    而不是原尺寸直喂(那会产生远超训练分布的视觉 token,答案偏离训练效果)。"""
+    from PIL import Image
+
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    big = Path(cfg.data.media_root) / "big.jpg"
+    Image.new("RGB", (1920, 1080), (1, 2, 3)).save(big, format="JPEG")
+
+    backend = MNNBackend(cfg)
+    sizes: list[tuple] = []
+    calls: list[str] = []
+
+    def _recording_imread(p, *a, **k):
+        calls.append(p)
+        with Image.open(p) as im:
+            sizes.append(im.size)
+        return _FakeImg(im.size[1], im.size[0])
+
+    backend._cv.imread = _recording_imread
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["big.jpg"], "big.jpg")
+
+    assert pred.error is None
+    assert calls[0].lower().endswith(".png")     # 走了 Pillow 缩放转码
+    assert sizes[0] == (1024, 576)               # 1920x1080 -> ~768*768 总像素
+
+
+def test_mnn_system_prompt_pushed_on_init(fake_mnn, tmp_path):
+    """inference.mnn.system_prompt 设置时,__init__ 经 set_config 下发给引擎
+    (由 MNN apply_chat_template 拼进对话模板,与训练的 system 轮对齐)。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    pushed: list = []
+    _FakeModel.set_config = lambda self, config: pushed.append(config) or True
+    try:
+        cfg = _mnn_cfg(tmp_path)
+        cfg.inference.mnn.system_prompt = "You are a helpful assistant."
+        MNNBackend(cfg)
+    finally:
+        del _FakeModel.set_config
+
+    assert {"system_prompt": "You are a helpful assistant."} in pushed
+
+
+def test_mnn_no_system_prompt_not_pushed(fake_mnn, tmp_path):
+    """system_prompt 未设(None)时不下发,沿用模型 config.json 自带值。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    pushed: list = []
+    _FakeModel.set_config = lambda self, config: pushed.append(config) or True
+    try:
+        cfg = _mnn_cfg(tmp_path)
+        MNNBackend(cfg)
+    finally:
+        del _FakeModel.set_config
+
+    assert not any(isinstance(c, dict) and "system_prompt" in c for c in pushed)
 
 
 def test_mnn_response_falls_back_to_two_arg_signature(fake_mnn, tmp_path):

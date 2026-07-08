@@ -210,7 +210,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
         )
 
     # system_prompt 运行时映射到当前后端块,复用后端既有系统消息处理
-    # (后端块若不支持系统提示——如 mnn——则跳过,不产生「设了不生效」的死配置)。
+    # (openai 走系统消息;mnn 经 set_config 下发给引擎的对话模板)。
     if cfg.pred.system_prompt is not None:
         active = cfg.inference.active
         if hasattr(active, "system_prompt"):
