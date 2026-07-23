@@ -104,6 +104,25 @@ def test_parser_eval_routes_and_overrides():
     assert args.scorer == "token_f1"
 
 
+def test_parser_eval_backend_flags():
+    """eval 也接受后端/权重 flag(与 pred 一致),让每个格式一条 eval 跑完 pred+score。"""
+    from eval_vlm.cli import _PERSIST_MAP
+    parser = build_parser()
+    args = parser.parse_args([
+        "eval", "--dataset", "emo_v4", "--backend", "mnn",
+        "--mnn-config", "/mnn/emo-4bit/config.json", "--mnn-quant", "hqq-4bit",
+        "--mnn-image-max-side", "1536",
+    ])
+    assert args.func is _cmd_eval
+    assert args.backend == "mnn" and args.mnn_config == "/mnn/emo-4bit/config.json"
+    assert args.mnn_quant == "hqq-4bit" and args.mnn_image_max_side == 1536
+    hf = parser.parse_args(["eval", "-d", "x", "--backend", "hf", "--hf-model", "/ckpt/h"])
+    assert hf.backend == "hf" and hf.hf_model == "/ckpt/h"
+    # 这些 flag 都在持久化映射里,_persist_overrides 会自动写回 config.yaml
+    persist_attrs = {a for a, _ in _PERSIST_MAP}
+    assert {"backend", "hf_model", "mnn_config", "mnn_quant", "mnn_image_max_side"} <= persist_attrs
+
+
 def test_parser_pred_and_score_require_target():
     parser = build_parser()
     # pred 取代旧 run:--dataset 走数据集预测
@@ -144,7 +163,7 @@ def test_eval_cli_persists_model_and_uses_model_dir(tmp_path, monkeypatch):
 
     # --model 写回 config.yaml(永久),产物落到该模型子目录
     assert "cli_model" in (folder / "config.yaml").read_text(encoding="utf-8")
-    assert (folder / "cli_model" / "predictions.jsonl").exists()
-    assert (folder / "cli_model" / "metrics.json").exists()
+    assert (folder / "cli_model" / "fake" / "predictions.jsonl").exists()
+    assert (folder / "cli_model" / "fake" / "metrics.json").exists()
     # 重新加载确认持久化生效
     assert load_dataset_config(folder).inference.openai.model == "cli_model"

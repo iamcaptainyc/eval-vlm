@@ -95,3 +95,84 @@ def test_token_f1_skipped_when_no_reference():
     sc = get_scorer("token_f1")
     r = sc.score_one("anything", None, _sample())
     assert r.detail.get("skipped") is True
+
+
+# ---- prefix_match(只比前 k 个字符,逻辑同 exact_match) ----
+
+def test_registry_has_prefix_match():
+    assert "prefix_match" in available_scorers()
+
+
+def test_prefix_match_hit_ignores_trailing():
+    """前 k 字符一致即命中,即使整串不同(与 exact_match 的关键区别)。"""
+    sc = get_scorer("prefix_match:3")
+    r = sc.score_one("红色的车厢", "红色的汽车", _sample())
+    assert r.score == 1.0                      # 前3字 "红色的" 相同,后续不同不影响
+    assert r.detail["prefix_match"] == 1.0
+    assert r.detail["k"] == 3
+
+
+def test_prefix_match_miss_on_early_diff():
+    """前 k 个字符里就有差异 -> 未命中。"""
+    sc = get_scorer("prefix_match:3")
+    r = sc.score_one("蓝色的车", "红色的车", _sample())
+    assert r.score == 0.0
+    assert r.detail["prefix_match"] == 0.0
+
+
+def test_prefix_match_normalizes_like_exact_match():
+    """归一化(大小写/标点/空白)后再比:'Red, apple' 与 'red apple' 前 3 字符一致。"""
+    sc = get_scorer("prefix_match:3")
+    r = sc.score_one("Red, apple", "red apple", _sample())
+    assert r.score == 1.0
+
+
+def test_prefix_match_k_via_name_suffix():
+    """名字后缀 prefix_match:K 指定 k,并体现在 detail 里。"""
+    sc = get_scorer("prefix_match:4")
+    r = sc.score_one("abcdef", "abcdZZ", _sample())
+    assert r.score == 1.0                      # 前4字 "abcd" 相同
+    assert r.detail["k"] == 4
+
+
+def test_prefix_match_short_reference_degrades_to_exact():
+    """reference 不足 k 个字符 -> 取其全部,退化为整串精确匹配。"""
+    sc = get_scorer("prefix_match:10")
+    assert sc.score_one("ab", "ab", _sample()).score == 1.0
+    assert sc.score_one("abc", "ab", _sample()).score == 0.0   # pred前10="abc" != ref"ab"
+
+
+def test_prefix_match_default_k():
+    """不带后缀的 prefix_match 用默认 k=10。"""
+    sc = get_scorer("prefix_match")
+    assert sc.k == 10
+    r = sc.score_one("x", "x", _sample())
+    assert r.score == 1.0 and r.detail["k"] == 10
+
+
+def test_prefix_match_bad_spec_raises():
+    for bad in ("prefix_match:abc", "prefix_match:0", "prefix_match:-3"):
+        try:
+            get_scorer(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} 应报错但未报")
+
+
+def test_prefix_match_aggregate_accuracy():
+    sc = get_scorer("prefix_match:2")
+    s = _sample()
+    results = [
+        sc.score_one("愤怒的表情", "愤怒", s),   # 前2字 "愤怒" == ref"愤怒" -> 命中
+        sc.score_one("开心", "愤怒", s),         # 前2字不同 -> 未命中
+    ]
+    agg = sc.aggregate(results)
+    assert agg["accuracy"] == 0.5
+    assert agg["prefix_k"] == 2
+
+
+def test_prefix_match_skipped_when_no_reference():
+    sc = get_scorer("prefix_match:5")
+    r = sc.score_one("anything", None, _sample())
+    assert r.detail.get("skipped") is True
+

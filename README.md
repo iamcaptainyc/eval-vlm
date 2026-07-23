@@ -47,6 +47,10 @@ scoring:
   turn_scorers: [token_f1, exact_match]   # 轮1描述用 token_f1(相似度),轮2标签用 exact_match
 ```
 
+> 轮2标签只想比**前 K 个字符**(答案开头就分对错,后续解释/标点不该影响判分)?用
+> `prefix_match:K`,如 `turn_scorers: [token_f1, prefix_match:10]`——逻辑同 exact_match
+> 但只比归一化后前 10 个字符。`K` 写在名字后缀里,缺省 `prefix_match` 取 K=10。
+
 ## 安装
 
 ```bash
@@ -61,7 +65,7 @@ pip install -e .
 
 - **机器级设置**(工作目录 `workspace`、图片根 `media_root`、跨机前缀 `image_strip_prefix`)放**全局配置** `~/.eval_vlm/config.yaml`(`EVAL_VLM_CONFIG` 环境变量可改路径),所有数据集共享、只配一次。
 - **每个数据集**是 `workspace/<数据集名>/` 一个**自包含文件夹**:`split` 时从内置模板自动生成该数据集的 `config.yaml`,连同 `split_meta.json`、`train/test.json` 落在里面(各模型共享)。
-- **产物按模型分目录**:`pred/score/eval` 的结果落在 `workspace/<数据集>/<模型名>/`(组织为 **工作目录/数据集/模型**)。模型名按后端取:openai/vllm/fake 取 `inference.openai.model`,mnn 取 `inference.mnn.config_path` 所在目录名。换模型 = 换结果目录,**不同模型对同一数据集互不覆盖**;同一模型目录已存在则按断点续跑沿用/补齐。
+- **产物按 模型/后端 分目录**:`pred/score/eval` 的结果落在 `workspace/<数据集>/<模型名>/<后端类型>/`(组织为 **工作目录/数据集/模型/后端**)。模型名按后端取:openai/vllm/fake 取 `inference.openai.model`,mnn 取 `inference.mnn.config_path` 所在目录名,hf 取 `inference.hf.model_path` 目录名;后端类型取 `inference.backend`(openai/vllm/mnn/hf/fake)。换模型或换后端 = 换结果目录,**同一模型的不同后端互不覆盖**(如 `<模型>/mnn` 与 `<模型>/hf` 并列);目录已存在则按断点续跑沿用/补齐。
 - **`--dataset` 两种含义**:`split --dataset <源JSON>` 是**初始化**(在工作目录建同名文件夹);`pred/score/eval --dataset <名|路径>` 是**读取**已存在的数据集文件夹(自动找夹内 `config.yaml`)。
 - **用户参数优先且持久化**:`--base-url/--model/--scorer/--backend/--mnn-config/--prompt` 等 CLI 覆盖会**永久写回**该数据集的 `config.yaml`(不再是临时),后续命令直接读到新值;当然也可直接手改 `config.yaml`。
 
@@ -122,10 +126,12 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | --- | --- | --- |
 | `config init / show / set <k> <v> / keys` | — | 管理全局配置;`keys` 列出全部可设置键(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`)及不可全局设的数据集级项 |
 | `split --dataset <源JSON>` | 源数据集 JSON 路径 | **初始化**:建文件夹 + 生成 config.yaml + 分割 |
-| `pred --dataset <名\|路径>` | 已存在数据集 | 读 test.json → `<数据集>/<模型>/predictions.jsonl`(只预测,不评分;等价旧 `run`) |
-| `pred --datadir <图片文件夹>` | 无标注图片文件夹 | **无标注图片描述**:逐张调 VLM,产物落 `workspace/<同名>/<模型>/`(不评分) |
-| `score --dataset <名\|路径>` | 已存在数据集 | 评分 → `<数据集>/<模型>/` 下 metrics/scored/failures/summary |
+| `pred --dataset <名\|路径>` | 已存在数据集 | 读 test.json → `<数据集>/<模型>/<后端>/predictions.jsonl`(只预测,不评分;等价旧 `run`) |
+| `pred --datadir <图片文件夹>` | 无标注图片文件夹 | **无标注图片描述**:逐张调 VLM,产物落 `workspace/<同名>/<模型>/<后端>/`(不评分) |
+| `score --dataset <名\|路径>` | 已存在数据集 | 评分 → `<数据集>/<模型>/<后端>/` 下 metrics/scored/failures/summary |
 | `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **pred + score**(不含 split) |
+| `precision --dataset <名\|路径>` | 已存在数据集 | 对比 **mnn(转换后) vs hf(转换前)** 的行为级精度误差 → `<数据集>/<mnn模型>/precision.{json,md}` |
+| `report --dataset <名\|路径>` | 已存在数据集 | **跨格式合并报告**:扫描该数据集下**全部已跑格式**(HF/各 MNN 变体),出质量并排 + 净质量Δ + 诊断 → `<数据集>/report.{json,md}`(纯读取,不跑模型) |
 
 > `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
 
@@ -142,9 +148,12 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `--train-out / --val-out / --test-out` | split | 把对应产物直接写到任意目录(如 LlamaFactory `data/`) |
 | `--base-url / --model` | pred / eval | **写回** `inference.openai.base_url / model`;`model` 同时决定 openai 后端产物子目录名 |
 | `--scorer` | score / eval | **写回** `scoring.scorer` |
-| `--backend openai\|vllm\|mnn\|fake` | pred | **写回** `inference.backend`(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;fake=回显不联网,自检用) |
-| `--mnn-config FILE` | pred | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(**写回** `inference.mnn.config_path`;也据其所在目录名定产物子目录) |
-| `--mnn-image-max-side N` | pred | mnn 后端图片最长边像素上限(超大图等比缩放防 native segfault;设 0 关闭)(**写回** `inference.mnn.image_max_side`) |
+| `--backend openai\|vllm\|mnn\|hf\|fake` | pred / eval | **写回** `inference.backend`(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;hf=本地 transformers 推理,作转换前参考;fake=回显不联网,自检用) |
+| `--mnn-config FILE` | pred / eval | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(**写回** `inference.mnn.config_path`;也据其所在目录名定产物子目录) |
+| `--mnn-image-max-side N` | pred / eval | mnn 后端图片最长边像素上限(超大图等比缩放防 native segfault;设 0 关闭)(**写回** `inference.mnn.image_max_side`) |
+| `--mnn-quant TEXT` | pred / eval | `--backend mnn` 时:量化配方标签(如 `hqq-4bit`/`hqq-8bit`),**纯记录**不参与推理;落进 run_meta/pred_meta 供 `report` 标注该变体(**写回** `inference.mnn.quant`) |
+| `--hf-model DIR` | pred / eval | `--backend hf` 时:本地 HF 权重目录(**写回** `inference.hf.model_path`;也用作产物子目录名) |
+| `--candidate-dir / --reference-dir` | precision | 候选(MNN)/ 参考(HF)模型名(其 `mnn`/`hf` 子目录);缺省按 `inference.mnn` / `inference.hf` 推断 |
 | `--prompt TEXT` | pred --datadir | **写回** `pred.prompt`(默认 `请描述图片`;设了多轮 `template` 时无效) |
 | `--system-prompt TEXT` | pred --datadir | **写回** `pred.system_prompt` |
 | `--overwrite` | pred --datadir | 无视已有结果整份重跑(覆盖 `predictions.jsonl`);默认断点续跑只补未完成 |
@@ -326,10 +335,120 @@ inference:
 > 仍满屏换行?多半是**转换层的 EOS / chat template 不匹配**(模型不发结束符),先调高 `repetition_penalty`/`frequency_penalty`
 > 兜住症状,再回头核对转换时的对话模板是否与训练一致。采样惩罚只治标,治不了「模型根本不发结束符」。
 
+### 测量 MNN 转换精度误差(`precision`)
+
+「llamaboard 答得好、转 mnn 后变差」到底**差多少、差在哪一环**?`precision` 命令给出**可量化**的答案:
+以本地 HF 模型(转换前·训练态)为参考基准,对比 mnn(转换后)在同一批样本上的**行为级**差异,
+并做**输入对齐审计**把误差定位到「预处理 / prefill / 解码」。
+
+> **为什么是行为级、不是 logits 级**:MNN 高层 API(`MNN.llm.response`)只返回解码文本、拿不到 logits,
+> 因此张量级 cosine/KL/SNR 在此架构下做不了。`precision` 改测两端**文本输出的一致性 + 输入对齐**——
+> 对定位「预处理不对齐」这一 VLM 最常见(也是本项目已记录的)根因最有效。真·数值级校验需在
+> `llmexport` 产出的 `llm.onnx` 中间件上用 MNN 原生 `tools/script/testMNNFromOnnx.py`(1% 相对误差阈 +
+> `DEBUG` 支配树二分定位坏算子),属另一条路径,不在本命令内。
+
+**三步流程**(候选与参考可在不同机器分别产出——MNN 边缘机 / HF GPU 机):
+
+```bash
+# 1) 参考:本地 HF(转换前)。需 transformers/torch(+ qwen-vl-utils)
+eval-vlm pred --dataset <数据集> --backend hf --hf-model /path/to/hf_ckpt
+# 2) 候选:本地 MNN(转换后)
+eval-vlm pred --dataset <数据集> --backend mnn --mnn-config /path/to/mnn/config.json
+# 3) 对比出报告(只读两份 predictions.jsonl,不再跑模型)
+eval-vlm precision --dataset <数据集>
+# -> <数据集>/<mnn模型名>/mnn/precision.md(汇总表 + 最差样本 side-by-side)+ precision.json
+```
+
+**报告指标与如何读**:
+
+| 指标 | 定位 | 好 / 坏 |
+| --- | --- | --- |
+| 输出完全一致率 | 端到端行为 | 越高越好;低于 `precision.agreement_min`(默认 0.9)报警 |
+| 平均 char token-F1 | 文本相似度(中文友好) | →1.0 好;低于 `token_f1_min` 报警 |
+| 平均编辑相似度 | 逐字漂移 | →1.0 好 |
+| 首发散字符位置分布 | **早发散**=prefill/预处理/算子;**晚发散**=解码噪声 | 早发散占多数会给出 🟠 提示 |
+| prompt token 数 Δ | 预处理/模板是否对齐(**主信号**:已含视觉 token 展开) | =0 好;≠0 给 🔴「预处理不对齐」 |
+| 图片 resize 像素 Δ | 图片预处理是否对齐 | =0 好;≠0 给 🔴 |
+
+> prompt token 数 Δ≠0 基本等价于「喂给两端模型的输入根本不一样」——此时先修预处理(见上一节
+> 图片预处理规则 / chat template),再谈模型精度。参考端(hf)的图片预处理复刻同一套
+> `image_max_pixels` 规则(`inference.hf` 块),使两端视觉 token 分布可比。
+
+阈值与对比对象可在 `config.yaml` 的 `precision:` 段调整(`candidate_dir`/`reference_dir` 缺省按
+`inference.mnn` / `inference.hf` 推断,也可用 `--candidate-dir`/`--reference-dir` 覆盖)。
+
+> **净质量Δ(vs gold)**:precision 默认是**行为级**(两端互比,不看标准答案)。若**两端都跑过
+> `score`**(各自有 `scored.jsonl`),precision 会额外算一段**净质量Δ**:把两端各自 vs gold 的逐轮
+> 命中交叉,给出「双方都对 / **HF 对了但候选错了(净回归)** / HF 错候选对(净改进) / 双错」。
+> 净回归率超 `precision.quality_regression_max`(默认 0.05)标 🔴 —— 这把「行为漂移」升级成「确实掉了质量」。
+> 二值 scorer(exact_match / prefix_match)才做 ✓/✗ 交叉;连续 scorer(token_f1)改记两端均分差。缺任一端
+> `scored.jsonl` 则优雅跳过(报告注明「先跑 score」)。
+
+### 一键合并报告(`report`)
+
+多个格式(HF 基准 + 4bit / 8bit 等 MNN 变体)分别 `eval` 完后,`report` 把它们**汇成一页**——
+不跑模型、只扫描该数据集下全部 `<模型>/<后端>/` 产物:
+
+```bash
+eval-vlm report --dataset <数据集>
+# -> <数据集>/report.md(+ report.json)
+```
+
+报告含四块:**① 绝对质量并排**(各格式各自 vs gold 的总分 + 逐轮主指标 + Δ vs HF 基准);
+**② 净质量Δ**(各 MNN 变体相对 HF 的净回归/改进,读两端 `scored.jsonl` 交叉);**③ 行为保真**
+(引用各 MNN 目录已生成的 `precision.json`);**④ 诊断结论**(规则式:掉分 + precision 报预处理不对齐
+→ 🔴 先修预处理;掉分但对齐正常 → 🟠 疑量化损失;掉分但没跑 precision → 🟠 建议先跑 precision)。
+量化变体建议用 `pred --mnn-quant hqq-4bit`(写回 `inference.mnn.quant`)打标,报告里即按 `hqq-4bit`/`hqq-8bit` 区分列。
+
+#### 完整流程:训练完 → 一页报告(可直接照抄)
+
+> 目标:量化「HF(转换前·训练态) vs MNN 各量化档」的效果差,并定位病根。
+> 每个格式一条 `eval`(= `pred` 推理 + `score` vs gold 打分);MNN 变体再跑 `precision`(vs HF 行为/对齐);最后 `report` 汇总。
+> **后端 / 权重路径通过 `eval`(或 `pred`)的 flag 传入并永久写回 `config.yaml`**,故后续 `precision`/`report` 直接读到——无需重复传。
+
+假设:数据集名 `emo_v4`(已 split);HF 权重目录 `/ckpt/qwen2vl-emo`;两个 MNN 转换产物
+`/mnn/emo-4bit/config.json`、`/mnn/emo-8bit/config.json`(4bit / 8bit 各一份)。
+
+```bash
+# 0)(若还没)初始化 + 分割
+eval-vlm split --dataset /data/emo_v4.json --train 0.95 --test 0.05
+
+# 1) HF 基准(转换前·训练态):一条 eval = pred(推理)+ score(vs gold 打分)
+eval-vlm eval --dataset emo_v4 --backend hf --hf-model /ckpt/qwen2vl-emo
+
+# 2) MNN 4bit:eval(打量化标签)+ precision(对 HF 行为/对齐)
+eval-vlm eval      --dataset emo_v4 --backend mnn --mnn-config /mnn/emo-4bit/config.json --mnn-quant hqq-4bit
+eval-vlm precision --dataset emo_v4          # 候选=当前 mnn(4bit),参考=hf,自动推断
+
+# 3) MNN 8bit:同上
+eval-vlm eval      --dataset emo_v4 --backend mnn --mnn-config /mnn/emo-8bit/config.json --mnn-quant hqq-8bit
+eval-vlm precision --dataset emo_v4
+
+# 4) 汇成一页合并报告
+eval-vlm report --dataset emo_v4
+# -> emo_v4/report.md(质量并排 + 净质量Δ + 行为保真 + 诊断结论)
+```
+
+产物目录(同数据集下各格式互不覆盖):
+
+```
+emo_v4/
+├── test.json / split_meta.json          # split 产物(各格式共享)
+├── qwen2vl-emo/hf/                       # HF 基准:metrics/scored/summary/run_meta ...
+├── emo-4bit/mnn/                         # 4bit:metrics/scored/precision ...(quant=hqq-4bit)
+├── emo-8bit/mnn/                         # 8bit:metrics/scored/precision ...(quant=hqq-8bit)
+└── report.md / report.json              # 跨格式合并报告
+```
+
+> - MNN 变体的子目录名取 `--mnn-config` 所在目录名(`emo-4bit` / `emo-8bit`),故不同档天然分目录、互不覆盖。
+> - `precision`/`report` 读的是**当前 `config.yaml` 指向的后端**;上面每步 `eval` 已把 backend/权重写回 config,所以紧随其后的 `precision` 正好作用在刚跑的那个格式上。
+> - `eval` 一步 = `pred` + `score`;若想分开(比如推理和打分在不同机器),把 `eval` 换成 `pred` + `score` 两条即可,flag 完全一致。
+> - 只想看**行为差异**、还没做 gold 打分?对 HF 与 MNN 都只跑 `pred`(不 `score`)再 `precision` 也行,只是报告的「净质量Δ」会标「先跑 score」。
+
 #### 自定义 vLLM API 与对话组织(`config.yaml`)
 
 `pred --datadir` 沿用**自包含文件夹模型**(同 `split`→`pred --dataset`):**首次运行**在 `<workspace>/<名>/` 生成一份
-`config.yaml`,**再次运行**直接读它;描述产物按模型落 `<workspace>/<名>/<模型名>/`。想完整定制
+`config.yaml`,**再次运行**直接读它;描述产物按 模型/后端 落 `<workspace>/<名>/<模型名>/<后端类型>/`。想完整定制
 **vLLM API** 或**每张图的对话怎么组织**,可手改这份 `config.yaml`(`--force` 可重新生成,覆盖手改),
 或直接用 CLI flag —— **用户参数会永久写回 `config.yaml`**(用户参数优先且持久化)。
 重新跑想覆盖旧结果用 `--overwrite`(默认断点续跑,只补未完成)。
@@ -356,15 +475,15 @@ pred:
 
 > 模板规则(否则构造时即报错):全部轮里 `<image>` **恰好出现 1 次**且**位于某个 `user` 轮**;**最后一轮必须是 `user`**(模型据此作答)。
 
-产物组织为 `<workspace>/<图片文件夹名>/<模型名>/`(`config.yaml` 在其父级,各模型共享;
+产物组织为 `<workspace>/<图片文件夹名>/<模型名>/<后端类型>/`(`config.yaml` 在其父级,各模型共享;
 若图片文件夹路径正是输出文件夹本身会报错,用 `--name` 区分):
 
 | 文件 | 位置 | 内容 |
 | --- | --- | --- |
 | `config.yaml` | `<名>/` | 该次 pred 的自包含配置(首次生成;重跑读取);CLI flag 会写回这里定制 vLLM API 与对话组织 |
-| `predictions.jsonl` | `<名>/<模型>/` | 每行一条成功描述,**原样 LlamaFactory 格式**(`messages` + `images`,多轮模板会完整保留各轮),可直接当新数据集复用;额外带 `id`/`latency` 便于追溯。**追加写,支持断点续跑**(已成功图片自动跳过;`--overwrite` 整份重跑) |
-| `failures.jsonl` | `<名>/<模型>/` | 每行一条失败记录(`id`/`image`/`error`),供排查与重跑(**仅反映本轮**:每次运行重写) |
-| `pred_meta.json` | `<名>/<模型>/` | 运行元信息(模型/后端/对话结构/计数/时间) |
+| `predictions.jsonl` | `<名>/<模型>/<后端>/` | 每行一条成功描述,**原样 LlamaFactory 格式**(`messages` + `images`,多轮模板会完整保留各轮),可直接当新数据集复用;额外带 `id`/`latency` 便于追溯。**追加写,支持断点续跑**(已成功图片自动跳过;`--overwrite` 整份重跑) |
+| `failures.jsonl` | `<名>/<模型>/<后端>/` | 每行一条失败记录(`id`/`image`/`error`),供排查与重跑(**仅反映本轮**:每次运行重写) |
+| `pred_meta.json` | `<名>/<模型>/<后端>/` | 运行元信息(模型/后端/对话结构/计数/时间) |
 
 支持的图片扩展名:`.png/.jpg/.jpeg/.webp/.bmp/.gif/.tif/.tiff`(仅当前层,不递归)。
 
@@ -399,29 +518,30 @@ data:
 
 ## 输出产物
 
-数据集级(各模型共享)落 `<workspace>/<数据集名>/`;模型级(pred/score/eval 结果)落
-`<workspace>/<数据集名>/<模型名>/` —— **不同模型对同一数据集互不覆盖**。
+数据集级(各模型共享)落 `<workspace>/<数据集名>/`;模型/后端级(pred/score/eval 结果)落
+`<workspace>/<数据集名>/<模型名>/<后端类型>/` —— **同一模型的不同后端互不覆盖**。
 
 | 文件 | 位置 | 内容 |
 | --- | --- | --- |
 | `config.yaml` | `<数据集>/` | 该数据集的自包含配置(split 时从内置模板生成;pred/score/eval 直接读它;CLI flag 写回这里) |
 | `train.json` / `test.json` / `val.json` | `<数据集>/` | 划分出的数据集,**均为原样 LlamaFactory 格式**(val 仅 `val>0` 时产出) |
 | `split_meta.json` | `<数据集>/` | 划分元信息(seed/比例/计数/源哈希/原始下标),用于复现与审计 |
-| `predictions.jsonl` | `<数据集>/<模型>/` | 每行一条预测(id/**turn**/prediction/**images**/latency/error),`images` 为原图地址可追溯回原图人工核查;多轮下每样本多行,**追加写,支持断点续跑** |
-| `metrics.json` | `<数据集>/<模型>/` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failed_samples`/`num_failed_targets`) |
-| `scored.jsonl` | `<数据集>/<模型>/` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...);机器可读全量数据 |
-| `failures.md` | `<数据集>/<模型>/` | **exact_match 未命中清单(人类可读)**:仅纳入 exact_match 评分错误的样本,按 `id` 分组列出**全部对话轮**(模型输出 vs 标准答案 + ✓/✗ + 原图地址),供人工核查。非 exact_match(如 token_f1)不计入 |
-| `summary.md` | `<数据集>/<模型>/` | 人类可读摘要(含未命中样本/目标轮数) |
-| `run_meta.json` | `<数据集>/<模型>/` | 运行元信息(模型/配置/时间/计数),用于复现 |
+| `predictions.jsonl` | `<数据集>/<模型>/<后端>/` | 每行一条预测(id/**turn**/prediction/**images**/latency/error),`images` 为原图地址可追溯回原图人工核查;多轮下每样本多行,**追加写,支持断点续跑** |
+| `metrics.json` | `<数据集>/<模型>/<后端>/` | 聚合指标(含 `per_turn` 逐轮分组指标 + `overall_mean_score` + `num_failed_samples`/`num_failed_targets`) |
+| `scored.jsonl` | `<数据集>/<模型>/<后端>/` | 逐(样本,轮)得分(id/turn/ordinal/scorer/score/**images**/...);机器可读全量数据 |
+| `failures.md` | `<数据集>/<模型>/<后端>/` | **exact_match 未命中清单(人类可读)**:仅纳入 exact_match 评分错误的样本,按 `id` 分组列出**全部对话轮**(模型输出 vs 标准答案 + ✓/✗ + 原图地址),供人工核查。非 exact_match(如 token_f1)不计入 |
+| `summary.md` | `<数据集>/<模型>/<后端>/` | 人类可读摘要(含未命中样本/目标轮数) |
+| `run_meta.json` | `<数据集>/<模型>/<后端>/` | 运行元信息(模型/配置/时间/计数 + mnn 的 `quant` 量化标签),用于复现 |
+| `report.md` / `report.json` | `<数据集>/`(**数据集级**,跨模型) | **合并报告**:扫描该数据集下全部格式(HF/各 MNN 变体),出「各格式 vs gold 质量并排 + Δ」「净质量Δ(HF对/候选错)」「行为保真(引用 precision)」「诊断结论」。由 `report` 命令生成,纯读取上述产物 |
 
 **多模型对比**:同一数据集换不同模型(改 `config.yaml` 的 `inference.openai.model`、`--model`,或换 mnn 模型)重跑,结果各进
-`<数据集>/<模型>/`,可并列对比、互不覆盖。
+`<数据集>/<模型>/<后端>/`,可并列对比、互不覆盖。
 
 **断点续跑**:`pred --dataset` 会跳过该模型目录 `predictions.jsonl` 中已成功的 id,只补缺失/失败的——大测试集中断后重跑无需从头。
 
 ## 扩展评分器
 
-内置 scorer:`exact_match`(归一化精确匹配 + 子串命中,适合多选 / 短答案 / 标签)与 `token_f1`(字符级 P/R/F1,中文友好,适合轮1这类开放式描述)。新增评分器:
+内置 scorer:`exact_match`(归一化精确匹配 + 子串命中,适合多选 / 短答案 / 标签)、`token_f1`(字符级 P/R/F1,中文友好,适合轮1这类开放式描述)与 `prefix_match:K`(只比较归一化后**前 K 个字符**是否完全相同,逻辑同 exact_match 但只看开头,适合「答案前几个字就分对错、后续解释不该影响判分」的标签轮;`K` 由名字后缀指定,如 `prefix_match:10`,缺省 `prefix_match` 取 K=10)。新增评分器:
 
 1. 在 `src/eval_vlm/scoring/` 下新建文件,继承 `Scorer`;
 2. 用 `@register("your_name")` 装饰;
@@ -443,12 +563,16 @@ src/eval_vlm/
 │   ├── base.py          # 后端接口(thread_safe 标志:有状态后端串行)
 │   ├── openai_backend.py# OpenAI 兼容调用(图片 base64、并发、重试;vllm 为其别名)
 │   ├── mnn_backend.py   # 本地 MNN(pymnn)推理(转换后的 mnn 模型,无需服务)
+│   ├── hf_backend.py    # 本地 HF(transformers)推理(转换前参考基准,precision 用)
 │   └── fake_backend.py  # 离线回显后端(测试/演示)
 ├── scoring/
 │   ├── base.py / registry.py / exact_match.py / token_f1.py   # 可插拔评分
 ├── results/store.py     # 产物读写(断点续跑)
 ├── runner.py            # 执行测试(并发编排)
 ├── predict.py           # 无标注图片文件夹 -> 单轮描述(不评分)
+├── precision.py         # mnn(转换后) vs hf(转换前) 行为级精度误差对比(+ 净质量Δ)
+├── compare.py           # 两份 scored.jsonl 交叉出净质量Δ(precision/report 共用)
+├── report.py            # 跨格式合并质量报告(HF vs 各 MNN 变体:质量并排 + 净质量Δ + 诊断)
 ├── evaluate.py          # 评分编排
 ├── workspace.py         # 工作目录模型:全局配置 + 数据集初始化/定位 + 模板渲染
 ├── templates/

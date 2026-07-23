@@ -84,9 +84,31 @@ class OpenAIBackendConfig:
     max_concurrency: int = 8
     max_tokens: int = 512
     temperature: float = 0.0
+    top_p: float = 1.0                          # nucleus 采样(累积概率到 p);1.0 = 不截断
     request_timeout: float = 120.0
     max_retries: int = 3
     image_detail: str = "auto"
+
+
+@dataclass
+class HFBackendConfig:
+    """HuggingFace(transformers)本地参考后端设置,独立成块。
+
+    用途:作为「转换前·训练态」的**参考基准**,与 mnn(转换后)后端做精度对比
+    (见 precision 命令)。用 transformers 直接加载本地权重推理,复刻 LlamaFactory
+    的图片预处理(image_max_pixels 规则),使其行为尽量贴近训练时。可选依赖:
+    未装 transformers/torch 时构造后端才报错,不影响其它后端。
+    """
+    model_path: Optional[str] = None            # 本地 HF 权重目录;也据其目录名定产物子目录
+    max_tokens: int = 512                       # generate 的 max_new_tokens
+    # 图片预处理:与 MNNBackendConfig 同一套规则(对齐 LlamaFactory 训练),
+    # 下发给 processor 的 min_pixels/max_pixels,使参考端与候选端预处理一致。
+    image_max_pixels: int = 768 * 768           # 总像素上限(超过按 sqrt 因子缩小);<=0 关闭
+    image_min_pixels: int = 32 * 32             # 总像素下限(不足按 sqrt 因子放大);<=0 关闭
+    system_prompt: Optional[str] = None         # 系统提示(应与训练一致);None=不加
+    device: str = "auto"                        # auto/cuda/cpu,传给 from_pretrained(device_map)
+    dtype: str = "auto"                         # auto/bfloat16/float16/float32
+    greedy: bool = True                         # True=贪心解码(确定可复现);False=按模型默认采样
 
 
 @dataclass
@@ -137,6 +159,9 @@ class MNNBackendConfig:
     # 高级逃生口:非空 dict 会**原样**下发给 MNN set_config、跳过上面的自动翻译(可直接写
     # sampler_type / mixed_samplers 等 MNN 原生键);设为 {} 则一概不下发、沿用模型 config.json 自带采样。
     sampler_config: Optional[dict] = None
+    # 量化配方标签(如 "hqq-4bit" / "hqq-8bit")。**纯记录用,不参与推理**:落进 run_meta/
+    # pred_meta,供 report 命令在质量并排表里标注该 MNN 变体是哪档量化,便于归因量化损失。
+    quant: Optional[str] = None
 
 
 @dataclass
@@ -149,16 +174,19 @@ class InferenceConfig:
     backend: str = "openai"
     openai: OpenAIBackendConfig = field(default_factory=OpenAIBackendConfig)
     mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
+    hf: HFBackendConfig = field(default_factory=HFBackendConfig)
 
     @property
     def active(self) -> Any:
-        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn)。"""
+        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;hf -> hf)。"""
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai
         if self.backend == "mnn":
             return self.mnn
+        if self.backend == "hf":
+            return self.hf
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, fake)"
         )
 
     @property
@@ -166,16 +194,20 @@ class InferenceConfig:
         """产物子目录名(<数据集>/<result_name>/),按后端取其模型标识。
 
         openai/vllm/fake -> openai.model;mnn -> config_path 所在目录名
-        (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model'。
+        (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model';
+        hf -> model_path 目录名,缺省回落 'hf-model'。
         """
         if self.backend == "mnn":
             cp = self.mnn.config_path
             return Path(cp).expanduser().parent.name if cp else "mnn-model"
+        if self.backend == "hf":
+            mp = self.hf.model_path
+            return Path(mp).expanduser().name if mp else "hf-model"
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai.model
         # 未知后端:与 active 一致地报错,而不是伪装成 openai 给出一个看似正常的目录名。
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, fake)"
         )
 
     @property
@@ -262,6 +294,26 @@ class LabelExtractConfig:
 
 
 @dataclass
+class PrecisionConfig:
+    """精度对比(precision 命令)设置:量化 mnn(转换后)相对 hf(转换前)的行为误差。
+
+    对比是**解耦**的:不在同进程跑两个模型,而是各自用 `pred` 产出 predictions.jsonl
+    (落在 <数据集>/<模型名>/<后端类型>/,候选走 mnn、参考走 hf 子目录),
+    precision 只读这两份产物做对比 + 出报告。
+    candidate/reference 指两个**模型名**;留空则默认取当前 mnn/hf 后端的 result_name。
+    """
+    candidate_dir: Optional[str] = None   # 候选(转换后,MNN)模型名(其 mnn 子目录);None=inference.mnn 的 result_name
+    reference_dir: Optional[str] = None   # 参考(转换前,HF)模型名(其 hf 子目录);None=inference.hf 的 result_name
+    agreement_min: float = 0.9            # 输出完全一致率低于此值 -> 报告标注「行为偏差偏大」
+    token_f1_min: float = 0.9             # 平均 char token-F1 低于此值 -> 标注「文本相似度偏低」
+    alignment_strict: bool = True         # True:prompt token 数 / 图片像素数有任一 delta≠0 即标注「预处理不对齐」
+    max_worst_samples: int = 20           # precision.md 里展开的「最差样本」条数
+    # 净质量Δ:候选(MNN)相对参考(HF)的「净回归率」(HF对了但MNN错了的占比)超过此值 -> 报告标 🔴。
+    # 需两端都跑过 score(各自 scored.jsonl 存在)才计算;缺任一则跳过该项。
+    quality_regression_max: float = 0.05
+
+
+@dataclass
 class Config:
     run_name: str = "default_run"
     output_dir: str = "outputs"
@@ -272,6 +324,7 @@ class Config:
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     pred: PredConfig = field(default_factory=PredConfig)
     label_extract: LabelExtractConfig = field(default_factory=LabelExtractConfig)
+    precision: "PrecisionConfig" = field(default_factory=lambda: PrecisionConfig())
 
     # 配置文件所在目录,用于把相对路径解析成绝对路径。
     config_dir: Path = field(default_factory=lambda: Path.cwd())
@@ -295,14 +348,18 @@ class Config:
 
     @property
     def run_dir(self) -> Path:
-        """本次 pred/score/eval 的产物目录 = 数据集文件夹 / <模型名>。
+        """本次 pred/score/eval 的产物目录 = 数据集文件夹 / <模型名> / <后端类型>。
 
-        按 inference.result_name 分目录(openai/vllm/fake 取 openai.model;mnn 取
-        config_path 所在目录名),使不同模型对同一数据集的结果互不覆盖
-        (组织为 工作目录/数据集/模型)。split 产物(train/test/val/split_meta)
-        是各模型共享的,落在 dataset_dir,不进这个子目录。
+        三级组织(数据集 / 模型名 / 后端类型):模型名按 inference.result_name 取
+        (openai/vllm/fake 取 openai.model;mnn 取 config_path 所在目录名;hf 取
+        model_path 目录名);后端类型取 inference.backend(openai/vllm/mnn/hf/fake)。
+        这样「同一模型的不同后端」结果互不覆盖(如 <模型>/mnn 与 <模型>/hf 并列),
+        便于 precision 对比。split 产物(train/test/val/split_meta)是各模型共享的,
+        落在 dataset_dir,不进这些子目录。
         """
-        return self.dataset_dir / safe_model_dirname(self.inference.result_name)
+        return (self.dataset_dir
+                / safe_model_dirname(self.inference.result_name)
+                / safe_model_dirname(self.inference.backend))
 
     # ---- 产物路径(三步之间的解耦契约) ----
     # split 产物:数据集级,各模型共享 -> 落在 dataset_dir。
@@ -353,6 +410,43 @@ class Config:
     def run_meta_path(self) -> Path:
         return self.run_dir / "run_meta.json"
 
+    # ---- precision(mnn vs hf 精度对比)----
+    def model_run_dir(self, model_name: str, backend: str) -> Path:
+        """按模型名 + 后端类型取产物子目录 <数据集>/<安全模型名>/<后端类型>/。
+
+        precision 命令据此定位候选(MNN)/参考(HF)各自的 predictions.jsonl,
+        与 run_dir(当前后端的目录)解耦,可对比任意两个已跑过的模型/后端。
+        """
+        return (self.dataset_dir
+                / safe_model_dirname(model_name)
+                / safe_model_dirname(backend))
+
+    def predictions_path_for(self, model_name: str, backend: str) -> Path:
+        """某模型 + 后端子目录下的 predictions.jsonl(precision 对比读它)。"""
+        return self.model_run_dir(model_name, backend) / "predictions.jsonl"
+
+    @property
+    def precision_report_path(self) -> Path:
+        """机器可读精度对比报告(落在当前后端=候选模型子目录)。"""
+        return self.run_dir / "precision.json"
+
+    @property
+    def precision_md_path(self) -> Path:
+        """人类可读精度对比报告。"""
+        return self.run_dir / "precision.md"
+
+    # ---- report(跨格式合并质量报告)----
+    # 数据集级(跨模型/后端),落在 dataset_dir 顶层,与各模型子目录并列。
+    @property
+    def report_md_path(self) -> Path:
+        """人类可读合并报告(HF vs 各 MNN 变体的质量并排 + 净质量Δ + 诊断)。"""
+        return self.dataset_dir / "report.md"
+
+    @property
+    def report_json_path(self) -> Path:
+        """机器可读合并报告。"""
+        return self.dataset_dir / "report.json"
+
     @property
     def labels_path(self) -> Path:
         """label-extract 成功结果:每行 {image, labels}(与 predictions.jsonl 同目录)。"""
@@ -386,9 +480,10 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     type_hints = {f.name: f.type for f in fields(cls)}
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
-              "label_extract": LabelExtractConfig,
+              "label_extract": LabelExtractConfig, "precision": PrecisionConfig,
               "mapping": Mapping, "tags": Tags,
-              "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig}
+              "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
+              "hf": HFBackendConfig}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

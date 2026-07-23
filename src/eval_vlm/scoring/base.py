@@ -25,6 +25,16 @@ class Scorer(ABC):
 
     name: str = "base"
 
+    @classmethod
+    def from_spec(cls, spec: str, **kwargs: Any) -> "Scorer":
+        """从 "name:spec" 里的参数后缀 spec 构造 scorer。
+
+        注册表在遇到带冒号的名字(如 "prefix_match:10")时调用本方法,
+        把冒号后的部分原样交给对应 scorer 解释。默认不接受任何参数后缀;
+        需要参数的 scorer(如 prefix_match)覆写本方法自行解析。
+        """
+        raise ValueError(f"scorer {cls.name!r} 不支持参数后缀(收到 ':{spec}')")
+
     @abstractmethod
     def score_one(
         self, prediction: str, reference: Optional[str], sample: Sample

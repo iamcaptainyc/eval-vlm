@@ -114,6 +114,7 @@ class OpenAIBackend(InferenceBackend):
                     messages=messages,
                     max_tokens=oc.max_tokens,
                     temperature=oc.temperature,
+                    top_p=oc.top_p,
                 )
                 text = resp.choices[0].message.content or ""
                 return Prediction(

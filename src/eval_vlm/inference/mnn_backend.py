@@ -368,6 +368,11 @@ class MNNBackend(InferenceBackend):
                 # stream=False -> 返回完整生成文本;自适应兼容新旧绑定签名。
                 text_out = self._respond(prompt, mc.max_tokens)
                 raw = self._collect_stats()
+                # 输入对齐元数据(供 precision 的对齐审计):喂给视觉编码器的 resize 后像素数,
+                # 及 prompt token 数(prompt_len 已含视觉 token 展开,是对齐的主信号)的规范键名。
+                raw["resized_pixels"] = int(width) * int(height)
+                if "prompt_len" in raw:
+                    raw.setdefault("prompt_token_count", raw["prompt_len"])
                 return Prediction(
                     id=sample_id,
                     prediction=text_out or "",

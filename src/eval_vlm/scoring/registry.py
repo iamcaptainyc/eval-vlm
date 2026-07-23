@@ -20,11 +20,20 @@ def register(name: str) -> Callable[[Type[Scorer]], Type[Scorer]]:
 
 
 def get_scorer(name: str, **kwargs) -> Scorer:
-    if name not in _REGISTRY:
+    """按名称构造 scorer。
+
+    支持 "base:spec" 形式的参数后缀(如 "prefix_match:10"):冒号前查注册表,
+    冒号后交给该 scorer 的 from_spec 解析。无后缀则直接实例化(向后兼容)。
+    """
+    base, sep, spec = name.partition(":")
+    if base not in _REGISTRY:
         raise ValueError(
             f"未知 scorer: {name!r}。可用: {', '.join(sorted(_REGISTRY)) or '(空)'}"
         )
-    return _REGISTRY[name](**kwargs)
+    cls = _REGISTRY[base]
+    if sep:
+        return cls.from_spec(spec, **kwargs)
+    return cls(**kwargs)
 
 
 def available_scorers() -> list[str]:

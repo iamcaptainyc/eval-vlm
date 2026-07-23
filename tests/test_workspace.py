@@ -111,8 +111,8 @@ def test_init_dataset_creates_self_contained_folder(temp_global):
 
     cfg = load_dataset_config(folder)
     assert cfg.dataset_dir == folder                      # 数据集文件夹钉到文件夹本身
-    # 产物按模型分目录:工作目录/数据集/<inference.model>(默认 trained-vlm)
-    assert cfg.run_dir == folder / "trained-vlm"
+    # 产物按 模型/后端 分目录:工作目录/数据集/<inference.model>/<backend>(默认 trained-vlm/openai)
+    assert cfg.run_dir == folder / "trained-vlm" / "openai"
     assert cfg.data.source.endswith("llamafactory_demo.json")
     assert cfg.data.media_root == str(FIXTURES)
     assert cfg.split.train == 0.6 and cfg.split.test == 0.4
@@ -153,8 +153,8 @@ def test_end_to_end_via_workspace(temp_global):
     # split 产物(各模型共享)落数据集文件夹本身
     for name in ("config.yaml", "split_meta.json", "test.json"):
         assert (folder / name).exists(), f"缺少数据集级产物 {name}"
-    # run/score 产物按模型分目录:数据集/<inference.model>/
-    mdir = folder / "trained-vlm"
+    # run/score 产物按 模型/后端 分目录:数据集/<inference.model>/<backend>/
+    mdir = folder / "trained-vlm" / "fake"
     for name in ("predictions.jsonl", "metrics.json", "scored.jsonl",
                  "failures.md", "summary.md"):
         assert (mdir / name).exists(), f"缺少模型级产物 {name}"
@@ -201,8 +201,8 @@ def test_per_model_dirs_isolate_results(temp_global):
     run_inference(cfg)
     score_predictions(cfg)
 
-    a = folder / "model_a"
-    b = folder / "model_b"
+    a = folder / "model_a" / "fake"
+    b = folder / "model_b" / "fake"
     assert (a / "predictions.jsonl").exists() and (a / "metrics.json").exists()
     assert (b / "predictions.jsonl").exists() and (b / "metrics.json").exists()
     # 互不覆盖:各自 metrics 记录自己的模型名
@@ -227,8 +227,8 @@ def test_set_dataset_value_persists_and_keeps_comments(temp_global):
     assert cfg.scoring.scorer == "token_f1"
     # 注释保留(整行替换只改值)
     assert "#" in (folder / "config.yaml").read_text(encoding="utf-8")
-    # 产物目录随写回的模型名走(非法字符折成 _)
-    assert cfg.run_dir == folder / "Qwen_Qwen2-VL"
+    # 产物目录随写回的模型名走(非法字符折成 _),后接后端类型
+    assert cfg.run_dir == folder / "Qwen_Qwen2-VL" / "openai"
 
 
 def test_set_dataset_value_missing_config_raises(tmp_path):
@@ -252,8 +252,8 @@ def test_set_dataset_value_three_level_nested(temp_global):
     assert cfg.inference.mnn.image_max_side == 1024
     # 写 mnn 块没有污染 openai 块
     assert cfg.inference.openai.model == "openai-model"
-    # mnn 后端产物子目录名取 config.json 所在目录名
-    assert cfg.run_dir == folder / "qwen-mnn"
+    # mnn 后端产物子目录名取 config.json 所在目录名,后接后端类型
+    assert cfg.run_dir == folder / "qwen-mnn" / "mnn"
     # 注释保留
     assert "#" in (folder / "config.yaml").read_text(encoding="utf-8")
 

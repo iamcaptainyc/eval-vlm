@@ -108,3 +108,34 @@ def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         f.write(text)
+
+
+# ---------------------------------------------------------------------------
+# 产物目录发现(跨模型/后端)
+# ---------------------------------------------------------------------------
+# 数据集级产物(各模型共享),不是「某模型某后端」的运行结果,枚举时要跳过。
+_DATASET_LEVEL_FILES = {"config.yaml", "report.md", "report.json"}
+# 判定「这是一个真正的运行结果目录」的标志产物(任一存在即算)。
+_RUN_MARKER_FILES = ("metrics.json", "precision.json", "run_meta.json", "pred_meta.json")
+
+
+def discover_run_dirs(dataset_dir: Path) -> list[tuple[str, str, Path]]:
+    """枚举 <dataset_dir>/<模型名>/<后端>/ 两级产物目录。
+
+    返回按 (model, backend) 排序的 [(model_name, backend, dir), ...],
+    只收含 _RUN_MARKER_FILES 任一(metrics/precision/run_meta/pred_meta)的叶子目录。
+    数据集级文件(train/test/val/split_meta/config.yaml/report.*)都在 dataset_dir 顶层,
+    不是二级目录,天然不会被纳入。跨格式合并报告(report 命令)据此发现全部已跑格式。
+    """
+    if not dataset_dir.is_dir():
+        return []
+    found: list[tuple[str, str, Path]] = []
+    for model_dir in sorted(dataset_dir.iterdir()):
+        if not model_dir.is_dir():
+            continue
+        for backend_dir in sorted(model_dir.iterdir()):
+            if not backend_dir.is_dir():
+                continue
+            if any((backend_dir / f).exists() for f in _RUN_MARKER_FILES):
+                found.append((model_dir.name, backend_dir.name, backend_dir))
+    return found

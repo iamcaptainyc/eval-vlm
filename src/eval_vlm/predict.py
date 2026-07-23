@@ -325,6 +325,7 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
         "model": cfg.inference.result_name,
         "backend": cfg.inference.backend,
         "base_url": getattr(cfg.inference.active, "base_url", None),
+        "quant": cfg.inference.mnn.quant if cfg.inference.backend == "mnn" else None,
         # 对话结构:单轮记 prompt;多轮记轮数(prompt 为 null)。便于复现与排查。
         "prompt": None if cfg.pred.template else (
             prompt if prompt is not None else cfg.pred.prompt),

@@ -3,10 +3,10 @@
 # 首次运行时从本模板渲染到该数据集文件夹;之后微调直接手改这个 config.yaml 再重跑即可。
 # (机器级路径来自全局配置 ~/.eval_vlm/config.yaml。)
 #
-# 产物按模型分目录:pred/score/eval 的结果落在 <数据集文件夹>/<模型名>/,
-# 不同模型对同一数据集互不覆盖(openai/vllm/fake 取 inference.openai.model;
-# mnn 取 inference.mnn.config_path 所在目录名);split 产物(train/test/val)
-# 是各模型共享的,落在数据集文件夹本身。
+# 产物按 模型/后端 分目录:pred/score/eval 的结果落在 <数据集文件夹>/<模型名>/<后端类型>/,
+# 同一模型的不同后端互不覆盖(openai/vllm/fake 模型名取 inference.openai.model;
+# mnn 取 inference.mnn.config_path 所在目录名;hf 取 model_path 目录名;后端类型取
+# inference.backend);split 产物(train/test/val)是各模型共享的,落在数据集文件夹本身。
 #
 # CLI 覆盖会「永久写回」本文件(用户参数优先且持久化,不是临时):
 #   --base-url/--model(pred/eval -> inference.openai.*)、--scorer(score/eval)、
@@ -68,8 +68,10 @@ split:
 # 推理后端(所有命令:pred / eval 都用这段)
 # 顶层只选 backend;每个后端的参数归到各自子块,互不冲突、不会「设了却不生效」。
 # 切到哪个后端就只读哪个块。新增后端只需加一个子块。
-#   backend=openai/vllm/fake -> 读 openai 块;产物子目录名取 openai.model
-#   backend=mnn              -> 读 mnn 块;产物子目录名取 mnn.config_path 所在目录名
+#   backend=openai/vllm/fake -> 读 openai 块;产物 <模型名>=openai.model,<后端类型>=backend
+#   backend=mnn              -> 读 mnn 块;产物 <模型名>=mnn.config_path 所在目录名
+#   backend=hf               -> 读 hf 块;产物 <模型名>=hf.model_path 目录名
+# 最终产物落 <数据集>/<模型名>/<后端类型>/。
 # CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*
 # ---------------------------------------------------------------------------
 inference:
@@ -115,6 +117,20 @@ inference:
     # 高级逃生口:sampler_config 非空则原样下发 MNN 原生键(sampler_type/mixed_samplers…)、跳过上面翻译;
     #   设为 {} 则一概不下发、沿用模型 config.json 自带采样。
     sampler_config: null
+    quant: null               # 量化配方标签(如 hqq-4bit / hqq-8bit),纯记录用不参与推理;落进 run_meta/pred_meta 供 report 标注该变体(--mnn-quant 永久写回)
+  # hf 本地参考后端(transformers):作「转换前·训练态」基准,与 mnn 做精度对比(precision 命令)。
+  # 需要 transformers/torch(+ Qwen2-VL 的 qwen-vl-utils);仅在 backend=hf 或 precision 用到时才需装。
+  hf:
+    model_path: null          # 本地 HF 权重目录(--hf-model 永久写回;也用作产物子目录名)
+    max_tokens: 512           # generate 的 max_new_tokens
+    # 图片预处理:与 mnn 块同一套规则(对齐 LlamaFactory 训练),下发给 processor 的 min/max_pixels,
+    # 使参考端与候选端喂给视觉编码器的 token 分布一致(precision 的对齐审计据此比对)。
+    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 mnn);<=0 关闭
+    image_min_pixels: 1024    # 总像素下限(默认 32*32,同 mnn);<=0 关闭
+    system_prompt: null       # 系统提示(应与训练一致);null=不加
+    device: auto              # auto/cuda/cpu(传给 from_pretrained 的 device_map)
+    dtype: auto               # auto/bfloat16/float16/float32
+    greedy: true              # true=贪心解码(确定可复现,便于与 mnn 逐条对齐);false=模型默认采样
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)
@@ -130,8 +146,10 @@ eval:
 scoring:
   scorer: exact_match         # 默认 scorer(已注册名称);可被 --scorer 覆盖
   turn_scorers: []            # 逐轮指定(按目标顺序),缺省回落到 scorer
-  # 例:轮1描述用 token_f1(相似度),轮2标签用 exact_match(精确匹配):
-  # turn_scorers: [token_f1, exact_match]
+  # 内置:exact_match(归一化精确匹配)、token_f1(字符级相似度,中文友好)、
+  #       prefix_match:K(只比较归一化后前 K 个字符是否完全相同,如轮2标签)
+  # 例:轮1描述用 token_f1(相似度),轮2标签比前 10 个字符:
+  # turn_scorers: [token_f1, prefix_match:10]
 
 # ---------------------------------------------------------------------------
 # 无标注图片的对话怎么组织(仅 pred --datadir;其它命令忽略本段)
@@ -167,3 +185,20 @@ label_extract:
   max_retries: 3              # 失败重试次数(指数退避)
   max_concurrency: 4          # 抽取并发(纯 I/O,与推理后端是否串行无关)
   none_label: 无              # cn 中表示「无该类目」的占位值,过滤掉
+
+# ---------------------------------------------------------------------------
+# 精度对比(仅 precision 命令;其它命令忽略本段)
+# 量化 mnn(转换后)相对 hf(转换前)的**行为级**误差:读两份已生成的 predictions.jsonl
+# (候选=<模型名>/mnn/、参考=<模型名>/hf/,均由 pred 产出)按 (id,turn) 对比,出 precision.json/.md。
+# 流程:pred --backend hf --hf-model <目录>  ->  pred --backend mnn --mnn-config <config.json>
+#       ->  precision --dataset <本数据集>
+# candidate_dir/reference_dir 留空则默认取 inference.mnn / inference.hf 的模型名。
+# ---------------------------------------------------------------------------
+precision:
+  candidate_dir: null         # 候选(转换后·MNN)模型名(其 mnn 子目录);null=按 inference.mnn 推断
+  reference_dir: null         # 参考(转换前·HF)模型名(其 hf 子目录);null=按 inference.hf 推断
+  agreement_min: 0.9          # 输出完全一致率低于此值 -> 报告标注「行为偏差偏大」
+  token_f1_min: 0.9           # 平均 char token-F1 低于此值 -> 标注「文本相似度偏低」
+  alignment_strict: true      # prompt token 数 / 图片像素数有任一 delta≠0 即标注「预处理不对齐」
+  max_worst_samples: 20       # precision.md 里展开的「最差样本」条数
+  quality_regression_max: 0.05  # 净质量Δ:候选相对 HF 的净回归率(HF对/候选错占比)超此值 -> 报告标 🔴(需两端都跑过 score)

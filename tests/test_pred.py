@@ -127,8 +127,8 @@ def _run_pred(ws: Path, imgs: Path, **kw):
 
 
 def _pred_out(ws: Path, imgs: Path) -> Path:
-    """pred 产物目录(模型子目录);config.yaml 仍在其父级(数据集文件夹)。"""
-    return ws / imgs.name / PRED_MODEL
+    """pred 产物目录(模型/后端子目录);config.yaml 仍在其父级(数据集文件夹)。"""
+    return ws / imgs.name / PRED_MODEL / "fake"
 
 
 def test_pred_generates_then_reads_config(temp_global):
@@ -274,7 +274,7 @@ def test_pred_persists_model_into_config(temp_global):
     _run_pred(ws, imgs, model="vlm_v2")
     cfg_text = (ws / imgs.name / "config.yaml").read_text(encoding="utf-8")
     assert "vlm_v2" in cfg_text                             # 写回 inference.openai.model
-    assert (ws / imgs.name / "vlm_v2" / "predictions.jsonl").exists()
+    assert (ws / imgs.name / "vlm_v2" / "fake" / "predictions.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +306,6 @@ def test_pred_dataset_runs_inference_without_scoring(tmp_path, monkeypatch):
     )
     assert _cmd_pred(ns) == 0
 
-    run_dir = folder / "trained-vlm"                        # fake -> openai.model 默认
+    run_dir = folder / "trained-vlm" / "fake"               # fake -> openai.model / backend
     assert (run_dir / "predictions.jsonl").exists()
     assert not (run_dir / "metrics.json").exists()          # pred 不评分

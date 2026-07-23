@@ -137,6 +137,7 @@ def run_inference(cfg: Config) -> dict:
         "model": cfg.inference.result_name,
         "backend": cfg.inference.backend,
         "base_url": getattr(cfg.inference.active, "base_url", None),
+        "quant": cfg.inference.mnn.quant if cfg.inference.backend == "mnn" else None,
         "eval_targets": cfg.eval.targets,
         "eval_context": cfg.eval.context,
         "test_size": len(samples),

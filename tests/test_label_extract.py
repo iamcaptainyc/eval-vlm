@@ -275,7 +275,7 @@ def test_pred_datadir_runs_label_extract(tmp_path, monkeypatch):
     )
     assert _cmd_pred(ns) == 0
 
-    run_dir = ws / imgs.name / "trained-vlm"                 # fake -> openai.model 默认
+    run_dir = ws / imgs.name / "trained-vlm" / "fake"        # fake -> openai.model / backend
     label_path = run_dir / "label.jsonl"
     assert label_path.exists()
     rows = [json.loads(ln) for ln in

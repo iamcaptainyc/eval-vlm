@@ -12,16 +12,17 @@
     score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.md / summary.md
     eval    : 读取已有 —— 一键连续执行 pred(--dataset)+ score(不含 split:split 后需先部署模型)
 
-产物按模型分目录:pred/score/eval 的结果落在 工作目录/<数据集>/<模型名>/,
-不同模型对同一数据集互不覆盖(openai/vllm/fake 取 inference.openai.model;
-mnn 取 inference.mnn.config_path 所在目录名);split 产物(train/test/val)是各模型
-共享的,落在数据集文件夹本身。
+产物按 模型/后端 分目录:pred/score/eval 的结果落在 工作目录/<数据集>/<模型名>/<后端类型>/,
+同一模型的不同后端互不覆盖(openai/vllm/fake 模型名取 inference.openai.model;
+mnn 取 inference.mnn.config_path 所在目录名;hf 取 model_path 目录名;后端类型取
+inference.backend);split 产物(train/test/val)是各模型共享的,落在数据集文件夹本身。
 
 CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持久化,不再是临时):
     --base-url / --model     pred/eval 写回 inference.openai.base_url / inference.openai.model
     --scorer                 score/eval 写回 scoring.scorer
-    --backend                pred 写回 inference.backend
-    --mnn-config / --mnn-image-max-side   pred 写回 inference.mnn.config_path / image_max_side
+    --backend                pred/eval 写回 inference.backend
+    --mnn-config / --mnn-image-max-side / --mnn-quant   pred/eval 写回 inference.mnn.*
+    --hf-model               pred/eval 写回 inference.hf.model_path
     --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
     --label-extract-url / --label-extract-token  pred 写回 label_extract.base_url / auth_token
 """
@@ -40,6 +41,9 @@ from .runner import run_inference
 from .predict import predict_folder
 from .label_extract import run_label_extract
 from .evaluate import score_predictions
+from .precision import compare_precision
+from .report import build_report, render_report_md
+from .results import store
 from .scoring import available_scorers
 from . import workspace
 
@@ -134,6 +138,8 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("backend", "inference.backend"),
     ("mnn_config", "inference.mnn.config_path"),
     ("mnn_image_max_side", "inference.mnn.image_max_side"),
+    ("mnn_quant", "inference.mnn.quant"),
+    ("hf_model", "inference.hf.model_path"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -209,7 +215,7 @@ def _pred_dataset(args: argparse.Namespace) -> int:
     persisted = _persist_overrides(folder, args)      # --base-url/--model 永久写回
     cfg = load_dataset_config(folder)
     _report_persist("pred", persisted, folder)
-    print(f"[pred] 数据集预测,模型目录(按模型名区分)-> {cfg.run_dir}")
+    print(f"[pred] 数据集预测,模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg)
     _maybe_label_extract(cfg, args)
     return 0
@@ -230,9 +236,48 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     persisted = _persist_overrides(folder, args)      # --base-url/--model/--scorer 永久写回
     cfg = load_dataset_config(folder)
     _report_persist("eval", persisted, folder)
-    print(f"[eval] 模型目录(按模型名区分)-> {cfg.run_dir}")
+    print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg, "eval")
     _do_score(cfg, args.scorer)
+    return 0
+
+
+def _cmd_precision(args: argparse.Namespace) -> int:
+    """对比 mnn(转换后)与 hf(转换前)两份预测,量化行为级精度误差并出报告。
+
+    只读两个模型子目录下已生成的 predictions.jsonl(候选=MNN、参考=HF),
+    因此候选/参考可在不同机器上分别用 `pred` 产出。默认模型名从 config.yaml 的
+    inference.mnn / inference.hf 推断,可用 --candidate-dir / --reference-dir 覆盖。
+    """
+    folder = _resolve_folder(args)
+    cfg = load_dataset_config(folder)
+    summary = compare_precision(cfg, candidate=args.candidate_dir,
+                                reference=args.reference_dir)
+    b = summary["behavior"]
+    print(f"[precision] 候选 `{summary['candidate']}` vs 参考 `{summary['reference']}`:"
+          f"对比 {summary['num_compared']} 条,输出一致率 {b['agreement_rate']:.1%},"
+          f"平均 token-F1 {b['mean_token_f1']:.4f}")
+    for f in summary["flags"]:
+        print("  " + f)
+    print(f"[precision] 报告 -> {summary['report_md']}")
+    return 0
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    """跨格式合并报告:扫描数据集下全部已跑格式,汇成一页质量门禁报告。
+
+    纯读取已落盘产物(metrics/scored/precision/run_meta),与当前 backend 无关。
+    """
+    folder = _resolve_folder(args)
+    cfg = load_dataset_config(folder)
+    report = build_report(cfg)
+    store.write_json(cfg.report_json_path, report)
+    store.write_text(cfg.report_md_path, render_report_md(report))
+    print(f"[report] 数据集 `{report['dataset']}`:发现 {report['num_formats']} 个格式,"
+          f"HF 基准 {'有' if report['baseline'] else '无'}")
+    for d in report["diagnosis"]:
+        print("  " + d)
+    print(f"[report] 合并报告 -> {cfg.report_md_path}")
     return 0
 
 
@@ -289,7 +334,7 @@ def _pred_datadir(args: argparse.Namespace) -> int:
 
     # 图片永远定位到 --datadir(即便 config 里 media_root 被改过)。
     cfg.data.media_root = str(datadir)
-    print(f"[pred] 模型目录(按模型名区分)-> {cfg.run_dir}")
+    print(f"[pred] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
 
     # prompt/system_prompt 已写回 config,故 prompt=None 交给 cfg.pred 驱动。
     stats = predict_folder(cfg, datadir, prompt=None,
@@ -374,8 +419,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     _add_inference_args(p_eval)
     p_eval.add_argument("--scorer", default=None, help="临时覆盖评分器")
+    # 后端 / 权重 flag(与 pred 一致,永久写回 config.yaml):让每个格式一条 eval 即可跑完 pred+score
+    p_eval.add_argument("--backend", default=None,
+                        choices=["openai", "vllm", "mnn", "hf", "fake"],
+                        help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/fake")
+    p_eval.add_argument("--hf-model", dest="hf_model", default=None,
+                        help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path;也用作产物子目录名)")
+    p_eval.add_argument("--mnn-config", dest="mnn_config", default=None,
+                        help="backend=mnn 时:转换产物目录里 config.json 路径(写回 inference.mnn.config_path)")
+    p_eval.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int, default=None,
+                        help="backend=mnn 时:图片最长边像素上限(写回 inference.mnn.image_max_side)")
+    p_eval.add_argument("--mnn-quant", dest="mnn_quant", default=None,
+                        help="backend=mnn 时:量化配方标签(如 hqq-4bit/hqq-8bit),供 report 标注(写回 inference.mnn.quant)")
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
+
+    # precision(对比 mnn 转换后 vs hf 转换前 的行为级精度误差)
+    p_prec = sub.add_parser(
+        "precision",
+        help="对比 mnn(转换后) vs hf(转换前) 的行为级精度误差:读两份 predictions.jsonl 出报告")
+    p_prec.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_prec.add_argument("--candidate-dir", dest="candidate_dir", default=None,
+                        help="候选(转换后·MNN)模型子目录名;默认取 inference.mnn 的产物目录名")
+    p_prec.add_argument("--reference-dir", dest="reference_dir", default=None,
+                        help="参考(转换前·HF)模型子目录名;默认取 inference.hf.model_path 的目录名")
+    _add_workspace_arg(p_prec)
+    p_prec.set_defaults(func=_cmd_precision)
+
+    # report(跨格式合并质量报告:HF vs 各 MNN 变体,读全部已跑产物)
+    p_report = sub.add_parser(
+        "report",
+        help="跨格式合并质量报告:扫描数据集下全部已跑格式,出质量并排 + 净质量Δ + 诊断(纯读取)")
+    p_report.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    _add_workspace_arg(p_report)
+    p_report.set_defaults(func=_cmd_report)
 
     # pred(统一预测命令:--dataset=数据集 test.json | --datadir=无标注图片文件夹)
     p_pred = sub.add_parser(
@@ -394,17 +471,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
                         help="[--datadir] 临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
     p_pred.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "fake"],
+                        choices=["openai", "vllm", "mnn", "hf", "fake"],
                         help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
                              "mnn(本地 pymnn 推理转换后的 mnn 模型,需 --mnn-config)| "
+                             "hf(本地 transformers 推理,作转换前参考基准,需 --hf-model)| "
                              "fake(回显,不联网,自检用)")
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
                              "(临时覆盖 inference.mnn.config_path)")
+    p_pred.add_argument("--hf-model", dest="hf_model", default=None,
+                        help="backend=hf 时:本地 HF 权重目录路径"
+                             "(临时覆盖 inference.hf.model_path;也用作产物子目录名)")
     p_pred.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int,
                         default=None,
                         help="backend=mnn 时:图片最长边像素上限(超大图等比缩放;默认 2048;"
                              "设 0 关闭缩放)。临时覆盖 inference.mnn.image_max_side")
+    p_pred.add_argument("--mnn-quant", dest="mnn_quant", default=None,
+                        help="backend=mnn 时:量化配方标签(如 hqq-4bit / hqq-8bit),纯记录用,"
+                             "落进 run_meta/pred_meta 供 report 标注(永久写回 inference.mnn.quant)")
     p_pred.add_argument("--force", action="store_true",
                         help="[--datadir] 重新生成文件夹内 config.yaml(覆盖你的手改)")
     p_pred.add_argument("--overwrite", action="store_true",
