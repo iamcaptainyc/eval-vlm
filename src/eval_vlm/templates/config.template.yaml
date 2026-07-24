@@ -147,7 +147,8 @@ scoring:
   scorer: exact_match         # 默认 scorer(已注册名称);可被 --scorer 覆盖
   turn_scorers: []            # 逐轮指定(按目标顺序),缺省回落到 scorer
   # 内置:exact_match(归一化精确匹配)、token_f1(字符级相似度,中文友好)、
-  #       prefix_match:K(只比较归一化后前 K 个字符是否完全相同,如轮2标签)
+  #       prefix_match:K(只比较归一化后前 K 个字符是否完全相同,如轮2标签)、
+  #       contain_acc(归一化后 pred 包含 ref 即算对,适合答案是短标签、输出带解释)
   # 例:轮1描述用 token_f1(相似度),轮2标签比前 10 个字符:
   # turn_scorers: [token_f1, prefix_match:10]
 

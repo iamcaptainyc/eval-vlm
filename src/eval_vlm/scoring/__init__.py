@@ -12,5 +12,6 @@ from .registry import register, get_scorer, available_scorers
 from . import exact_match  # noqa: F401,E402
 from . import token_f1     # noqa: F401,E402
 from . import prefix_match  # noqa: F401,E402
+from . import contain_acc  # noqa: F401,E402
 
 __all__ = ["Scorer", "ScoreResult", "register", "get_scorer", "available_scorers"]

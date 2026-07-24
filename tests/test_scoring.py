@@ -176,3 +176,53 @@ def test_prefix_match_skipped_when_no_reference():
     r = sc.score_one("anything", None, _sample())
     assert r.detail.get("skipped") is True
 
+
+# ---- contain_acc(pred 包含 ref 即命中,不限位置、不要求整串相等) ----
+
+def test_registry_has_contain_acc():
+    assert "contain_acc" in available_scorers()
+
+
+def test_contain_acc_hit_when_substring():
+    """ref 作为子串出现在 pred 里(前后有解释)-> 命中,与 exact_match 的关键区别。"""
+    sc = get_scorer("contain_acc")
+    r = sc.score_one("这张图片表达的情绪是愤怒。", "愤怒", _sample())
+    assert r.score == 1.0
+    assert r.detail["contain_acc"] == 1.0
+
+
+def test_contain_acc_miss_when_absent():
+    sc = get_scorer("contain_acc")
+    r = sc.score_one("这张图片表达的是开心", "愤怒", _sample())
+    assert r.score == 0.0
+
+
+def test_contain_acc_normalizes_before_match():
+    """归一化(大小写/标点/空白)后再判子串:'Red apple' 含 'red'。"""
+    sc = get_scorer("contain_acc")
+    assert sc.score_one("A Red, apple.", "red", _sample()).score == 1.0
+
+
+def test_contain_acc_empty_reference_not_hit():
+    """归一化后 ref 为空串不算命中(否则空串是任何串的子串会误判满分)。"""
+    sc = get_scorer("contain_acc")
+    assert sc.score_one("anything", "", _sample()).score == 0.0
+
+
+def test_contain_acc_aggregate_accuracy():
+    sc = get_scorer("contain_acc")
+    s = _sample()
+    results = [
+        sc.score_one("答案是第三车道", "第三车道", s),   # 包含 -> 命中
+        sc.score_one("第二车道", "第三车道", s),         # 不含 -> 未命中
+    ]
+    agg = sc.aggregate(results)
+    assert agg["accuracy"] == 0.5
+    assert agg["num_scored"] == 2
+
+
+def test_contain_acc_skipped_when_no_reference():
+    sc = get_scorer("contain_acc")
+    r = sc.score_one("anything", None, _sample())
+    assert r.detail.get("skipped") is True
+

@@ -541,7 +541,7 @@ data:
 
 ## 扩展评分器
 
-内置 scorer:`exact_match`(归一化精确匹配 + 子串命中,适合多选 / 短答案 / 标签)、`token_f1`(字符级 P/R/F1,中文友好,适合轮1这类开放式描述)与 `prefix_match:K`(只比较归一化后**前 K 个字符**是否完全相同,逻辑同 exact_match 但只看开头,适合「答案前几个字就分对错、后续解释不该影响判分」的标签轮;`K` 由名字后缀指定,如 `prefix_match:10`,缺省 `prefix_match` 取 K=10)。新增评分器:
+内置 scorer:`exact_match`(归一化精确匹配 + 子串命中,适合多选 / 短答案 / 标签)、`token_f1`(字符级 P/R/F1,中文友好,适合轮1这类开放式描述)、`prefix_match:K`(只比较归一化后**前 K 个字符**是否完全相同,逻辑同 exact_match 但只看开头,适合「答案前几个字就分对错、后续解释不该影响判分」的标签轮;`K` 由名字后缀指定,如 `prefix_match:10`,缺省 `prefix_match` 取 K=10)与 `contain_acc`(归一化后 pred **包含** ref 即算对,不限位置、不要求整串相等,适合标准答案是短标签而模型输出常带前后解释的场景)。新增评分器:
 
 1. 在 `src/eval_vlm/scoring/` 下新建文件,继承 `Scorer`;
 2. 用 `@register("your_name")` 装饰;
