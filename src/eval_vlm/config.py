@@ -14,7 +14,7 @@ from typing import Any, Optional
 import yaml
 
 # pred 默认单轮提示词(唯一真源;predict.py / cli.py import 本常量)。
-DEFAULT_PROMPT = "请描述图片"
+DEFAULT_PROMPT = "请描述这张图片。"
 
 # 文件名非法字符(Windows 最严):路径分隔符、保留符号、控制字符。
 _UNSAFE_DIR_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')

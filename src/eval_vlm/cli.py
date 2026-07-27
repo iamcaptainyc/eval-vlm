@@ -358,6 +358,55 @@ def _pred_datadir(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# infer:单图推理(mnn),只打印结果、不落盘
+# ---------------------------------------------------------------------------
+def _cmd_infer(args: argparse.Namespace) -> int:
+    """单图推理:用 mnn 后端对一张图推理,把结果打印到控制台,**不保存任何文件**。
+
+    复用现有 MNN 后端(与 pred/eval 同一套预处理:image_max/min_pixels 对齐
+    LlamaFactory、默认贪心+重复惩罚)。只构造内存 Config,不读写 workspace/产物目录。
+    状态信息走 stderr,推理结果走 stdout(便于管道取用)。
+    """
+    from .config import InferenceConfig, MNNBackendConfig
+    from .data.schema import Turn
+    from .inference import build_backend
+
+    img_path = Path(args.img_path).expanduser()
+    if not img_path.is_file():
+        print(f"[infer] --img-path 不是文件: {img_path}", file=sys.stderr)
+        return 2
+
+    mnn = MNNBackendConfig(config_path=args.mnn_config)
+    if args.max_pixels is not None:
+        mnn.image_max_pixels = args.max_pixels
+    if args.min_pixels is not None:
+        mnn.image_min_pixels = args.min_pixels
+    if args.max_tokens is not None:
+        mnn.max_tokens = args.max_tokens
+    if args.system_prompt is not None:
+        mnn.system_prompt = args.system_prompt
+    cfg = Config(inference=InferenceConfig(backend="mnn", mnn=mnn))
+
+    prompt = args.prompt
+    content = prompt if "<image>" in prompt else f"<image>{prompt}"
+    context = [Turn(role="user", content=content)]
+
+    print(f"[infer] 加载 mnn 模型({args.mnn_config})...", file=sys.stderr, flush=True)
+    backend = build_backend(cfg)
+    try:
+        # 绝对路径直接透传:resolve_image_path 对绝对路径原样返回,无需 media_root。
+        pred = backend.complete(context, [str(img_path.resolve())], sample_id=img_path.name)
+    finally:
+        backend.close()
+
+    if pred.error:
+        print(f"[infer] 推理失败: {pred.error}", file=sys.stderr)
+        return 1
+    print(pred.prediction or "")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # 参数
 # ---------------------------------------------------------------------------
 def _add_workspace_arg(p: argparse.ArgumentParser) -> None:
@@ -467,6 +516,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     _add_workspace_arg(p_report)
     p_report.set_defaults(func=_cmd_report)
+
+    # infer(单图推理:mnn 后端,只打印结果不落盘)
+    p_infer = sub.add_parser(
+        "infer",
+        help="单图推理(mnn 后端):对一张图推理并打印结果,不保存任何文件")
+    p_infer.add_argument("--mnn-config", dest="mnn_config", required=True,
+                         help="转换后 mnn 模型目录里的 config.json 路径(传给 MNN.llm.create)")
+    p_infer.add_argument("--img-path", dest="img_path", required=True, help="单张图片路径")
+    p_infer.add_argument("--max-pixels", dest="max_pixels", type=int, default=None,
+                         help="图片总像素上限(超过按 sqrt 因子缩小,对齐 LlamaFactory;缺省用 mnn 默认 589824;<=0 关闭)")
+    p_infer.add_argument("--min-pixels", dest="min_pixels", type=int, default=None,
+                         help="图片总像素下限(不足按 sqrt 因子放大;缺省用 mnn 默认 1024;<=0 关闭)")
+    p_infer.add_argument("--prompt", default=DEFAULT_PROMPT,
+                         help=f"提问文本(缺省 {DEFAULT_PROMPT!r});不含 <image> 时自动前置")
+    p_infer.add_argument("--system-prompt", dest="system_prompt", default=None,
+                         help="系统提示(应与训练一致;缺省沿用模型 config.json)")
+    p_infer.add_argument("--max-tokens", dest="max_tokens", type=int, default=None,
+                         help="生成上限(缺省 512)")
+    p_infer.set_defaults(func=_cmd_infer)
 
     # pred(统一预测命令:--dataset=数据集 test.json | --datadir=无标注图片文件夹)
     p_pred = sub.add_parser(

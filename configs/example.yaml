@@ -111,7 +111,7 @@ scoring:
 # 规则:全部轮里 <image> 恰好 1 次且在 user 轮;最后一轮必须是 user。
 # ---------------------------------------------------------------------------
 pred:
-  prompt: 请描述图片          # 单轮默认提示词(可用 --prompt 临时覆盖)
+  prompt: 请描述这张图片。          # 单轮默认提示词(可用 --prompt 临时覆盖)
   system_prompt: null         # 可选系统提示(可用 --system-prompt 临时覆盖;运行时映射到 inference.system_prompt)
   # template:                 # 多轮模板(取消注释并编辑;设置后覆盖 prompt)
   #   - {role: user, content: "我会给你一张图片,请用简体中文、200 字以内、客观描述画面内容。"}

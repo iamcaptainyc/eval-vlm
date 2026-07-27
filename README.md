@@ -154,7 +154,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `--mnn-quant TEXT` | pred / eval | `--backend mnn` 时:量化配方标签(如 `hqq-4bit`/`hqq-8bit`),**纯记录**不参与推理;落进 run_meta/pred_meta 供 `report` 标注该变体(**写回** `inference.mnn.quant`) |
 | `--hf-model DIR` | pred / eval | `--backend hf` 时:本地 HF 权重目录(**写回** `inference.hf.model_path`;也用作产物子目录名) |
 | `--candidate-dir / --reference-dir` | precision | 候选(MNN)/ 参考(HF)模型名(其 `mnn`/`hf` 子目录);缺省按 `inference.mnn` / `inference.hf` 推断 |
-| `--prompt TEXT` | pred --datadir | **写回** `pred.prompt`(默认 `请描述图片`;设了多轮 `template` 时无效) |
+| `--prompt TEXT` | pred --datadir | **写回** `pred.prompt`(默认 `请描述这张图片。`;设了多轮 `template` 时无效) |
 | `--system-prompt TEXT` | pred --datadir | **写回** `pred.system_prompt` |
 | `--overwrite` | pred --datadir | 无视已有结果整份重跑(覆盖 `predictions.jsonl`);默认断点续跑只补未完成 |
 | `--workspace DIR` | split/pred/score/eval | 临时覆盖全局 workspace |
@@ -165,7 +165,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 想让模型逐张描述时,用 `pred --datadir`:它不需要 split、没有标准答案、**不评分**,每张图各起一段独立对话:
 
 ```
-user:      <image>请描述图片
+user:      <image>请描述这张图片。
 assistant: <模型生成的描述>
 ```
 

@@ -152,7 +152,7 @@ def test_pred_generates_then_reads_config(temp_global):
 
 
 def test_pred_end_to_end_default_single_turn(temp_global):
-    """默认单轮:产物为 [user(<image>请描述图片), assistant] 的 LlamaFactory 记录。"""
+    """默认单轮:产物为 [user(<image>+默认提示词), assistant] 的 LlamaFactory 记录。"""
     ws, imgs = temp_global
     _run_pred(ws, imgs)
     out = _pred_out(ws, imgs)
