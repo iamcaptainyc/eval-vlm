@@ -182,6 +182,10 @@ class HFBackend(InferenceBackend):
                         **inputs,
                         max_new_tokens=hc.max_tokens,
                         do_sample=not hc.greedy,
+                        # 显式给 pad_token_id(回落 eos),否则 generate 每条都打印
+                        # "Setting pad_token_id to eos_token_id" 警告(纯噪音,不影响结果)。
+                        pad_token_id=self.processor.tokenizer.pad_token_id
+                        or self.processor.tokenizer.eos_token_id,
                     )
                 trimmed = gen[:, prompt_len:]
                 out_text = self.processor.batch_decode(
