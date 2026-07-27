@@ -248,11 +248,20 @@ def _cmd_precision(args: argparse.Namespace) -> int:
     只读两个模型子目录下已生成的 predictions.jsonl(候选=MNN、参考=HF),
     因此候选/参考可在不同机器上分别用 `pred` 产出。默认模型名从 config.yaml 的
     inference.mnn / inference.hf 推断,可用 --candidate-dir / --reference-dir 覆盖。
+
+    --dataset(run/dataset 格式)与 --datadir(pred --datadir 的对话格式)二选一;
+    用 --datadir 时按 messages 末尾 assistant 轮解析预测。
     """
+    datadir_format = args.datadir is not None
+    # 两种入口都解析成"该 workspace 文件夹";_resolve_folder 读 args.dataset,
+    # 故用 --datadir 时把它的值临时赋给 dataset 供解析(二者互斥,不会冲突)。
+    if datadir_format:
+        args.dataset = args.datadir
     folder = _resolve_folder(args)
     cfg = load_dataset_config(folder)
     summary = compare_precision(cfg, candidate=args.candidate_dir,
-                                reference=args.reference_dir)
+                                reference=args.reference_dir,
+                                datadir_format=datadir_format)
     b = summary["behavior"]
     print(f"[precision] 候选 `{summary['candidate']}` vs 参考 `{summary['reference']}`:"
           f"对比 {summary['num_compared']} 条,输出一致率 {b['agreement_rate']:.1%},"
@@ -438,7 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_prec = sub.add_parser(
         "precision",
         help="对比 mnn(转换后) vs hf(转换前) 的行为级精度误差:读两份 predictions.jsonl 出报告")
-    p_prec.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    prec_src = p_prec.add_mutually_exclusive_group(required=True)
+    prec_src.add_argument("--dataset", "-d", default=None,
+                          help="数据集名(或文件夹路径):预测为 run / pred --dataset 格式")
+    prec_src.add_argument("--datadir", default=None,
+                          help="pred --datadir 产出的文件夹名(或路径):预测为 LlamaFactory 对话格式,"
+                               "按 messages 末尾 assistant 轮解析(否则会读成空串、误报 100%% 一致)")
     p_prec.add_argument("--candidate-dir", dest="candidate_dir", default=None,
                         help="候选(转换后·MNN)模型子目录名;默认取 inference.mnn 的产物目录名")
     p_prec.add_argument("--reference-dir", dest="reference_dir", default=None,

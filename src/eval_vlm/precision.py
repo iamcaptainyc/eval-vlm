@@ -127,8 +127,14 @@ def _resolve_names(cfg: Config, candidate: Optional[str],
 
 
 def compare_precision(cfg: Config, candidate: Optional[str] = None,
-                      reference: Optional[str] = None) -> dict:
-    """对比候选(MNN)与参考(HF)两份预测,算行为级精度误差,落盘报告并返回汇总。"""
+                      reference: Optional[str] = None,
+                      datadir_format: bool = False) -> dict:
+    """对比候选(MNN)与参考(HF)两份预测,算行为级精度误差,落盘报告并返回汇总。
+
+    datadir_format=True:两端预测由 pred --datadir 产出(LlamaFactory 对话格式,输出在
+    messages 最后一个 assistant 轮),按此解析;否则按 run / pred --dataset 的
+    Prediction 格式(顶层 prediction/turn)解析。
+    """
     cand_name, ref_name = _resolve_names(cfg, candidate, reference)
     cand_path = cfg.predictions_path_for(cand_name, "mnn")
     ref_path = cfg.predictions_path_for(ref_name, "hf")
@@ -143,8 +149,8 @@ def compare_precision(cfg: Config, candidate: Optional[str] = None,
             f"`eval-vlm pred --dataset <ds> --backend hf --hf-model <目录>` 产出它。"
         )
 
-    cand_preds = store.load_predictions(cand_path)
-    ref_preds = store.load_predictions(ref_path)
+    cand_preds = store.load_predictions(cand_path, datadir_format=datadir_format)
+    ref_preds = store.load_predictions(ref_path, datadir_format=datadir_format)
     cand_by_key = {(p.id, p.turn): p for p in cand_preds}
     ref_by_key = {(p.id, p.turn): p for p in ref_preds}
 

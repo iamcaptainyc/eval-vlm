@@ -45,8 +45,36 @@ def load_prediction_keys(path: Path) -> set[tuple[str, int]]:
     return done
 
 
-def load_predictions(path: Path) -> list[Prediction]:
-    """读取全部预测(取每个 (id, turn) 的最后一条,后写覆盖先写)。"""
+def _prediction_from_datadir_record(obj: dict) -> Prediction:
+    """把 pred --datadir 的 LlamaFactory 对话记录解析成 Prediction。
+
+    datadir 产物是对话格式 {id, images, messages, latency}:模型输出在 messages
+    最后一个 assistant 轮里,**无顶层 prediction/turn 字段**。这里取该轮 content 作
+    prediction、其下标作 turn。用于 precision --datadir(否则 from_dict 会读成空串,
+    使两端都成 "" 而误报 100% 一致)。
+    """
+    msgs = obj.get("messages") or []
+    last_idx, content = -1, ""
+    for i, m in enumerate(msgs):
+        if isinstance(m, dict) and m.get("role") == "assistant":
+            last_idx, content = i, m.get("content", "")
+    return Prediction(
+        id=str(obj["id"]),
+        turn=last_idx,
+        prediction=content,
+        images=list(obj.get("images", [])),
+        latency=obj.get("latency"),
+        error=obj.get("error"),
+        raw=obj.get("raw"),
+    )
+
+
+def load_predictions(path: Path, *, datadir_format: bool = False) -> list[Prediction]:
+    """读取全部预测(取每个 (id, turn) 的最后一条,后写覆盖先写)。
+
+    datadir_format=True 时按 pred --datadir 的对话格式解析(输出在 messages 最后一个
+    assistant 轮);默认按 run / pred --dataset 的 Prediction.to_dict 格式解析。
+    """
     by_key: dict[tuple[str, int], Prediction] = {}
     if not path.exists():
         return []
@@ -59,7 +87,8 @@ def load_predictions(path: Path) -> list[Prediction]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            pred = Prediction.from_dict(obj)
+            pred = (_prediction_from_datadir_record(obj) if datadir_format
+                    else Prediction.from_dict(obj))
             by_key[(pred.id, pred.turn)] = pred
     return list(by_key.values())
 
