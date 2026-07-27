@@ -35,7 +35,14 @@ class HFBackend(InferenceBackend):
         super().__init__(cfg)
         try:
             import torch  # noqa: F401
-            from transformers import AutoModelForVision2Seq, AutoProcessor
+            from transformers import AutoProcessor
+            # transformers 4.49+ 用 AutoModelForImageTextToText 取代旧的
+            # AutoModelForVision2Seq(后者在更新版本里已弃用甚至移除)。优先用新名,
+            # 回退旧名,兼容不同 transformers 版本(否则新版会报 cannot import name)。
+            try:
+                from transformers import AutoModelForImageTextToText as _AutoVLM
+            except ImportError:
+                from transformers import AutoModelForVision2Seq as _AutoVLM
         except ImportError as e:  # pragma: no cover - 取决于运行环境
             raise ImportError(
                 "backend=hf 需要安装 transformers 与 torch(以及 Qwen2-VL 所需的 "
@@ -63,11 +70,11 @@ class HFBackend(InferenceBackend):
 
         dtype = self._resolve_dtype(hc.dtype)
         if hc.device == "auto":
-            self.model = AutoModelForVision2Seq.from_pretrained(
+            self.model = _AutoVLM.from_pretrained(
                 hc.model_path, torch_dtype=dtype, device_map="auto"
             )
         else:
-            self.model = AutoModelForVision2Seq.from_pretrained(
+            self.model = _AutoVLM.from_pretrained(
                 hc.model_path, torch_dtype=dtype
             ).to(hc.device)
         self.model.eval()
