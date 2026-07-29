@@ -125,8 +125,9 @@ inference:
     max_tokens: 512           # generate 的 max_new_tokens
     # 图片预处理:与 mnn 块同一套规则(对齐 LlamaFactory 训练),下发给 processor 的 min/max_pixels,
     # 使参考端与候选端喂给视觉编码器的 token 分布一致(precision 的对齐审计据此比对)。
-    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 mnn);<=0 关闭
-    image_min_pixels: 1024    # 总像素下限(默认 32*32,同 mnn);<=0 关闭
+    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
+    image_min_pixels: 1024    # 总像素下限(默认 32*32,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
+    image_max_side: 0         # 最长边上限:纯等比缩放不 patch 对齐(同 mnn:image_max_side)。非 Qwen 切片模型(如 MiniCPM-V)建议把上面两项设 0、改用本项;<=0 关闭(--hf-image-max-side 永久写回)
     system_prompt: null       # 系统提示(应与训练一致);null=不加
     device: auto              # auto/cuda/cpu(传给 from_pretrained 的 device_map)
     dtype: auto               # auto/bfloat16/float16/float32

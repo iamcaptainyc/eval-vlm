@@ -140,6 +140,7 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("mnn_image_max_side", "inference.mnn.image_max_side"),
     ("mnn_quant", "inference.mnn.quant"),
     ("hf_model", "inference.hf.model_path"),
+    ("hf_image_max_side", "inference.hf.image_max_side"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -490,6 +491,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/fake")
     p_eval.add_argument("--hf-model", dest="hf_model", default=None,
                         help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path;也用作产物子目录名)")
+    p_eval.add_argument("--hf-image-max-side", dest="hf_image_max_side", type=int, default=None,
+                        help="backend=hf 时:图片最长边像素上限,纯等比缩放不 patch 对齐"
+                             "(适合 MiniCPM-V 等非 Qwen 切片模型;设 0 关闭)"
+                             "(写回 inference.hf.image_max_side)")
     p_eval.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 路径(写回 inference.mnn.config_path)")
     p_eval.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int, default=None,
@@ -571,6 +576,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--hf-model", dest="hf_model", default=None,
                         help="backend=hf 时:本地 HF 权重目录路径"
                              "(临时覆盖 inference.hf.model_path;也用作产物子目录名)")
+    p_pred.add_argument("--hf-image-max-side", dest="hf_image_max_side", type=int,
+                        default=None,
+                        help="backend=hf 时:图片最长边像素上限,纯等比缩放不 patch 对齐"
+                             "(适合 MiniCPM-V 等非 Qwen 切片模型;需把 hf.image_max/min_pixels "
+                             "设 0);设 0 关闭。临时覆盖 inference.hf.image_max_side")
     p_pred.add_argument("--mnn-image-max-side", dest="mnn_image_max_side", type=int,
                         default=None,
                         help="backend=mnn 时:图片最长边像素上限(超大图等比缩放;默认 2048;"

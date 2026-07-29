@@ -105,6 +105,13 @@ class HFBackendConfig:
     # 下发给 processor 的 min_pixels/max_pixels,使参考端与候选端预处理一致。
     image_max_pixels: int = 768 * 768           # 总像素上限(超过按 sqrt 因子缩小);<=0 关闭
     image_min_pixels: int = 32 * 32             # 总像素下限(不足按 sqrt 因子放大);<=0 关闭
+    # 图片最长边像素上限:**纯等比缩放,不做 patch 对齐**(同 mnn 的 image_max_side)。
+    # 与上面的 image_max/min_pixels 是两条独立路径:后者会作为 max_pixels/min_pixels
+    # 下发给 processor(Qwen2-VL 专属旋钮),对 MiniCPM-V 这类切片模型会污染切片网格;
+    # 本项则在**交给 processor 之前**由本后端自己等比缩小图片,patch/切片对齐仍交给模型
+    # 自己的 processor。因此非 Qwen 模型(如 MiniCPM-V)建议:image_max/min_pixels 设 0
+    # 关掉,改用本项控制输入尺寸。<=0 关闭(默认关,不改变既有 Qwen 行为)。
+    image_max_side: int = 0
     system_prompt: Optional[str] = None         # 系统提示(应与训练一致);None=不加
     device: str = "auto"                        # auto/cuda/cpu,传给 from_pretrained(device_map)
     dtype: str = "auto"                         # auto/bfloat16/float16/float32

@@ -118,6 +118,26 @@ class HFBackend(InferenceBackend):
             messages.append({"role": turn.role, "content": parts})
         return messages
 
+    def _maybe_resize_max_side(self, pil_img):
+        """按最长边上限做**纯等比缩放**(不对齐 patch),再交给 processor。
+
+        与 mnn 的 image_max_side 同义:仅当 max(宽,高) 超过上限时等比缩小,patch/切片
+        对齐仍交给模型自己的 processor。适合 MiniCPM-V 这类非 Qwen 的切片模型——把
+        Qwen 专属的 image_max/min_pixels 关掉(设 0)、改用本项控制输入尺寸,避免那些
+        旋钮污染切片网格。<=0 或未超限则原样返回。缩放用 BICUBIC(同 LlamaFactory/mnn)。
+        """
+        from PIL import Image
+        side = self.cfg.inference.hf.image_max_side
+        if not side or side <= 0:
+            return pil_img
+        w, h = pil_img.size
+        longest = max(w, h)
+        if longest <= side:
+            return pil_img
+        factor = side / longest
+        dst = (max(int(w * factor), 1), max(int(h * factor), 1))
+        return pil_img.resize(dst, Image.BICUBIC)
+
     def _image_meta(self, inputs) -> dict:
         """从 processor 输出提取图片对齐元数据(grid_thw -> 像素/视觉 token 数)。
 
@@ -164,6 +184,7 @@ class HFBackend(InferenceBackend):
             if not img_path.exists():
                 raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
             pil_img = Image.open(img_path).convert("RGB")
+            pil_img = self._maybe_resize_max_side(pil_img)  # 纯等比缩放(不 patch 对齐)
             text = self.processor.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
@@ -197,6 +218,8 @@ class HFBackend(InferenceBackend):
                     "backend": "hf",
                     "prompt_token_count": prompt_len,
                     "output_token_ids": [int(x) for x in trimmed[0].tolist()],
+                    # 喂给 processor 前的实际图片尺寸(经 image_max_side 等比缩放后),供对齐审计。
+                    "hf_image_input_size": [pil_img.width, pil_img.height],
                 }
                 raw.update(self._image_meta(inputs))
                 return Prediction(
