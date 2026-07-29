@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Any, Optional
@@ -78,6 +79,11 @@ class HFBackend(InferenceBackend):
                 hc.model_path, torch_dtype=dtype
             ).to(hc.device)
         self.model.eval()
+        # 模型架构标识:MiniCPM-V-4.6(NaViT 切片视觉)不能走通用 processor(text,images)——
+        # 那会把按子图分组的 pixel_values 打平、丢掉 grids/num_patches_per_image、也不传
+        # downsample_mode,导致其 vit_merger 的统一 reshape 崩(见 _build_minicpmv46_inputs)。
+        # 故对它走一条复刻 LlamaFactory MiniCPMV4_6Plugin 的专属预处理;其它模型不受影响。
+        self._model_type = str(getattr(getattr(self.model, "config", None), "model_type", "") or "")
 
     def _resolve_dtype(self, name: str):
         if not name or name == "auto":
@@ -138,6 +144,108 @@ class HFBackend(InferenceBackend):
         dst = (max(int(w * factor), 1), max(int(h * factor), 1))
         return pil_img.resize(dst, Image.BICUBIC)
 
+    def _minicpmv46_downsample_mode(self) -> str:
+        """取 MiniCPM-V-4.6 的 downsample_mode(4x/16x 视觉 token 压缩比)。
+
+        与 plugin 一致:优先环境变量 DOWNSAMPLE_MODE,否则读 image_processor.downsample_mode,
+        缺省 "16x"。它既决定占位符里每 patch 的 token 数,也要透传给 forward(否则占位符
+        token 数与模型内部对不上)。
+        """
+        ds = os.getenv("DOWNSAMPLE_MODE")
+        if ds is None:
+            ds = getattr(getattr(self.processor, "image_processor", None), "downsample_mode", "16x")
+        return ds or "16x"
+
+    def _minicpmv46_placeholder(self, mm_inputs: dict, downsample_mode: str) -> str:
+        """复刻 MiniCPMV4_6Plugin._build_v4_6_placeholder(单图,image_idx=0)。
+
+        按 NaViT token 计数展开图像占位符:<image> + image_token*N + </image>,再按切片网格
+        (grids)拼 <slice>...</slice> 行。N = target_sizes.prod(-1)//token_divisor,
+        token_divisor = 4(4x)/16(16x)。
+        """
+        proc = self.processor
+        grids = mm_inputs.get("grids", [[0, 0]])
+        num_patches_per_image = mm_inputs.get("num_patches_per_image", [1])
+        target_sizes = mm_inputs.get("target_sizes")
+        token_divisor = 4 if downsample_mode == "4x" else 16
+
+        n_patches = int(num_patches_per_image[0])                 # 单图:flat_index=0
+        num_tokens_per_patch = target_sizes[0:n_patches].prod(-1) // token_divisor
+        num_rows, num_cols = int(grids[0][0]), int(grids[0][1])
+
+        image_start = getattr(proc, "image_start_token", "<image>")
+        image_end = getattr(proc, "image_end_token", "</image>")
+        slice_start = getattr(proc, "slice_start_token", "<slice>")
+        slice_end = getattr(proc, "slice_end_token", "</slice>")
+        image_id_start = getattr(proc, "image_id_start_token", "<image_id>")
+        image_id_end = getattr(proc, "image_id_end_token", "</image_id>")
+        image_token = (
+            getattr(proc, "image_token", None)
+            or getattr(getattr(proc, "tokenizer", None), "image_token", None)
+            or "<image>"
+        )
+
+        placeholder = image_start + image_token * int(num_tokens_per_patch[0]) + image_end
+        if getattr(proc, "default_use_image_id", True):
+            placeholder = f"{image_id_start}0{image_id_end}" + placeholder
+
+        if getattr(proc, "slice_mode", True) and num_rows > 0 and num_cols > 0:
+            per_slice = int(num_tokens_per_patch[1]) if num_tokens_per_patch.numel() > 1 else 0
+            slice_ph = slice_start + image_token * per_slice + slice_end
+            placeholder += "\n".join(slice_ph * num_cols for _ in range(num_rows))
+        return placeholder
+
+    def _build_minicpmv46_inputs(self, context: list[Turn], sample_id: str, pil_img) -> dict:
+        """为 MiniCPM-V-4.6 构造与 LlamaFactory 同源的 generate 输入。
+
+        视觉张量走 **image_processor 直调**(保留按子图分组的 pixel_values + grids +
+        num_patches_per_image,喂给它自己的 vit_merger 才不崩);文本按 _minicpmv46_placeholder
+        手工展开图像占位符后 tokenize;downsample_mode 透传给 forward;grids/num_patches_per_image
+        forward 不收,不放进返回值。
+        """
+        hc = self.cfg.inference.hf
+        # 校验恰好 1 个 <image>(与通用路径一致)。
+        img_turns = [t for t in context if _INTERNAL_PLACEHOLDER in t.content]
+        if len(img_turns) != 1:
+            raise ValueError(
+                f"样本 {sample_id}:hf 后端要求对话恰好含 1 个 {_INTERNAL_PLACEHOLDER} "
+                f"占位符,当前 {len(img_turns)} 个。"
+            )
+
+        mm_inputs = self.processor.image_processor([pil_img], return_tensors="pt")
+        downsample_mode = self._minicpmv46_downsample_mode()
+        placeholder = self._minicpmv46_placeholder(mm_inputs, downsample_mode)
+
+        # 把内部 <image> 占位替换成展开后的图像占位串,再套对话模板 + tokenize(纯文本)。
+        messages: list[dict] = []
+        if hc.system_prompt:
+            messages.append({"role": "system", "content": hc.system_prompt})
+        for turn in context:
+            content = turn.content
+            if _INTERNAL_PLACEHOLDER in content:
+                content = content.replace(_INTERNAL_PLACEHOLDER, placeholder, 1)
+            messages.append({"role": turn.role, "content": content})
+        prompt = self.processor.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        text_inputs = self.processor.tokenizer(prompt, return_tensors="pt")
+
+        return {
+            "input_ids": text_inputs["input_ids"],
+            "attention_mask": text_inputs["attention_mask"],
+            "pixel_values": mm_inputs["pixel_values"],
+            "target_sizes": mm_inputs["target_sizes"],
+            "downsample_mode": downsample_mode,  # str:forward 显式形参,透传;非张量不 .to()
+        }
+
+    def _to_device(self, obj, device):
+        """把(可能嵌套 list/tuple 的)张量搬到 device;非张量(如 downsample_mode 字符串)原样返回。"""
+        if self._torch.is_tensor(obj):
+            return obj.to(device)
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(self._to_device(x, device) for x in obj)
+        return obj
+
     def _image_meta(self, inputs) -> dict:
         """从 processor 输出提取图片对齐元数据(grid_thw -> 像素/视觉 token 数)。
 
@@ -179,26 +287,37 @@ class HFBackend(InferenceBackend):
                 )
             from PIL import Image
 
-            messages = self._build_messages(context, sample_id)
             img_path = resolve_image_path(images[0], self.cfg)
             if not img_path.exists():
                 raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
             pil_img = Image.open(img_path).convert("RGB")
-            pil_img = self._maybe_resize_max_side(pil_img)  # 纯等比缩放(不 patch 对齐)
-            text = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = self.processor(
-                text=[text], images=[pil_img], padding=True, return_tensors="pt"
-            )
+            if self._model_type == "minicpmv4_6":
+                # MiniCPM-V-4.6:走复刻 LlamaFactory 的专属预处理(image_processor 直调 +
+                # 手工占位符 + downsample_mode);其自身 image_processor 负责切片/尺寸,故不预缩放。
+                inputs = self._build_minicpmv46_inputs(context, sample_id, pil_img)
+            else:
+                pil_img = self._maybe_resize_max_side(pil_img)  # 纯等比缩放(不 patch 对齐)
+                messages = self._build_messages(context, sample_id)
+                text = self.processor.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+                inputs = self.processor(
+                    text=[text], images=[pil_img], padding=True, return_tensors="pt"
+                )
         except Exception as e:  # 构造阶段失败(缺图/占位符不符等)
             self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
             return Prediction(id=sample_id, error=f"build_prompt: {e}")
 
         with self._lock:
             try:
-                inputs = inputs.to(self.model.device)
-                prompt_len = int(inputs.input_ids.shape[1])
+                # minicpmv4_6 路径返回普通 dict(含 str 型 downsample_mode);通用路径返回
+                # BatchFeature。分别搬到设备并取 prompt 长度,再统一 **inputs 送 generate。
+                if isinstance(inputs, dict):
+                    inputs = {k: self._to_device(v, self.model.device) for k, v in inputs.items()}
+                    prompt_len = int(inputs["input_ids"].shape[1])
+                else:
+                    inputs = inputs.to(self.model.device)
+                    prompt_len = int(inputs.input_ids.shape[1])
                 with self._torch.inference_mode():
                     gen = self.model.generate(
                         **inputs,
