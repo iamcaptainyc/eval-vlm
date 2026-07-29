@@ -42,8 +42,21 @@ class InferenceBackend(ABC):
 
         实现方应捕获自身异常并写入 Prediction.error,而不是抛出,
         以免中断整批评测。返回的 Prediction 不需要设置 turn,由 runner 填。
+
+        例外:在 except 块里先调 self._raise_if_fail_fast() —— fail-fast 模式下它会
+        原样抛出当前异常(带完整 traceback),否则直接返回、照常记 error 继续跑。
         """
         raise NotImplementedError
+
+    def _raise_if_fail_fast(self) -> None:
+        """fail-fast 模式:重新抛出**正在处理中的**异常,让完整 traceback 冒泡到 CLI。
+
+        必须在 except 块内(或其调用链上)调用:无参 `raise` 会重新抛出当前活跃异常,
+        且保留其原始 traceback(指向真正出错的那一行,如模型内部的 reshape)。
+        默认(非 fail-fast)是 no-op —— 由调用方接着记 error、不中断整批。
+        """
+        if self.cfg.inference.fail_fast:
+            raise  # re-raise active exception, original traceback intact
 
     def close(self) -> None:
         """可选:释放资源(连接池等)。"""

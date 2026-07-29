@@ -172,6 +172,10 @@ class InferenceConfig:
     新增后端只需加一个子块 + 一个分支。
     """
     backend: str = "openai"
+    # fail_fast:任一条推理出错就立即抛出**原始异常(带完整 traceback)**并中断整批,
+    # 而非默认的「记 error 继续跑」。仅供调试用(如定位模型 reshape 报错),由 CLI 的
+    # --fail-fast 运行时置位,不写回 config.yaml。跨后端通用,故放在顶层而非各后端块。
+    fail_fast: bool = False
     openai: OpenAIBackendConfig = field(default_factory=OpenAIBackendConfig)
     mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
     hf: HFBackendConfig = field(default_factory=HFBackendConfig)

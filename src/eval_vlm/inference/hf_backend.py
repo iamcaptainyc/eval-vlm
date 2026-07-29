@@ -171,6 +171,7 @@ class HFBackend(InferenceBackend):
                 text=[text], images=[pil_img], padding=True, return_tensors="pt"
             )
         except Exception as e:  # 构造阶段失败(缺图/占位符不符等)
+            self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
             return Prediction(id=sample_id, error=f"build_prompt: {e}")
 
         with self._lock:
@@ -205,6 +206,7 @@ class HFBackend(InferenceBackend):
                     raw=raw,
                 )
             except Exception as e:  # noqa: BLE001 - 捕获以记录而非中断整批
+                self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
                 return Prediction(
                     id=sample_id,
                     latency=round(time.time() - start, 3),

@@ -214,6 +214,7 @@ def _pred_dataset(args: argparse.Namespace) -> int:
     folder = _resolve_folder(args)
     persisted = _persist_overrides(folder, args)      # --base-url/--model 永久写回
     cfg = load_dataset_config(folder)
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("pred", persisted, folder)
     print(f"[pred] 数据集预测,模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg)
@@ -235,6 +236,7 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     folder = _resolve_folder(args)
     persisted = _persist_overrides(folder, args)      # --base-url/--model/--scorer 永久写回
     cfg = load_dataset_config(folder)
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("eval", persisted, folder)
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg, "eval")
@@ -339,6 +341,7 @@ def _pred_datadir(args: argparse.Namespace) -> int:
     # 再读回成强类型 Config —— 用户参数优先且持久化。
     persisted = _persist_overrides(out_dir, args)
     cfg = load_dataset_config(out_dir)          # 读 config.yaml + 钉 dataset_dir=out_dir
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("pred", persisted, out_dir)
 
     # 图片永远定位到 --datadir(即便 config 里 media_root 被改过)。
@@ -419,6 +422,10 @@ def _add_inference_args(p: argparse.ArgumentParser) -> None:
                    help="临时覆盖 inference.openai.base_url(部署地址,如 http://localhost:8000/v1)")
     p.add_argument("--model", default=None,
                    help="临时覆盖 inference.openai.model(部署时注册的模型名)")
+    # 调试用:任一条推理出错立即抛出原始异常(带完整 traceback)并中断整批,不再默默记
+    # error 跑完全程。仅运行时生效,不写回 config.yaml。默认关闭(保持容错、可断点续跑)。
+    p.add_argument("--fail-fast", dest="fail_fast", action="store_true",
+                   help="任一条推理出错就立即抛出完整 traceback 并中断(调试用;默认记 error 继续跑)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -532,8 +539,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help=f"提问文本(缺省 {DEFAULT_PROMPT!r});不含 <image> 时自动前置")
     p_infer.add_argument("--system-prompt", dest="system_prompt", default=None,
                          help="系统提示(应与训练一致;缺省沿用模型 config.json)")
-    p_infer.add_argument("--max-tokens", dest="max_tokens", type=int, default=None,
-                         help="生成上限(缺省 512)")
+    p_infer.add_argument("--max-tokens", dest="max_tokens", type=int, default=1024,
+                         help="生成上限(缺省 1024)")
     p_infer.set_defaults(func=_cmd_infer)
 
     # pred(统一预测命令:--dataset=数据集 test.json | --datadir=无标注图片文件夹)
@@ -608,6 +615,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         return args.func(args)
     except (FileExistsError, FileNotFoundError, ValueError, KeyError) as e:
+        # --fail-fast:用户明确要看完整 traceback,连这些「已知用户侧错误」也照抛不拦。
+        if getattr(args, "fail_fast", False):
+            raise
         # 已知的用户侧错误:打印简洁信息,不抛完整堆栈。
         print(f"[error] {e}", file=sys.stderr)
         return 2

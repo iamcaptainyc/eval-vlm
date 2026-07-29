@@ -105,6 +105,7 @@ class OpenAIBackend(InferenceBackend):
         try:
             messages = self._build_messages(context, images, sample_id)
         except Exception as e:  # 构造阶段失败(如缺图)
+            self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
             return Prediction(id=sample_id, error=f"build_messages: {e}")
 
         for attempt in range(oc.max_retries + 1):
@@ -128,6 +129,10 @@ class OpenAIBackend(InferenceBackend):
                 last_err = e
                 if attempt < oc.max_retries:
                     time.sleep(min(2 ** attempt, 10))
+        # fail-fast:重试仍失败则抛出最后一次异常(带其 traceback),不再吞成 error 继续跑。
+        # 已在 except 块外,故显式 `raise last_err`(无参 raise 在此处已无活跃异常)。
+        if self.cfg.inference.fail_fast and last_err is not None:
+            raise last_err
         return Prediction(
             id=sample_id,
             latency=round(time.time() - start, 3),

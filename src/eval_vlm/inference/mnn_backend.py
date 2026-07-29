@@ -356,6 +356,7 @@ class MNNBackend(InferenceBackend):
                 "images": [{"data": img, "height": height, "width": width}],
             }
         except Exception as e:  # 构造阶段失败(缺图/尺寸异常等)
+            self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
             return Prediction(id=sample_id, error=f"build_prompt: {e}")
 
         with self._lock:
@@ -380,6 +381,7 @@ class MNNBackend(InferenceBackend):
                     raw=raw,
                 )
             except Exception as e:  # noqa: BLE001 - 捕获以记录而非中断整批
+                self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
                 return Prediction(
                     id=sample_id,
                     latency=round(time.time() - start, 3),
