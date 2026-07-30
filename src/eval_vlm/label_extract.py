@@ -84,17 +84,26 @@ def _post_data(text: str, le: LabelExtractConfig) -> dict:
     return data
 
 
-def extract_one(text: str, le: LabelExtractConfig) -> list[str]:
-    """对单条描述抽取 cn 标签列表,带指数退避重试;彻底失败抛 LabelExtractError。"""
+def _retry_extract(text: str, le: LabelExtractConfig, parser):
+    """带指数退避重试地 POST 抽取,并用 parser 把响应 data 段解析成结果。
+
+    parser: ``(data: dict) -> 任意结果``。label-extract 用 parse_cn_labels(打平去重列表);
+    field-eval 用 field_eval.parse_cn_fields(保留字段结构)。彻底失败抛 LabelExtractError。
+    """
     last: Optional[Exception] = None
     for attempt in range(le.max_retries + 1):
         try:
-            return parse_cn_labels(_post_data(text, le), le.none_label)
+            return parser(_post_data(text, le))
         except LabelExtractError as e:
             last = e
             if attempt < le.max_retries:
                 time.sleep(min(2 ** attempt, 10))
     raise LabelExtractError(str(last))
+
+
+def extract_one(text: str, le: LabelExtractConfig) -> list[str]:
+    """对单条描述抽取 cn 标签列表(打平去重),带指数退避重试;彻底失败抛 LabelExtractError。"""
+    return _retry_extract(text, le, lambda data: parse_cn_labels(data, le.none_label))
 
 
 def _iter_descriptions(pred_path: Path) -> Iterator[tuple[str, str]]:

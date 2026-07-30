@@ -40,6 +40,7 @@ from .data.splitter import split_dataset
 from .runner import run_inference
 from .predict import predict_folder
 from .label_extract import run_label_extract
+from .field_eval import run_field_eval
 from .evaluate import score_predictions
 from .precision import compare_precision
 from .report import build_report, render_report_md
@@ -229,6 +230,26 @@ def _cmd_score(args: argparse.Namespace) -> int:
     cfg = load_dataset_config(folder)
     _report_persist("score", persisted, folder)
     _do_score(cfg, args.scorer)
+    return 0
+
+
+def _cmd_field_eval(args: argparse.Namespace) -> int:
+    """field-eval:把 ref/pred 的第一轮描述各发给 value-extract 服务抽字段,逐字段算准确率。"""
+    folder = _resolve_folder(args)
+    persisted = _persist_overrides(folder, args)      # --label-extract-url/token 永久写回
+    cfg = load_dataset_config(folder)
+    _report_persist("field-eval", persisted, folder)
+    metrics = run_field_eval(cfg, overwrite=getattr(args, "overwrite", False))
+    ov = metrics["overall"]
+    print(f"[field-eval] 已评 {metrics['num_scored']} 样本(模型无输出判错 {metrics['num_pred_missing']},"
+          f" 跳过 ref {metrics['skipped_ref']}/pred {metrics['skipped_pred_error']})"
+          f" -> {cfg.field_metrics_path}")
+    print(f"[field-eval] micro={ov['micro_accuracy']}  macro={ov['macro_accuracy']}  "
+          f"全对率={ov['exact_match_rate']}")
+    for f in metrics["fields"]:
+        pf = metrics["per_field"][f]
+        print(f"  - {f}: {pf['accuracy']}  ({pf['correct']}/{pf['total']})")
+    print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
     return 0
 
 
@@ -479,6 +500,20 @@ def build_parser() -> argparse.ArgumentParser:
                          help=f"临时覆盖评分器。可用: {', '.join(available_scorers())}")
     _add_workspace_arg(p_score)
     p_score.set_defaults(func=_cmd_score)
+
+    # field-eval:第一轮描述 -> value-extract 服务抽固定字段 -> 逐字段准确率
+    p_fe = sub.add_parser(
+        "field-eval",
+        help="第一轮描述逐字段准确率:ref/pred 各发给 value-extract 服务抽字段后严格比对(--dataset=名|路径)")
+    p_fe.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_fe.add_argument("--overwrite", action="store_true",
+                      help="无视已有 fields_ref/fields_pred 整份重抽;默认断点续跑只补未完成")
+    p_fe.add_argument("--label-extract-url", dest="label_extract_url", default=None,
+                      help="临时覆盖抽取服务地址 base_url(永久写回 label_extract.base_url)")
+    p_fe.add_argument("--label-extract-token", dest="label_extract_token", default=None,
+                      help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
+    _add_workspace_arg(p_fe)
+    p_fe.set_defaults(func=_cmd_field_eval)
 
     # eval = run + score
     p_eval = sub.add_parser("eval", help="一键连续执行 run + score(不含 split)")

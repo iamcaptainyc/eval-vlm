@@ -302,6 +302,9 @@ class LabelExtractConfig:
     max_retries: int = 3
     max_concurrency: int = 4          # 抽取是纯 I/O,可并发(与推理后端是否串行无关)
     none_label: str = "无"            # cn 中表示「无该类目」的占位值,过滤掉
+    # field-eval 用的专用路由:返回固定枚举字段(主辅路/道路结构/车道位置/警示标志),
+    # 信封同 label-extract(data.labels.cn)。与上面的 path(旧 13 类标签)相互独立。
+    value_path: str = "api/v1/vlm/value-extract"
 
 
 @dataclass
@@ -467,6 +470,44 @@ class Config:
     def label_failures_path(self) -> Path:
         """label-extract 失败记录:每行 {image, error},供排查/重跑。"""
         return self.run_dir / "label_failures.jsonl"
+
+    # ---- field-eval(第一轮描述的字段抽取 -> 逐字段准确率)----
+    # ref 字段跨模型运行不变,缓存在**数据集级**(dataset_dir),各模型/后端复用;
+    # pred 字段与比对结果是**运行级**(run_dir),随模型/后端区分。
+    @property
+    def field_ref_path(self) -> Path:
+        """ref(标准描述)抽取出的字段,数据集级缓存:每行 {id, fields}。"""
+        return self.dataset_dir / "fields_ref.jsonl"
+
+    @property
+    def field_ref_failures_path(self) -> Path:
+        """ref 字段抽取失败记录:每行 {id, error}。"""
+        return self.dataset_dir / "fields_ref_failures.jsonl"
+
+    @property
+    def field_pred_path(self) -> Path:
+        """pred(模型描述)抽取出的字段,运行级:每行 {id, fields}。"""
+        return self.run_dir / "fields_pred.jsonl"
+
+    @property
+    def field_pred_failures_path(self) -> Path:
+        """pred 字段抽取失败记录:每行 {id, error}。"""
+        return self.run_dir / "fields_pred_failures.jsonl"
+
+    @property
+    def field_metrics_path(self) -> Path:
+        """逐字段准确率等聚合指标(机器可读)。"""
+        return self.run_dir / "field_metrics.json"
+
+    @property
+    def field_summary_path(self) -> Path:
+        """逐字段准确率的人类可读摘要。"""
+        return self.run_dir / "field_summary.md"
+
+    @property
+    def field_mismatches_path(self) -> Path:
+        """逐字段失配清单(按 id 列 ref vs pred 每字段值 + ✓/✗),供人工核查。"""
+        return self.run_dir / "field_mismatches.md"
 
     def _resolve(self, p: str | os.PathLike[str]) -> Path:
         """相对路径相对当前工作目录(CWD)解析,绝对路径原样返回。
