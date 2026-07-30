@@ -126,12 +126,14 @@ def load_fields(path: Path) -> dict[str, dict[str, list[str]]]:
 
 def _extract_batch(items: list[tuple[str, str]], le: LabelExtractConfig,
                    out_path: Path, fail_path: Path, *, label: str,
-                   overwrite: bool) -> dict:
+                   overwrite: bool, images_by_id: Optional[dict[str, list[str]]] = None) -> dict:
     """把 [(id, text)] 逐条发给服务抽取字段,成功写 out_path、失败写 fail_path。
 
+    每条落盘行带 ``images``(该 id 的原图地址,便于追溯回原图,同 predictions.jsonl)。
     并发(le.max_concurrency)、断点续跑(out_path 已成功的 id 跳过)、每条 flush+fsync、
     失败不中断整批。overwrite=True 忽略已有 out_path 整份重跑。返回统计。
     """
+    images_by_id = images_by_id or {}
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done = set() if overwrite else _done_ids(out_path)
     todo = [(sid, text) for sid, text in items if sid not in done]
@@ -152,12 +154,14 @@ def _extract_batch(items: list[tuple[str, str]], le: LabelExtractConfig,
 
         def _record(sid: str, result) -> None:
             nonlocal n_ok, n_err
+            imgs = images_by_id.get(sid, [])
             if isinstance(result, Exception):
                 n_err += 1
-                _append(fail_fh, {"id": sid, "error": f"{type(result).__name__}: {result}"})
+                _append(fail_fh, {"id": sid, "images": imgs,
+                                  "error": f"{type(result).__name__}: {result}"})
             else:
                 n_ok += 1
-                _append(ok_fh, {"id": sid, "fields": result})
+                _append(ok_fh, {"id": sid, "images": imgs, "fields": result})
 
         try:
             if max_workers == 1:
@@ -235,8 +239,9 @@ def _detect_datadir_format(path: Path) -> bool:
     return False
 
 
-def _pred_items(pred_path: Path, desc_turn: dict[str, int]) -> list[tuple[str, str]]:
-    """从 predictions.jsonl 取每 id 描述轮的 [(id, 描述文本)];缺/空/报错的 id 不产出。
+def _pred_items(pred_path: Path, desc_turn: dict[str, int]
+                ) -> tuple[list[tuple[str, str]], dict[str, list[str]]]:
+    """从 predictions.jsonl 取每 id 描述轮的 [(id, 描述文本)] 与 {id: images};缺/空/报错不产出。
 
     兼容 run/pred --dataset 的 Prediction 格式与 pred --datadir 的对话格式。按描述轮
     turn_index 对齐;取不到该轮时回落到该 id 唯一/首个 assistant 预测。
@@ -249,6 +254,7 @@ def _pred_items(pred_path: Path, desc_turn: dict[str, int]) -> list[tuple[str, s
         by_id.setdefault(p.id, []).append(p)
 
     items: list[tuple[str, str]] = []
+    images: dict[str, list[str]] = {}
     for sid, turn in desc_turn.items():
         p = by_key.get((sid, turn))
         if p is None:
@@ -262,7 +268,8 @@ def _pred_items(pred_path: Path, desc_turn: dict[str, int]) -> list[tuple[str, s
         if not text.strip():
             continue
         items.append((sid, text))
-    return items
+        images[sid] = list(getattr(p, "images", None) or [])
+    return items, images
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +299,9 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
     """
     fields = _canonical_fields(ref_fields)
     per_field = {f: {"correct": 0, "total": 0} for f in fields}
+    # 逐取值(per-class):{字段: {取值: {correct, support}}}。support=该取值在 ref 出现的样本数,
+    # correct=其中 pred 也含该取值的数;accuracy=correct/support(即该取值的召回)。
+    per_value: dict[str, dict[str, dict[str, int]]] = {}
     n_scored = 0
     n_exact = 0
     n_pred_missing = 0
@@ -336,16 +346,33 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                 per_field[f]["correct"] += 1
             else:
                 all_correct = False
+            # 逐取值:对 ref 里出现的每个取值,统计 pred 是否也命中(该取值的召回)
+            pset = set(p)
+            for v in r:
+                pv = per_value.setdefault(f, {}).setdefault(v, {"correct": 0, "support": 0})
+                pv["support"] += 1
+                if v in pset:
+                    pv["correct"] += 1
             field_rows.append({"field": f, "ref": r, "pred": p, "correct": correct})
         if all_correct:
             n_exact += 1
         if not all_correct:                 # 只把有失配(含 pred_missing)的 id 列入清单
-            rows.append({"id": sid, "state": state, "fields": field_rows})
+            rows.append({"id": sid, "images": list(s.images), "state": state,
+                         "fields": field_rows})
 
     # 聚合指标
     for f in fields:
         c, t = per_field[f]["correct"], per_field[f]["total"]
         per_field[f]["accuracy"] = round(c / t, 4) if t else 0.0
+    # 逐取值准确率(每字段内按 support 降序,便于阅读)
+    per_value_out: dict[str, dict[str, dict]] = {}
+    for f in fields:
+        vals = per_value.get(f, {})
+        per_value_out[f] = {
+            v: {"correct": d["correct"], "support": d["support"],
+                "accuracy": round(d["correct"] / d["support"], 4) if d["support"] else 0.0}
+            for v, d in sorted(vals.items(), key=lambda kv: (-kv[1]["support"], kv[0]))
+        }
     tot_correct = sum(per_field[f]["correct"] for f in fields)
     tot_total = sum(per_field[f]["total"] for f in fields)
     macro = (sum(per_field[f]["accuracy"] for f in fields) / len(fields)) if fields else 0.0
@@ -358,6 +385,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
         "skipped_ref": skipped_ref,
         "skipped_pred_error": skipped_pred_error,
         "per_field": per_field,
+        "per_value": per_value_out,
         "overall": {
             "micro_accuracy": round(tot_correct / tot_total, 4) if tot_total else 0.0,
             "macro_accuracy": round(macro, 4),
@@ -394,6 +422,26 @@ def _render_summary(metrics: dict, cfg: Config) -> str:
         pf = metrics["per_field"][f]
         lines.append(f"| {f} | {pf['accuracy']} | {pf['correct']}/{pf['total']} |")
     lines.append("")
+
+    # 逐取值(per-class)准确率:每字段展开其各取值的召回
+    lines.append("## 逐取值准确率")
+    lines.append("")
+    lines.append("> 某取值的准确率 = 该取值在 ref 出现的样本中,pred 也命中该取值的比例(召回)。")
+    per_value = metrics.get("per_value") or {}
+    for f in metrics["fields"]:
+        vals = per_value.get(f) or {}
+        lines.append("")
+        lines.append(f"### {f}")
+        if not vals:
+            lines.append("")
+            lines.append("(ref 中无取值)")
+            continue
+        lines.append("")
+        lines.append("| 取值 | 准确率 | 命中/出现 |")
+        lines.append("| --- | --- | --- |")
+        for v, d in vals.items():
+            lines.append(f"| {v} | {d['accuracy']} | {d['correct']}/{d['support']} |")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -419,6 +467,9 @@ def _render_mismatches(rows: list[dict], metrics: dict, cfg: Config) -> str:
     for row in rows:
         tag = "  ⚠️ 模型未产出描述" if row["state"] == "pred_missing" else ""
         blocks.append(f"## 样本 `{row['id']}`{tag}")
+        imgs = row.get("images") or []
+        if imgs:
+            blocks.append("- 图片: " + ", ".join(f"`{i}`" for i in imgs))
         blocks.append("")
         blocks.append("| 字段 | ref | pred | |")
         blocks.append("| --- | --- | --- | --- |")
@@ -448,14 +499,15 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
 
     # ---- A. 抽 ref 字段(数据集级缓存,跨模型复用)----
     ref_items, desc_turn = _ref_items(samples)
+    ref_images = {s.id: list(s.images) for s in samples}
     ref_stats = _extract_batch(ref_items, le, cfg.field_ref_path, cfg.field_ref_failures_path,
-                               label="ref", overwrite=overwrite)
+                               label="ref", overwrite=overwrite, images_by_id=ref_images)
 
     # ---- B. 抽 pred 字段(运行级)----
-    pred_items = _pred_items(cfg.predictions_path, desc_turn)
+    pred_items, pred_images = _pred_items(cfg.predictions_path, desc_turn)
     pred_desc_ids = {sid for sid, _ in pred_items}
     pred_stats = _extract_batch(pred_items, le, cfg.field_pred_path, cfg.field_pred_failures_path,
-                                label="pred", overwrite=overwrite)
+                                label="pred", overwrite=overwrite, images_by_id=pred_images)
 
     # ---- C. 比对 + 聚合 ----
     ref_fields = load_fields(cfg.field_ref_path)

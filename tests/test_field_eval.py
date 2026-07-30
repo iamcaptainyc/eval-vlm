@@ -104,6 +104,15 @@ def test_aggregate_correctness_matrix():
     ids = {r["id"]: r["state"] for r in rows}
     assert ids == {"b": "compared", "c": "pred_missing"}
 
+    # 逐取值(per-class)准确率:该取值在 ref 出现的样本中 pred 命中的比例
+    pv = metrics["per_value"]
+    # 主辅路 ref 全是「主路」(a,b,c),pred 命中 a、b,c 无输出 -> 2/3
+    assert pv["主辅路"]["主路"] == {"correct": 2, "support": 3, "accuracy": 0.6667}
+    assert "辅路" not in pv["主辅路"]                      # ref 中未出现 -> 不统计
+    # 警示标志:礼让行人(a,命中)1/1;学校路口(c,pred_missing 未命中)0/1
+    assert pv["警示标志"]["礼让行人"] == {"correct": 1, "support": 1, "accuracy": 1.0}
+    assert pv["警示标志"]["学校路口"] == {"correct": 0, "support": 1, "accuracy": 0.0}
+
 
 def test_aggregate_both_empty_is_correct():
     """ref 与 pred 该字段都为空(都「无」)-> 判对。"""

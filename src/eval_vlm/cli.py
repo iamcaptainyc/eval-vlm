@@ -249,6 +249,8 @@ def _cmd_field_eval(args: argparse.Namespace) -> int:
     for f in metrics["fields"]:
         pf = metrics["per_field"][f]
         print(f"  - {f}: {pf['accuracy']}  ({pf['correct']}/{pf['total']})")
+        for v, d in (metrics.get("per_value", {}).get(f) or {}).items():
+            print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
     return 0
 
