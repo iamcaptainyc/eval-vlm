@@ -45,6 +45,14 @@ base_train_args:
   optim: adamw_torch
   save_total_limit: 1
   lora_target: all
+  # LoRA:rank 由 search_space 搜;alpha 由顶层 lora_alpha_ratio × rank **派生**(下面这个值只是占位/回退)。
+  lora_alpha: 32
+  lora_dropout: 0
+  # per_device 固定 4:本机显存上限(设 8 必 OOM),**永不搜索**。
+  # gradient_accumulation_steps 由 search_space 搜(梯度累加不额外吃显存);此处 16 作回退。
+  # lr 与 grad_accum 各自独立搜,不做绑定。
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 16
   freeze_vision_tower: true
   freeze_multi_modal_projector: true
   image_max_pixels: 589824
@@ -59,24 +67,22 @@ merge_args:
   export_size: 5
   export_device: cpu
 
+# LoRA alpha 与 rank 的耦合:alpha = lora_alpha_ratio × 采样到的 lora_rank(即 rank = 1/2·alpha 时设 2)。
+# 设了它就**不要**再把 lora_alpha 放进 search_space;驱动器会据此自动派生 alpha。null=不派生。
+lora_alpha_ratio: 2
+
 # --- 搜索空间(键 = llamafactory 参数名;会覆盖 base_train_args 同名项)---
-# type: float_log(对数均匀,给 low/high)| float(均匀,给 low/high)| int(给 low/high[/step])| categorical(给 choices)
+# type: float_log(对数均匀,给 low/high)| float(均匀)| int | categorical
+# 依据 3 组实验收窄:分辨率↑显著涨分(尤其车道位置)、lr 2e-4 优于 1e-4、rank 16 优于 8。
+# lr 与 grad_accum **各自独立搜**(不做绑定),由 TPE 自己找组合。
 search_space:
-  learning_rate:               {type: float_log, low: 5.0e-6, high: 5.0e-4}
-  lora_rank:                   {type: categorical, choices: [8, 16, 32, 64]}
-  lora_alpha:                  {type: categorical, choices: [16, 32, 64, 128]}
-  lora_dropout:                {type: float, low: 0.0, high: 0.1}
-  gradient_accumulation_steps: {type: categorical, choices: [8, 16]}
-  per_device_train_batch_size: {type: categorical, choices: [2, 4]}
-  warmup_ratio:                {type: float, low: 0.0, high: 0.1}
-  # 图像最大像素:同时影响训练与评测(评测端会自动用该 trial 采样到的同一值,保证对齐)。
-  # 512*512 / 768*768 / 1024*1024:
-  image_max_pixels:            {type: categorical, choices: [262144, 589824, 1048576]}
-  # 可选进阶(按需打开):
-  # num_train_epochs:          {type: categorical, choices: [2.0, 3.0, 4.0]}
-  # neftune_noise_alpha:       {type: float, low: 0.0, high: 5.0}
-  # loraplus_lr_ratio:         {type: categorical, choices: [1.0, 8.0, 16.0]}
-  # use_rslora:                {type: categorical, choices: [true, false]}
+  learning_rate:    {type: float_log, low: 1e-4, high: 4.0e-4}          # 围绕 2e-4 偏高(1e-4 实测明显差)
+  lora_rank:        {type: categorical, choices: [8, 16, 32, 64]}            # 不搜 8(实测差);alpha=2×rank 自动派生
+  image_max_pixels: {type: categorical, choices: [589824, 1048576, 1638400]}  # 768²/1024²/1280²:1024>768,继续往高推(显存不够就去掉 1280²)
+  gradient_accumulation_steps: {type: categorical, choices: [8, 16, 32]}  # 有效batch=4×{8,16,32}={32,64,128};per_device 固定 4(本机上限,8 必 OOM)
+  # 想再扩(需更多 trial):
+  # num_train_epochs: {type: categorical, choices: [2.0, 3.0, 4.0]}
+  # neftune_noise_alpha: {type: float, low: 0.0, high: 5.0}
 
 # --- 优化目标(可选参数)---
 objective:
@@ -100,7 +106,7 @@ eval_env_vars:
 # --- Optuna ---
 optuna:
   n_trials: 20
-  study_name: qwen35vl_4dim
+  study_name: Qwen3_5_0_8B_4dimroad
   storage: null                # null => 自动用 sqlite:///<work_root>/study.db(断点续跑);也可自填
   sampler: tpe                 # tpe(贝叶斯,推荐)| random
   seed: 42

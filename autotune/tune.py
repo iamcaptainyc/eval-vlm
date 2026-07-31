@@ -162,6 +162,10 @@ def build_objective(cfg: dict):
 
     def objective(trial: "optuna.Trial") -> float:
         params = {name: suggest(trial, name, spec) for name, spec in cfg["search_space"].items()}
+        # 派生耦合参数:alpha = lora_alpha_ratio × 采样的 lora_rank(遵循 rank=1/2·alpha 等约定)。
+        alpha_ratio = cfg.get("lora_alpha_ratio")
+        if alpha_ratio and "lora_rank" in params:
+            params["lora_alpha"] = int(round(alpha_ratio * params["lora_rank"]))
         # merged 目录名 = 模型名_trial_000N:既唯一(修掉 run_dir 撞名),又让 eval-vlm 的
         # result_name(取目录名)带模型信息。adapter 为临时产物,合并成功后删除,只留合并权重。
         trial_tag = f"{model_tag}_trial_{trial.number:04d}"
