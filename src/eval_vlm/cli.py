@@ -42,6 +42,7 @@ from .predict import predict_folder
 from .label_extract import run_label_extract
 from .field_eval import run_field_eval
 from .evaluate import score_predictions
+from .data.loader import load_samples
 from .precision import compare_precision
 from .report import build_report, render_report_md
 from .results import store
@@ -142,6 +143,10 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("mnn_quant", "inference.mnn.quant"),
     ("hf_model", "inference.hf.model_path"),
     ("hf_image_max_side", "inference.hf.image_max_side"),
+    ("vllm_model", "inference.vllm_offline.model_path"),
+    ("vllm_gpu_util", "inference.vllm_offline.gpu_memory_utilization"),
+    ("vllm_max_model_len", "inference.vllm_offline.max_model_len"),
+    ("vllm_image_max_pixels", "inference.vllm_offline.image_max_pixels"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -234,11 +239,32 @@ def _cmd_score(args: argparse.Namespace) -> int:
 
 
 def _cmd_field_eval(args: argparse.Namespace) -> int:
-    """field-eval:把 ref/pred 的第一轮描述各发给 value-extract 服务抽字段,逐字段算准确率。"""
+    """field-eval:逐字段准确率。自给自足——用 config.inference.backend 解析 run_dir,
+    没有 predictions.jsonl 就先用当前 backend 跑 pred,有则直接评(避免 pred/field-eval 后端不一致)。
+    """
     folder = _resolve_folder(args)
-    persisted = _persist_overrides(folder, args)      # --label-extract-url/token 永久写回
+    persisted = _persist_overrides(folder, args)      # --backend/--vllm-model/--label-extract-* 等永久写回
     cfg = load_dataset_config(folder)
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("field-eval", persisted, folder)
+
+    # 自给自足:run_dir 由 cfg.inference.backend + result_name 决定。预测**完整覆盖 test 全部
+    # 目标轮**才直接评;缺失/部分/无 都用当前 backend 补跑(run_inference 可续跑,已完成样本不重推)。
+    need_pred = True
+    if cfg.predictions_path.exists():
+        try:
+            samples = load_samples(cfg, source=cfg.test_path)
+            expected = {(s.id, t.turn_index) for s in samples for t in s.targets}
+            done = store.load_prediction_keys(cfg.predictions_path)
+            need_pred = not (expected and expected.issubset(done))
+        except Exception:  # noqa: BLE001 - 读不出就当作需要补跑,交给下游报确切错
+            need_pred = True
+    if need_pred:
+        print(f"[field-eval] 预测缺失/不完整,用 backend={cfg.inference.backend} 补跑 pred -> {cfg.run_dir}")
+        _do_run(cfg, "field-eval")
+    else:
+        print(f"[field-eval] 复用已有完整预测(backend={cfg.inference.backend}) -> {cfg.predictions_path}")
+
     metrics = run_field_eval(cfg, overwrite=getattr(args, "overwrite", False))
     ov = metrics["overall"]
     print(f"[field-eval] 已评 {metrics['num_scored']} 样本(模型无输出判错 {metrics['num_pred_missing']},"
@@ -452,6 +478,22 @@ def _add_inference_args(p: argparse.ArgumentParser) -> None:
                    help="任一条推理出错就立即抛出完整 traceback 并中断(调试用;默认记 error 继续跑)")
 
 
+def _add_vllm_offline_args(p: argparse.ArgumentParser) -> None:
+    """backend=vllm_offline(离线 vLLM 进程内加载合并权重)的参数。"""
+    p.add_argument("--vllm-model", dest="vllm_model", default=None,
+                   help="backend=vllm_offline 时:合并后全精度权重目录"
+                        "(临时覆盖 inference.vllm_offline.model_path;也用作产物子目录名)")
+    p.add_argument("--vllm-gpu-util", dest="vllm_gpu_util", type=float, default=None,
+                   help="backend=vllm_offline 时:GPU 显存利用率 0~1"
+                        "(临时覆盖 inference.vllm_offline.gpu_memory_utilization)")
+    p.add_argument("--vllm-max-model-len", dest="vllm_max_model_len", type=int, default=None,
+                   help="backend=vllm_offline 时:最大序列长度"
+                        "(临时覆盖 inference.vllm_offline.max_model_len)")
+    p.add_argument("--vllm-image-max-pixels", dest="vllm_image_max_pixels", type=int, default=None,
+                   help="backend=vllm_offline 时:图片像素上限,建议与训练 image_max_pixels 对齐"
+                        "(临时覆盖 inference.vllm_offline.image_max_pixels)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eval_vlm",
@@ -506,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
     # field-eval:第一轮描述 -> value-extract 服务抽固定字段 -> 逐字段准确率
     p_fe = sub.add_parser(
         "field-eval",
-        help="第一轮描述逐字段准确率:ref/pred 各发给 value-extract 服务抽字段后严格比对(--dataset=名|路径)")
+        help="第一轮描述逐字段准确率:无预测则自动用当前 backend 跑 pred,再发 value-extract 抽字段严格比对(--dataset=名|路径)")
     p_fe.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     p_fe.add_argument("--overwrite", action="store_true",
                       help="无视已有 fields_ref/fields_pred 整份重抽;默认断点续跑只补未完成")
@@ -514,6 +556,17 @@ def build_parser() -> argparse.ArgumentParser:
                       help="临时覆盖抽取服务地址 base_url(永久写回 label_extract.base_url)")
     p_fe.add_argument("--label-extract-token", dest="label_extract_token", default=None,
                       help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
+    # field-eval 自给自足:没预测就用当前 backend 先跑 pred。下面这些 flag 指定/覆盖该 backend
+    # 及其模型(与 pred/eval 一致,持久化到 config.yaml),既决定 run_dir 也决定自动 pred 用哪个后端。
+    p_fe.add_argument("--backend", default=None,
+                      choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                      help="临时覆盖推理后端(写回 inference.backend);决定 run_dir 与自动 pred 用哪个后端")
+    p_fe.add_argument("--hf-model", dest="hf_model", default=None,
+                      help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path)")
+    p_fe.add_argument("--mnn-config", dest="mnn_config", default=None,
+                      help="backend=mnn 时:转换产物 config.json 路径(写回 inference.mnn.config_path)")
+    _add_inference_args(p_fe)          # --base-url / --model / --fail-fast
+    _add_vllm_offline_args(p_fe)       # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
     _add_workspace_arg(p_fe)
     p_fe.set_defaults(func=_cmd_field_eval)
 
@@ -524,8 +577,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--scorer", default=None, help="临时覆盖评分器")
     # 后端 / 权重 flag(与 pred 一致,永久写回 config.yaml):让每个格式一条 eval 即可跑完 pred+score
     p_eval.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "hf", "fake"],
-                        help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/fake")
+                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                        help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/vllm_offline/fake")
     p_eval.add_argument("--hf-model", dest="hf_model", default=None,
                         help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path;也用作产物子目录名)")
     p_eval.add_argument("--hf-image-max-side", dest="hf_image_max_side", type=int, default=None,
@@ -538,6 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="backend=mnn 时:图片最长边像素上限(写回 inference.mnn.image_max_side)")
     p_eval.add_argument("--mnn-quant", dest="mnn_quant", default=None,
                         help="backend=mnn 时:量化配方标签(如 hqq-4bit/hqq-8bit),供 report 标注(写回 inference.mnn.quant)")
+    _add_vllm_offline_args(p_eval)
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
 
@@ -602,10 +656,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
                         help="[--datadir] 临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
     p_pred.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "hf", "fake"],
+                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
                         help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
                              "mnn(本地 pymnn 推理转换后的 mnn 模型,需 --mnn-config)| "
                              "hf(本地 transformers 推理,作转换前参考基准,需 --hf-model)| "
+                             "vllm_offline(本地离线 vLLM 进程内加载合并权重,需 --vllm-model)| "
                              "fake(回显,不联网,自检用)")
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
@@ -638,6 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--label-extract-token", dest="label_extract_token", default=None,
                         help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
     _add_inference_args(p_pred)
+    _add_vllm_offline_args(p_pred)
     _add_workspace_arg(p_pred)
     p_pred.set_defaults(func=_cmd_pred)
 

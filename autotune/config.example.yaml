@@ -1,0 +1,97 @@
+# ============================================================================
+# 自动超参搜索配置示例。复制成 config.yaml 填好后:
+#   conda run -n <driver_env> python tune.py --config config.yaml
+# 整个闭环跑在 GPU 服务器上;路径全部由你填。
+# ============================================================================
+
+# --- 环境(conda)---
+# 训练/合并用 LlamaFactory 环境;评测用装了 vllm + eval-vlm 的环境。二者可不同。
+train_env: llama
+eval_env:  vllm
+# 切换环境的命令前缀(会被 split 成 token 后拼在命令前)。一般不用改。
+conda_run: "conda run --no-capture-output -n"
+
+# --- 路径(全部由你填成服务器上的真实路径)---
+base_model: /root/autodl-tmp/models/Qwen3.5-0.8B      # 基座权重(训练与合并都用)
+llamafactory_dir: /root/autodl-tmp/LLaMA-Factory      # llamafactory-cli 的工作目录(含 data/ 与 dataset_info.json)
+eval_vlm_dataset: /root/autodl-tmp/eval_runs/4dim_road_v2   # eval-vlm 数据集文件夹(含 config.yaml + test.json)
+work_root: /root/autodl-tmp/autotune_runs             # 每个 trial 的 adapter/merged/日志/leaderboard 根目录
+
+# --- 训练基础参数(照抄你的 llama_train.sh,不搜索的都放这;model_name_or_path / output_dir 由驱动器自动设)---
+base_train_args:
+  stage: sft
+  do_train: true
+  finetuning_type: lora
+  template: qwen3_5
+  flash_attn: auto
+  dataset_dir: data
+  dataset: 4dim_road_v2_train          # 用哪个数据集由你定
+  cutoff_len: 4096
+  num_train_epochs: 3.0
+  max_samples: 100000
+  lr_scheduler_type: cosine
+  max_grad_norm: 1.0
+  logging_steps: 5
+  save_steps: 100
+  warmup_steps: 0
+  packing: false
+  enable_thinking: true
+  report_to: none
+  bf16: true
+  plot_loss: true
+  trust_remote_code: true
+  ddp_timeout: 180000000
+  include_num_input_tokens_seen: true
+  optim: adamw_torch
+  save_total_limit: 1
+  lora_target: all
+  freeze_vision_tower: true
+  freeze_multi_modal_projector: true
+  image_max_pixels: 589824
+  image_min_pixels: 1024
+  video_max_pixels: 65536
+  video_min_pixels: 256
+
+# --- 合并 export 参数(model_name_or_path / adapter_name_or_path / export_dir 由驱动器自动填)---
+merge_args:
+  template: qwen3_5
+  finetuning_type: lora
+  export_size: 5
+  export_device: cpu
+
+# --- 搜索空间(键 = llamafactory 参数名;会覆盖 base_train_args 同名项)---
+# type: float_log(对数均匀,给 low/high)| float(均匀,给 low/high)| int(给 low/high[/step])| categorical(给 choices)
+search_space:
+  learning_rate:               {type: float_log, low: 5.0e-6, high: 5.0e-4}
+  lora_rank:                   {type: categorical, choices: [8, 16, 32, 64]}
+  lora_alpha:                  {type: categorical, choices: [16, 32, 64, 128]}
+  lora_dropout:                {type: float, low: 0.0, high: 0.1}
+  gradient_accumulation_steps: {type: categorical, choices: [8, 16]}
+  per_device_train_batch_size: {type: categorical, choices: [2, 4]}
+  warmup_ratio:                {type: float, low: 0.0, high: 0.1}
+  # 可选进阶(按需打开):
+  # num_train_epochs:          {type: categorical, choices: [2.0, 3.0, 4.0]}
+  # neftune_noise_alpha:       {type: float, low: 0.0, high: 5.0}
+  # loraplus_lr_ratio:         {type: categorical, choices: [1.0, 8.0, 16.0]}
+  # use_rslora:                {type: categorical, choices: [true, false]}
+  # image_max_pixels:          {type: categorical, choices: [401408, 589824, 802816]}
+
+# --- 优化目标(可选参数)---
+objective:
+  metric: field_exact_match    # field_exact_match | field_micro | field_macro | mean_score(仅 field_eval:false)
+  direction: maximize          # maximize | minimize
+
+# --- 离线 vLLM 评测参数(透传给 eval-vlm 的 vllm_offline 后端)---
+eval:
+  gpu_memory_utilization: 0.9
+  max_model_len: 4096
+  image_max_pixels: 589824     # 与训练 image_max_pixels 对齐(视觉 token 分布一致);要实验分辨率再单独改
+  field_eval: true             # true=用 eval-vlm field-eval(逐字段准确率);false=用 eval-vlm eval(score)
+
+# --- Optuna ---
+optuna:
+  n_trials: 20
+  study_name: qwen35vl_4dim
+  storage: null                # null => 自动用 sqlite:///<work_root>/study.db(断点续跑);也可自填
+  sampler: tpe                 # tpe(贝叶斯,推荐)| random
+  seed: 42

@@ -258,6 +258,54 @@ def test_run_field_eval_missing_predictions(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # CLI 解析
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# _cmd_field_eval:自给自足(无预测则自动 pred,有则直接评)
+# ---------------------------------------------------------------------------
+def _canned_metrics() -> dict:
+    return {"overall": {"micro_accuracy": 0.5, "macro_accuracy": 0.5, "exact_match_rate": 0.3},
+            "num_scored": 1, "num_pred_missing": 0, "skipped_ref": 0, "skipped_pred_error": 0,
+            "fields": [], "per_field": {}, "per_value": {}}
+
+
+def test_cmd_field_eval_auto_pred_when_missing(tmp_path, monkeypatch):
+    """预测缺失/不完整 -> 先 _do_run(pred);完整覆盖 -> 直接评、不再 pred。"""
+    import argparse
+    from eval_vlm import cli
+    from eval_vlm.config import Config
+    from eval_vlm.data.schema import Sample, EvalTurn
+
+    cfg = Config()
+    cfg.run_dir_path = tmp_path
+    samples = [Sample(id="a", targets=[EvalTurn(turn_index=1, reference="x")])]
+    monkeypatch.setattr(cli, "_resolve_folder", lambda args: tmp_path)
+    monkeypatch.setattr(cli, "_persist_overrides", lambda folder, args: [])
+    monkeypatch.setattr(cli, "_report_persist", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "load_dataset_config", lambda folder: cfg)
+    monkeypatch.setattr(cli, "load_samples", lambda cfg, source=None: samples)
+    monkeypatch.setattr(cli, "run_field_eval", lambda cfg, overwrite=False: _canned_metrics())
+    calls = {"pred": 0}
+    monkeypatch.setattr(cli, "_do_run", lambda cfg, tag="pred": calls.__setitem__("pred", calls["pred"] + 1))
+
+    ns = argparse.Namespace(dataset="ds", overwrite=False, fail_fast=False, workspace=None)
+
+    # 预测不存在 -> 自动 pred 一次
+    assert cli._cmd_field_eval(ns) == 0
+    assert calls["pred"] == 1
+
+    # 预测**完整覆盖**目标轮(id=a,turn=1)-> 直接评,不再 pred
+    cfg.predictions_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.predictions_path.write_text(
+        json.dumps({"id": "a", "turn": 1, "prediction": "p"}) + "\n", encoding="utf-8")
+    assert cli._cmd_field_eval(ns) == 0
+    assert calls["pred"] == 1
+
+    # 预测存在但**不完整**(缺 turn=1)-> 补跑 pred
+    cfg.predictions_path.write_text(
+        json.dumps({"id": "a", "turn": 0, "prediction": "p"}) + "\n", encoding="utf-8")
+    assert cli._cmd_field_eval(ns) == 0
+    assert calls["pred"] == 2
+
+
 def test_parser_field_eval_flags():
     parser = build_parser()
     args = parser.parse_args(["field-eval", "-d", "mydata"])

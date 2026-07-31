@@ -172,6 +172,36 @@ class MNNBackendConfig:
 
 
 @dataclass
+class VLLMOfflineBackendConfig:
+    """离线 vLLM(在进程内 `LLM(...)` 加载权重)本地推理后端设置,独立成块。
+
+    与 openai/vllm(HTTP 别名)不同:**不起服务**,直接用 vllm 的 offline `LLM` 引擎
+    在本机加载合并后的全精度权重推理。主要给自动调参闭环用(训练→合并→离线 vLLM 评测)。
+    单模型对象有状态、不可并发(见 vllm_offline_backend.thread_safe=False)。
+    """
+    model_path: Optional[str] = None            # 合并后全精度权重目录(传给 LLM(model=...))
+    # --- LLM(...) 引擎参数(默认取用户给的离线示例值)---
+    gpu_memory_utilization: float = 0.9
+    max_model_len: int = 4096
+    max_num_seqs: int = 128
+    max_num_batched_tokens: int = 20480
+    # Qwen-VL processor 的像素上下限(经 mm_processor_kwargs 下发);建议与训练 image_max_pixels 对齐。
+    image_min_pixels: int = 28 * 28
+    image_max_pixels: int = 720 * 28 * 28
+    dtype: str = "auto"
+    trust_remote_code: bool = True
+    # 高级逃生口:非空 dict 原样合并进 LLM(**vllm_kwargs)(可写 enforce_eager 等 vllm 原生键)。
+    vllm_kwargs: Optional[dict] = None
+    # --- 生成参数(SamplingParams)---
+    max_tokens: int = 512
+    temperature: float = 0.0                    # 0 => 贪心(可复现)
+    top_p: float = 1.0
+    top_k: int = -1                             # -1 => 关闭
+    repetition_penalty: float = 1.0             # 1.0 => 关闭
+    system_prompt: Optional[str] = None         # 应与训练一致;None/空 = 不加
+
+
+@dataclass
 class InferenceConfig:
     """推理设置:顶层只选 backend,各后端的参数归入各自的子块。
 
@@ -186,18 +216,21 @@ class InferenceConfig:
     openai: OpenAIBackendConfig = field(default_factory=OpenAIBackendConfig)
     mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
     hf: HFBackendConfig = field(default_factory=HFBackendConfig)
+    vllm_offline: VLLMOfflineBackendConfig = field(default_factory=VLLMOfflineBackendConfig)
 
     @property
     def active(self) -> Any:
-        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;hf -> hf)。"""
+        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;hf -> hf;vllm_offline -> vllm_offline)。"""
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai
         if self.backend == "mnn":
             return self.mnn
         if self.backend == "hf":
             return self.hf
+        if self.backend == "vllm_offline":
+            return self.vllm_offline
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, fake)"
         )
 
     @property
@@ -206,7 +239,8 @@ class InferenceConfig:
 
         openai/vllm/fake -> openai.model;mnn -> config_path 所在目录名
         (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model';
-        hf -> model_path 目录名,缺省回落 'hf-model'。
+        hf -> model_path 目录名,缺省回落 'hf-model';
+        vllm_offline -> model_path 目录名,缺省回落 'vllm-offline-model'。
         """
         if self.backend == "mnn":
             cp = self.mnn.config_path
@@ -214,11 +248,14 @@ class InferenceConfig:
         if self.backend == "hf":
             mp = self.hf.model_path
             return Path(mp).expanduser().name if mp else "hf-model"
+        if self.backend == "vllm_offline":
+            mp = self.vllm_offline.model_path
+            return Path(mp).expanduser().name if mp else "vllm-offline-model"
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai.model
         # 未知后端:与 active 一致地报错,而不是伪装成 openai 给出一个看似正常的目录名。
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, fake)"
         )
 
     @property
@@ -535,7 +572,7 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
               "label_extract": LabelExtractConfig, "precision": PrecisionConfig,
               "mapping": Mapping, "tags": Tags,
               "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
-              "hf": HFBackendConfig}
+              "hf": HFBackendConfig, "vllm_offline": VLLMOfflineBackendConfig}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

@@ -71,11 +71,13 @@ split:
 #   backend=openai/vllm/fake -> 读 openai 块;产物 <模型名>=openai.model,<后端类型>=backend
 #   backend=mnn              -> 读 mnn 块;产物 <模型名>=mnn.config_path 所在目录名
 #   backend=hf               -> 读 hf 块;产物 <模型名>=hf.model_path 目录名
+#   backend=vllm_offline     -> 读 vllm_offline 块(离线 vLLM,进程内加载合并权重);产物 <模型名>=vllm_offline.model_path 目录名
 # 最终产物落 <数据集>/<模型名>/<后端类型>/。
-# CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*
+# CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*;
+#   --hf-model -> hf.*;--vllm-model/--vllm-gpu-util/--vllm-max-model-len/--vllm-image-max-pixels -> vllm_offline.*
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai/vllm(OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn 推理转换后的 mnn 模型) | fake(回显,自检用)
+  backend: openai             # openai/vllm(在线 OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn) | hf(本地 transformers) | vllm_offline(本地离线 vLLM,加载合并权重) | fake(回显,自检用)
   # openai/vllm 后端(也是 fake 自检走的块):
   openai:
     base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回)
@@ -83,7 +85,7 @@ inference:
     api_key_env: OPENAI_API_KEY # 从该环境变量读取 api key(本地服务可随便填)
     system_prompt: null       # 系统提示(pred 也可在下方 pred.system_prompt 设置,后者运行时映射到这里)
     max_concurrency: 8        # 并发请求数
-    max_tokens: 512           # 生成上限
+    max_tokens: 1024           # 生成上限
     temperature: 0.0
     request_timeout: 120      # 单请求超时(秒)
     max_retries: 3            # 失败重试次数(指数退避)
@@ -97,7 +99,7 @@ inference:
     image_min_pixels: 1024    # 总像素下限(默认 32*32,同 LlamaFactory);不足按 sqrt 因子等比放大;<=0 关闭
     image_max_side: 2048      # 最长边像素上限(native OOM 兜底;经 image_max_pixels 后一般不触发;设 0 关闭)(--mnn-image-max-side 永久写回)
     system_prompt: null       # 系统提示,经 set_config 下发、由 MNN 引擎拼进对话模板;应与训练一致(LlamaFactory qwen2_vl 模板默认 "You are a helpful assistant.");null=沿用模型 config.json
-    max_tokens: 512           # 生成上限(作为 response 的 max_new_tokens)
+    max_tokens: 1024           # 生成上限(作为 response 的 max_new_tokens)
     # 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线,无需碰 sampler_type)。
     # 小模型(如 0.8B)纯贪心解码遇到「没把握」的图会陷入 \n\n\n… 复读到 max_tokens;
     # 默认「仅开重复惩罚 1.1 + 确定性选词」即可止住复读且结果可复现。规则:
@@ -122,7 +124,7 @@ inference:
   # 需要 transformers/torch(+ Qwen2-VL 的 qwen-vl-utils);仅在 backend=hf 或 precision 用到时才需装。
   hf:
     model_path: null          # 本地 HF 权重目录(--hf-model 永久写回;也用作产物子目录名)
-    max_tokens: 512           # generate 的 max_new_tokens
+    max_tokens: 1024           # generate 的 max_new_tokens
     # 图片预处理:与 mnn 块同一套规则(对齐 LlamaFactory 训练),下发给 processor 的 min/max_pixels,
     # 使参考端与候选端喂给视觉编码器的 token 分布一致(precision 的对齐审计据此比对)。
     image_max_pixels: 589824  # 总像素上限(默认 768*768,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
@@ -132,6 +134,31 @@ inference:
     device: auto              # auto/cuda/cpu(传给 from_pretrained 的 device_map)
     dtype: auto               # auto/bfloat16/float16/float32
     greedy: true              # true=贪心解码(确定可复现,便于与 mnn 逐条对齐);false=模型默认采样
+  # vllm_offline 本地离线后端:进程内 vllm 的 LLM() 加载**合并后的全精度权重**推理,不起 HTTP 服务
+  # (与 openai/vllm 那种连远端服务的在线后端不同)。主要给自动调参闭环用。需在 backend=hf/mnn 之外
+  # 的环境装 vllm;产物 <模型名>=vllm_offline.model_path 目录名。CLI 覆盖:--vllm-model/--vllm-gpu-util/
+  # --vllm-max-model-len/--vllm-image-max-pixels 永久写回本块。
+  vllm_offline:
+    model_path: null          # 合并后全精度权重目录(传给 LLM(model=...);--vllm-model 永久写回;也用作产物子目录名)
+    # --- LLM(...) 引擎参数 ---
+    gpu_memory_utilization: 0.4    # 显存利用率 0~1(--vllm-gpu-util 永久写回);OOM 就调低
+    max_model_len: 4096       # 最大序列长度(含输入+生成)(--vllm-max-model-len 永久写回)
+    max_num_seqs: 128         # 引擎最大并发序列数
+    max_num_batched_tokens: 20480  # 单批最大 token 数
+    # 图片像素上下限:经 mm_processor_kwargs 交给 Qwen-VL processor 内部缩放,**建议与训练 image_max_pixels 对齐**,
+    # 否则视觉 token 分布偏离训练。默认 28*28 ~ 720*28*28。
+    image_min_pixels: 784     # 28*28
+    image_max_pixels: 564480  # 720*28*28(--vllm-image-max-pixels 永久写回)
+    dtype: auto               # auto/bfloat16/float16/float32
+    trust_remote_code: true   # Qwen-VL 等自定义模型需 true
+    vllm_kwargs: null         # 高级逃生口:非空 dict 原样合并进 LLM(**kwargs)(如 {enforce_eager: true})
+    # --- 生成参数(SamplingParams)---
+    max_tokens: 1024           # 生成上限
+    temperature: 0.0          # 0=贪心(确定、可复现);>0=随机采样
+    top_p: 1.0                # nucleus 截断;1.0=不截断(仅 temperature>0 有意义)
+    top_k: -1                 # top-k 截断;-1=关闭(仅 temperature>0 有意义)
+    repetition_penalty: 1.0   # >1 惩罚已出现 token;1.0=关闭
+    system_prompt: null       # 系统提示(应与训练一致);null/空=不加
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)
