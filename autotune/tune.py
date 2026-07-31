@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import shlex
 import shutil
@@ -64,11 +65,15 @@ def render_train_args(args: dict) -> list[str]:
     return out
 
 
-def run(cmd: list[str], cwd: str | None = None) -> None:
-    """跑子进程,输出实时透传到终端;非零退出抛异常(由 objective 捕获转 TrialPruned)。"""
+def run(cmd: list[str], cwd: str | None = None, env: dict | None = None) -> None:
+    """跑子进程,输出实时透传到终端;非零退出抛异常(由 objective 捕获转 TrialPruned)。
+
+    env 非 None 时作为子进程环境(用于给 vLLM 评测注入 FLASHINFER_* 等变量,须在子进程
+    python 启动前设好,才能早于 import vllm 生效)。
+    """
     print("\n$ " + " ".join(shlex.quote(c) for c in cmd) + (f"   (cwd={cwd})" if cwd else ""),
           flush=True)
-    r = subprocess.run(cmd, cwd=cwd)
+    r = subprocess.run(cmd, cwd=cwd, env=env)
     if r.returncode != 0:
         raise RuntimeError(f"命令失败(exit {r.returncode}):{cmd[:3]}...")
 
@@ -147,6 +152,11 @@ def build_objective(cfg: dict):
     field_eval = bool(ev.get("field_eval", True))
     objective_cfg = cfg["objective"]
     leaderboard = work_root / "leaderboard.csv"
+    # 评测子进程环境:在 os.environ 基础上叠加 eval_env_vars(如禁用 flashinfer 的变量)。
+    # 子进程 python 启动前即带上,保证早于 import vllm 生效。None 表示不改(继承当前环境)。
+    eval_env_vars = cfg.get("eval_env_vars") or {}
+    eval_proc_env = ({**os.environ, **{str(k): str(v) for k, v in eval_env_vars.items()}}
+                     if eval_env_vars else None)
 
     model_tag = safe_name(Path(cfg["base_model"]).name)   # 如 Qwen3.5-0.8B;进 merged 目录名/result_name
 
@@ -189,15 +199,18 @@ def build_objective(cfg: dict):
             # 3) 评测(eval_env):field-eval 自给自足——没预测就用同一 backend/模型自动跑 pred,
             #    再抽字段算准确率;一条命令,pred 与评测必然同一 run_dir(无不一致风险)。
             #    field_eval=false 时用 eval-vlm eval(pred+score 合一)。
+            # 若 image_max_pixels 被搜索,评测端必须用**该 trial 的采样值**(与训练对齐),否则回退静态配置。
+            eval_img_max = params.get("image_max_pixels", ev["image_max_pixels"])
             eval_common = [
                 "--dataset", eval_ds,
                 "--backend", "vllm_offline", "--vllm-model", str(merged_dir),
                 "--vllm-gpu-util", str(ev["gpu_memory_utilization"]),
                 "--vllm-max-model-len", str(ev["max_model_len"]),
-                "--vllm-image-max-pixels", str(ev["image_max_pixels"]),
+                "--vllm-image-max-pixels", str(eval_img_max),
             ]
             sub = "field-eval" if field_eval else "eval"
-            run(conda_prefix(cfg, cfg["eval_env"]) + ["eval-vlm", sub] + eval_common)
+            run(conda_prefix(cfg, cfg["eval_env"]) + ["eval-vlm", sub] + eval_common,
+                env=eval_proc_env)
 
             # 4) 读指标(run_dir = <dataset>/<merged名>/vllm_offline)
             run_dir = Path(eval_ds) / merged_dir.name / "vllm_offline"

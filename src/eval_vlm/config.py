@@ -190,6 +190,10 @@ class VLLMOfflineBackendConfig:
     image_max_pixels: int = 720 * 28 * 28
     dtype: str = "auto"
     trust_remote_code: bool = True
+    # vLLM 相关环境变量:在 import vllm / 建 LLM **之前**写入 os.environ(部分 vllm/flashinfer 变量在
+    # import 期就读取,晚设无效)。例:{"FLASHINFER_DISABLE_VERSION_CHECK": "1",
+    # "VLLM_ATTENTION_BACKEND": "FLASH_ATTN"} 用来绕过/禁用 flashinfer。null=不设。
+    env: Optional[dict] = None
     # 高级逃生口:非空 dict 原样合并进 LLM(**vllm_kwargs)(可写 enforce_eager 等 vllm 原生键)。
     vllm_kwargs: Optional[dict] = None
     # --- 生成参数(SamplingParams)---

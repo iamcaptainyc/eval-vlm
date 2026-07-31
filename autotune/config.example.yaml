@@ -69,12 +69,14 @@ search_space:
   gradient_accumulation_steps: {type: categorical, choices: [8, 16]}
   per_device_train_batch_size: {type: categorical, choices: [2, 4]}
   warmup_ratio:                {type: float, low: 0.0, high: 0.1}
+  # 图像最大像素:同时影响训练与评测(评测端会自动用该 trial 采样到的同一值,保证对齐)。
+  # 512*512 / 768*768 / 1024*1024:
+  image_max_pixels:            {type: categorical, choices: [262144, 589824, 1048576]}
   # 可选进阶(按需打开):
   # num_train_epochs:          {type: categorical, choices: [2.0, 3.0, 4.0]}
   # neftune_noise_alpha:       {type: float, low: 0.0, high: 5.0}
   # loraplus_lr_ratio:         {type: categorical, choices: [1.0, 8.0, 16.0]}
   # use_rslora:                {type: categorical, choices: [true, false]}
-  # image_max_pixels:          {type: categorical, choices: [401408, 589824, 802816]}
 
 # --- 优化目标(可选参数)---
 objective:
@@ -85,8 +87,15 @@ objective:
 eval:
   gpu_memory_utilization: 0.9
   max_model_len: 4096
-  image_max_pixels: 589824     # 与训练 image_max_pixels 对齐(视觉 token 分布一致);要实验分辨率再单独改
+  image_max_pixels: 589824     # 评测端像素上限;**当 search_space 搜索 image_max_pixels 时,自动改用该 trial 的采样值**(此处仅作未搜索时的回退)
   field_eval: true             # true=用 eval-vlm field-eval(逐字段准确率);false=用 eval-vlm eval(score)
+
+# --- 评测子进程环境变量(在子进程 python 启动前注入,早于 import vllm 生效)---
+# 用于禁用/绕过 flashinfer 等。留空(或整段删掉)则不改环境。
+eval_env_vars:
+  FLASHINFER_DISABLE_VERSION_CHECK: "1"
+  VLLM_ATTENTION_BACKEND: FLASH_ATTN     # 不用 flashinfer 注意力后端(或 XFORMERS / TORCH_SDPA)
+  VLLM_USE_FLASHINFER_SAMPLER: "0"       # 不用 flashinfer 采样
 
 # --- Optuna ---
 optuna:

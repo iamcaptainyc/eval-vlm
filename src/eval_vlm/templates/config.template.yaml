@@ -151,6 +151,13 @@ inference:
     image_max_pixels: 564480  # 720*28*28(--vllm-image-max-pixels 永久写回)
     dtype: auto               # auto/bfloat16/float16/float32
     trust_remote_code: true   # Qwen-VL 等自定义模型需 true
+    # vLLM 环境变量:在 import vllm 之前写入 os.environ(部分变量 import 期就读,晚设无效)。
+    # 禁用/绕过 flashinfer 常用:
+    # env:
+    #   FLASHINFER_DISABLE_VERSION_CHECK: "1"
+    #   VLLM_ATTENTION_BACKEND: FLASH_ATTN     # 不用 flashinfer 注意力后端(或 XFORMERS / TORCH_SDPA)
+    #   VLLM_USE_FLASHINFER_SAMPLER: "0"       # 不用 flashinfer 采样
+    env: null
     vllm_kwargs: null         # 高级逃生口:非空 dict 原样合并进 LLM(**kwargs)(如 {enforce_eager: true})
     # --- 生成参数(SamplingParams)---
     max_tokens: 1024           # 生成上限

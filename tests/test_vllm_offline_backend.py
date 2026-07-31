@@ -5,6 +5,7 @@ complete 产出。仿 test_mnn_backend 的「monkeypatch 原生依赖」思路�
 """
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -138,6 +139,18 @@ def test_engine_kwargs_from_config(fake_vllm):
     assert init["max_model_len"] == 8192
     assert init["mm_processor_kwargs"]["max_pixels"] == 111111
     assert init["enforce_eager"] is True            # vllm_kwargs 逃生口合并
+
+
+def test_env_applied_before_llm_build(fake_vllm, monkeypatch):
+    """vllm_offline.env 在建 LLM 前写入 os.environ(用于禁用/绕过 flashinfer 等)。"""
+    for k in ("FLASHINFER_DISABLE_VERSION_CHECK", "VLLM_ATTENTION_BACKEND"):
+        monkeypatch.delenv(k, raising=False)   # 注册清理,测试结束移除
+    cfg = _cfg("/models/m")
+    cfg.inference.vllm_offline.env = {"FLASHINFER_DISABLE_VERSION_CHECK": "1",
+                                      "VLLM_ATTENTION_BACKEND": "FLASH_ATTN"}
+    build_backend(cfg)
+    assert os.environ["FLASHINFER_DISABLE_VERSION_CHECK"] == "1"
+    assert os.environ["VLLM_ATTENTION_BACKEND"] == "FLASH_ATTN"
 
 
 # ---------------------------------------------------------------------------

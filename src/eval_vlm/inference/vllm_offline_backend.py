@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import threading
 import time
 from pathlib import Path
@@ -42,6 +43,10 @@ class VLLMOfflineBackend(InferenceBackend):
 
     def __init__(self, cfg: Config) -> None:
         super().__init__(cfg)
+        vc = cfg.inference.vllm_offline
+        # 必须在 import vllm 之前写环境变量(部分 vllm/flashinfer 变量在 import 期读取)。
+        if vc.env:
+            os.environ.update({str(k): str(v) for k, v in vc.env.items()})
         try:
             from vllm import LLM, SamplingParams
         except ImportError as e:  # pragma: no cover - 取决于运行环境是否装了 vllm
@@ -50,7 +55,6 @@ class VLLMOfflineBackend(InferenceBackend):
                 "请在评测用的 conda 环境 `pip install vllm`。"
             ) from e
 
-        vc = cfg.inference.vllm_offline
         if not vc.model_path:
             raise ValueError(
                 "backend=vllm_offline 需要 inference.vllm_offline.model_path(合并后全精度权重目录);"
