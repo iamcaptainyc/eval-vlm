@@ -13,8 +13,9 @@
     返回 RequestOutput 列表,取 ``[0].outputs[0].text``。
   - 图片用 **base64 data URI** 传入(免去 vllm 的本地文件白名单 allowed_local_media_path 配置)。
 
-约束(对齐 mnn/hf 后端):单图、由含 <image> 的 user 轮驱动;单个 LLM 对象有状态、
-不可并发(thread_safe=False,编排层降为串行,本类再加锁兜底)。
+约束(对齐 mnn/hf):单图、由含 <image> 的 user 轮驱动;单个 LLM 对象有状态、不可多线程并发。
+但 **supports_batch=True**:runner 走批量路径,把每一轮所有样本一次性交给 ``llm.chat([多对话])``,
+由 vLLM 引擎内部 continuous batching 提速(而非逐条串行)——这是相对 openai/mnn/hf 后端的关键差异。
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from typing import Optional
 from ..config import Config
 from ..data.loader import resolve_image_path
 from ..data.schema import Prediction, Turn
-from .base import InferenceBackend
+from .base import BatchItem, InferenceBackend
 
 _INTERNAL_PLACEHOLDER = "<image>"
 
@@ -38,8 +39,10 @@ _MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
 
 
 class VLLMOfflineBackend(InferenceBackend):
-    # 单个有状态 LLM 对象 + 单 GPU,不并发(与 mnn/hf 一致);编排层据此串行。
+    # 单个有状态 LLM 对象 + 单 GPU,不并发(与 mnn/hf 一致);编排层据此串行(但见 supports_batch)。
     thread_safe = False
+    # 支持真·批处理:runner 会把整轮所有样本一次交给 complete_batch,由 vLLM 内部 continuous batching。
+    supports_batch = True
 
     def __init__(self, cfg: Config) -> None:
         super().__init__(cfg)
@@ -126,6 +129,30 @@ class VLLMOfflineBackend(InferenceBackend):
             messages.append({"role": turn.role, "content": parts})
         return messages
 
+    def _messages_for(self, context: list[Turn], images: list[str], sample_id: str) -> list[dict]:
+        """校验单图 + 解析路径 + 组多模态 messages(构造失败抛异常,由调用方兜)。"""
+        if len(images) != 1:
+            raise ValueError(
+                f"样本 {sample_id}:vllm_offline 后端仅支持单图推理,当前 {len(images)} 张。"
+            )
+        img_path = resolve_image_path(images[0], self.cfg)
+        if not img_path.exists():
+            raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
+        return self._build_messages(context, sample_id, self._data_uri(img_path))
+
+    @staticmethod
+    def _out_to_pred(out, sample_id: str, latency: Optional[float]) -> Prediction:
+        """把一个 vLLM RequestOutput 转成 Prediction。"""
+        text = out.outputs[0].text if out.outputs else ""
+        raw = {"backend": "vllm_offline"}
+        try:
+            raw["prompt_len"] = len(out.prompt_token_ids)
+            raw["gen_seq_len"] = len(out.outputs[0].token_ids)
+            raw["prompt_token_count"] = raw["prompt_len"]
+        except Exception:  # noqa: BLE001 - 统计可选
+            pass
+        return Prediction(id=sample_id, prediction=text or "", latency=latency, raw=raw)
+
     def complete(
         self,
         context: list[Turn],
@@ -135,41 +162,51 @@ class VLLMOfflineBackend(InferenceBackend):
     ) -> Prediction:
         start = time.time()
         try:
-            if len(images) != 1:
-                raise ValueError(
-                    f"样本 {sample_id}:vllm_offline 后端仅支持单图推理,当前 {len(images)} 张。"
-                )
-            img_path = resolve_image_path(images[0], self.cfg)
-            if not img_path.exists():
-                raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
-            messages = self._build_messages(context, sample_id, self._data_uri(img_path))
+            messages = self._messages_for(context, images, sample_id)
         except Exception as e:  # 构造阶段失败(缺图/占位符异常等)
             self._raise_if_fail_fast()
             return Prediction(id=sample_id, error=f"build_prompt: {e}")
-
         with self._lock:
             try:
-                # v1 per-sample(0.8B 很快);后续可批量 self.llm.chat([m1,m2,...]) 提速。
                 outs = self.llm.chat(messages, self.sampling, use_tqdm=False)
-                out = outs[0]
-                text_out = out.outputs[0].text if out.outputs else ""
-                raw = {"backend": "vllm_offline"}
-                try:
-                    raw["prompt_len"] = len(out.prompt_token_ids)
-                    raw["gen_seq_len"] = len(out.outputs[0].token_ids)
-                    raw["prompt_token_count"] = raw["prompt_len"]
-                except Exception:  # noqa: BLE001 - 统计可选
-                    pass
-                return Prediction(
-                    id=sample_id,
-                    prediction=text_out or "",
-                    latency=round(time.time() - start, 3),
-                    raw=raw,
-                )
+                return self._out_to_pred(outs[0], sample_id, round(time.time() - start, 3))
             except Exception as e:  # noqa: BLE001 - 记录而非中断整批
                 self._raise_if_fail_fast()
-                return Prediction(
-                    id=sample_id,
-                    latency=round(time.time() - start, 3),
-                    error=f"{type(e).__name__}: {e}",
-                )
+                return Prediction(id=sample_id, latency=round(time.time() - start, 3),
+                                  error=f"{type(e).__name__}: {e}")
+
+    def complete_batch(self, items: list[BatchItem]) -> list[Prediction]:
+        """真·批处理:一次把整批 prompt 交给 vLLM(内部 continuous batching)。
+
+        构造失败的单条记 error、不进批;其余组成一次 llm.chat(多对话) 调用,按序映射回结果。
+        返回与 items 等长同序的 Prediction。
+        """
+        start = time.time()
+        preds: list[Optional[Prediction]] = [None] * len(items)
+        msgs: dict[int, list[dict]] = {}
+        for i, it in enumerate(items):
+            try:
+                msgs[i] = self._messages_for(it.context, it.images, it.sample_id)
+            except Exception as e:  # 构造失败:记 error,不进批
+                self._raise_if_fail_fast()
+                preds[i] = Prediction(id=it.sample_id, error=f"build_prompt: {e}")
+
+        if msgs:
+            idxs = list(msgs.keys())
+            conversations = [msgs[i] for i in idxs]
+            with self._lock:
+                try:
+                    outs = self.llm.chat(conversations, self.sampling, use_tqdm=True)
+                except Exception as e:  # noqa: BLE001 - 整批生成失败:每条记 error
+                    self._raise_if_fail_fast()
+                    for i in idxs:
+                        preds[i] = Prediction(id=items[i].sample_id,
+                                              error=f"{type(e).__name__}: {e}")
+                    outs = None
+            if outs is not None:
+                lat = round((time.time() - start) / max(len(idxs), 1), 3)  # 均摊延迟(近似)
+                for i, out in zip(idxs, outs):
+                    preds[i] = self._out_to_pred(out, items[i].sample_id, lat)
+
+        return [p if p is not None else Prediction(id=items[i].sample_id, error="unknown")
+                for i, p in enumerate(preds)]

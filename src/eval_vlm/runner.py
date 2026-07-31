@@ -19,7 +19,7 @@ from .data.loader import load_samples
 from .data.schema import Prediction, Sample, Turn
 from .data.splitter import load_split_meta
 from .inference import build_backend, worker_count
-from .inference.base import InferenceBackend
+from .inference.base import BatchItem, InferenceBackend
 from .results import store
 
 
@@ -60,6 +60,41 @@ def _rollout_sample(cfg: Config, backend: InferenceBackend,
     return preds
 
 
+def _rollout_batch(cfg: Config, backend: InferenceBackend, todo: list[Sample],
+                   writer: "store.PredictionWriter") -> tuple[int, int]:
+    """批处理路径:**按目标轮序逐轮、跨样本批量** rollout(供 supports_batch 后端)。
+
+    第 r 轮:收集所有"有第 r 个目标轮"的样本,一次性 complete_batch(让引擎批处理);
+    轮与轮之间串行,rollout 模式下用上一轮各样本自己的输出作下一轮上下文。写盘边跑边落。
+    """
+    mode = cfg.eval.context
+    predicted: dict[str, dict[int, str]] = {s.id: {} for s in todo}
+    max_targets = max((len(s.targets) for s in todo), default=0)
+    n_ok = 0
+    n_err = 0
+    pbar = tqdm(total=sum(len(s.targets) for s in todo), desc="inference(batch)", unit="target")
+    for r in range(max_targets):
+        round_samples = [s for s in todo if len(s.targets) > r]
+        items = [BatchItem(_build_context(s, s.targets[r].turn_index, predicted[s.id], mode),
+                           list(s.images), s.id, s.targets[r].reference)
+                 for s in round_samples]
+        preds = backend.complete_batch(items)
+        for s, pred in zip(round_samples, preds):
+            target = s.targets[r]
+            pred.turn = target.turn_index
+            pred.images = list(s.images)
+            writer.write(pred)
+            if pred.error:
+                n_err += 1
+            else:
+                n_ok += 1
+                if mode == "rollout":
+                    predicted[s.id][target.turn_index] = pred.prediction
+            pbar.update(1)
+    pbar.close()
+    return n_ok, n_err
+
+
 def run_inference(cfg: Config) -> dict:
     """对测试集执行推理,返回统计信息。"""
     if not cfg.test_path.exists():
@@ -82,8 +117,9 @@ def run_inference(cfg: Config) -> dict:
     print(f"[run] 待推理 {len(todo)} 条样本(已完成跳过 {len(samples) - len(todo)} 条),"
           f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
+    batch_mode = getattr(backend, "supports_batch", False)
     max_workers = worker_count(backend, cfg.inference.max_concurrency)
-    if cfg.inference.max_concurrency > 1 and max_workers == 1:
+    if cfg.inference.max_concurrency > 1 and max_workers == 1 and not batch_mode:
         import warnings
         warnings.warn(
             f"[run] 注意: max_concurrency={cfg.inference.max_concurrency} 对 "
@@ -101,7 +137,10 @@ def run_inference(cfg: Config) -> dict:
     else:
         with store.PredictionWriter(cfg.predictions_path) as writer:
             try:
-                if max_workers == 1:
+                if batch_mode:
+                    # 真·批处理后端(如离线 vLLM):按轮次跨样本批量,引擎内部 continuous batching。
+                    n_ok, n_err = _rollout_batch(cfg, backend, todo, writer)
+                elif max_workers == 1:
                     pbar = tqdm(todo, total=len(todo), desc="inference", unit="sample")
                     for s in pbar:
                         pbar.set_postfix_str(s.id)

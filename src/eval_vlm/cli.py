@@ -455,7 +455,7 @@ def _cmd_infer(args: argparse.Namespace) -> int:
     if pred.error:
         print(f"[infer] 推理失败: {pred.error}", file=sys.stderr)
         return 1
-    print(pred.prediction or "")
+    # print(pred.prediction or "")
     return 0
 
 

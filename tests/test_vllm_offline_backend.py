@@ -46,6 +46,10 @@ class _FakeLLM:
 
     def chat(self, messages, sampling, use_tqdm=False):
         _FakeLLM.last_chat = messages
+        # 批处理:messages 是"对话列表"(首元素是 list)-> 每条对话一个输出;
+        # 单条:messages 是一条对话(首元素是 dict)-> 一个输出。
+        if messages and isinstance(messages[0], list):
+            return [_FakeOut(f"pred_{i}") for i in range(len(messages))]
         return [_FakeOut("主辅路：主路")]
 
 
@@ -210,3 +214,48 @@ def test_complete_fail_fast_reraises(fake_vllm, tmp_path):
     with pytest.raises(FileNotFoundError):
         backend.complete([Turn(role="user", content="<image>x")],
                          [str(tmp_path / "nope.jpg")], "s")
+
+
+# ---------------------------------------------------------------------------
+# complete_batch:真·批处理
+# ---------------------------------------------------------------------------
+def test_supports_batch_flag(fake_vllm):
+    backend = build_backend(_cfg("/models/m"))
+    assert backend.supports_batch is True
+
+
+def test_complete_batch_one_chat_call_ordered(fake_vllm, tmp_path):
+    """整批一次 llm.chat(多对话);返回与 items 等长同序;成功条有 raw。"""
+    from eval_vlm.inference.base import BatchItem
+    imgs = []
+    for n in ("a.jpg", "b.jpg", "c.jpg"):
+        p = tmp_path / n
+        p.write_bytes(b"\xff\xd8\xffdata")
+        imgs.append(str(p))
+    backend = build_backend(_cfg("/models/m"))
+    items = [BatchItem([Turn("user", "<image>描述")], [im], f"s{i}") for i, im in enumerate(imgs)]
+    preds = backend.complete_batch(items)
+
+    assert [p.id for p in preds] == ["s0", "s1", "s2"]
+    assert [p.prediction for p in preds] == ["pred_0", "pred_1", "pred_2"]
+    assert all(p.error is None and p.raw["backend"] == "vllm_offline" for p in preds)
+    # 一次 chat,传入的是"对话列表"(批处理)
+    assert isinstance(_FakeLLM.last_chat[0], list)
+    assert len(_FakeLLM.last_chat) == 3
+
+
+def test_complete_batch_build_error_isolated(fake_vllm, tmp_path):
+    """单条构造失败(缺图)记 error 且不进批,其余仍正常;顺序/长度不变。"""
+    from eval_vlm.inference.base import BatchItem
+    ok = tmp_path / "ok.jpg"
+    ok.write_bytes(b"x")
+    items = [
+        BatchItem([Turn("user", "<image>x")], [str(tmp_path / "missing.jpg")], "bad"),
+        BatchItem([Turn("user", "<image>x")], [str(ok)], "good"),
+    ]
+    backend = build_backend(_cfg("/models/m"))
+    preds = backend.complete_batch(items)
+    assert preds[0].id == "bad" and preds[0].error and "build_prompt" in preds[0].error
+    assert preds[1].id == "good" and preds[1].error is None
+    # 只有 1 条进了批(good)
+    assert len(_FakeLLM.last_chat) == 1
