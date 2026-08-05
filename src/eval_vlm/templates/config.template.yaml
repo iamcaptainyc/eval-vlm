@@ -246,7 +246,7 @@ precision:
 # 把参考模型的视觉塔(ViT)/ LLM 解码器各自包装成「每层边界都是具名输出」的 probe ONNX,
 # 对一组图做前向,逐层比对 onnxruntime(ONNX 候选)vs torch(safetensors 参考)的中间激活,
 # 定位第一个发散的层。校验 torch→ONNX 导出保真度(管线 safetensors→ONNX→MNN 前半段)。
-# 仅支持 Qwen2-VL/2.5-VL/3-VL 家族;参考权重复用 inference.hf.model_path;需 torch+onnx+onnxruntime。
+# 仅支持 Qwen3.5-VL 系列;参考权重复用 inference.hf.model_path;需 torch+onnx+onnxruntime。
 # ---------------------------------------------------------------------------
 onnx_precision:
   targets: ["vit", "llm"]     # 对比哪些子模型:vit(视觉塔)/ llm(解码器)

@@ -19,7 +19,7 @@ LlamaFactory 的预处理),否则逐层数值对比无意义。dtype 统一 **fl
   - torch / onnx / onnxruntime **惰性 import**(仿 hf/mnn 后端),未装只在用本命令时报错。
   - 指标(逐层逐图):cosine(展平)、rel_l2(‖候选-参考‖/‖参考‖)、max_abs_err、mean_abs_err。
   - **首发散层** = 最小的不达标层下标(仿 precision 的首发散字符);跨图取每层最差(任一图发散即算)。
-  - 仅支持 Qwen 家族(visual.blocks[i] / 解码器 layers[i]);参考权重复用 inference.hf.model_path。
+  - 仅支持 Qwen3.5-VL 系列(model.model.visual.blocks[i] / model.model.language_model.layers[i]);参考权重复用 inference.hf.model_path。
   - 产物落 `<数据集>/<模型名>/onnx-precision/` 下 onnx_precision.{json,md};probe onnx 默认写临时目录跑完删。
 """
 from __future__ import annotations
@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
+from tqdm import tqdm
 
 from .config import Config
 from .data.loader import load_samples
@@ -129,7 +130,9 @@ def _aggregate_layers(per_image: list[list[dict]], names: list[str],
 
 
 # ---------------------------------------------------------------------------
-# Qwen 子模块发现(兼容不同 transformers 版本的层级布局)
+# Qwen3.5-VL 子模块发现
+#   ForConditionalGeneration 包一层 .model(=Qwen3_5VLModel),视觉塔 / 语言塔 / get_rope_index
+#   都挂在这层上。也容许直接传入内层 model(视觉塔退到顶层),两种入口都能解析。
 # ---------------------------------------------------------------------------
 def _resolve_path(root: Any, path: tuple[str, ...]) -> Any:
     obj = root
@@ -141,33 +144,33 @@ def _resolve_path(root: Any, path: tuple[str, ...]) -> Any:
 
 
 def _find_visual(model: Any) -> Any:
-    """找视觉塔(有 .blocks):Qwen2-VL 是 model.visual;Qwen2.5/3-VL 是 model.model.visual。"""
-    for path in (("visual",), ("model", "visual")):
+    """找视觉塔(有 .blocks):Qwen3.5-VL 在 model.model.visual(传内层 model 时退到 model.visual)。"""
+    for path in (("model", "visual"), ("visual",)):
         v = _resolve_path(model, path)
         if v is not None and hasattr(v, "blocks"):
             return v
     raise RuntimeError(
-        "未找到含 .blocks 的视觉塔(model.visual / model.model.visual);"
-        "onnx-precision 目前仅支持 Qwen2-VL / Qwen2.5-VL / Qwen3-VL 家族。"
+        "未找到含 .blocks 的视觉塔(model.model.visual);"
+        "onnx-precision 目前仅支持 Qwen3.5-VL 系列。"
     )
 
 
 def _find_decoder(model: Any) -> Any:
-    """找文本解码器(有 .layers):老版是 model.model;新版是 model.model.language_model。"""
-    for path in (("model",), ("model", "language_model"), ("language_model",),
-                 ("model", "model")):
+    """找文本解码器(有 .layers):Qwen3.5-VL 在 model.model.language_model(传内层 model 时退到 model.language_model)。"""
+    for path in (("model", "language_model"), ("language_model",)):
         d = _resolve_path(model, path)
         if d is not None and hasattr(d, "layers"):
             return d
     raise RuntimeError(
-        "未找到含 .layers 的文本解码器(model.model / model.model.language_model);"
-        "onnx-precision 目前仅支持 Qwen 家族。"
+        "未找到含 .layers 的文本解码器(model.model.language_model);"
+        "onnx-precision 目前仅支持 Qwen3.5-VL 系列。"
     )
 
 
 def _rope_index_fn(model: Any):
-    """取 get_rope_index(算 Qwen 3D mrope 的 position_ids);老版在顶层、新版在 model.model 上。"""
-    for owner in (model, getattr(model, "model", None)):
+    """取 get_rope_index(算 Qwen3.5 3D mrope 的 position_ids);挂在 model.model(Qwen3_5VLModel)上,
+    传内层 model 时挂在顶层。"""
+    for owner in (getattr(model, "model", None), model):
         fn = getattr(owner, "get_rope_index", None)
         if callable(fn):
             return fn
@@ -175,11 +178,11 @@ def _rope_index_fn(model: Any):
 
 
 def _call_rope_index(rope_fn, model: Any, inputs: dict, attn, gthw):
-    """按 get_rope_index 的**实际签名**喂参,兼容各代 Qwen-VL:
-      - Qwen2/2.5-VL:(input_ids, image_grid_thw, attention_mask)。
-      - Qwen3/3.5-VL:还必须传 mm_token_type_ids(processor 随 input_ids 产出,标记 文本0/图1/视频2)。
-    用签名反射按需选参;mm_token_type_ids 若 processor 没给,则按 config 的 image/video token id
-    从 input_ids 现构(兜底)。返回 3D position_ids。"""
+    """按 get_rope_index 的**实际签名**喂参。Qwen3.5-VL 的签名是
+    (input_ids, mm_token_type_ids, image_grid_thw=None, video_grid_thw=None, attention_mask=None):
+    mm_token_type_ids(标记 文本0/图1/视频2)是必需参,由 processor 随 input_ids 一并产出。
+    用签名反射按需选参(对签名微调也不脆);mm_token_type_ids 若 processor 没给,则按 config 的
+    image/video token id 从 input_ids 现构(兜底)。返回 3D position_ids。"""
     import inspect
     import torch
 
@@ -323,7 +326,8 @@ def _compare_target_vit(backend: Any, inputs_list: list, cfg: Config,
     mdtype, mdevice = _param_dtype_device(visual)
 
     per_image: list[list[dict]] = []
-    for si, inputs in enumerate(inputs_list):
+    prog = tqdm(inputs_list, desc="onnx-precision:vit", unit="img", leave=False)
+    for si, inputs in enumerate(prog):
         # 输入随模型 dtype/device 走:浮点张量转模型精度、整型(grid_thw)只搬设备,
         # 否则 dtype!=float32 或 device!=cpu 时会 matmul/设备不匹配崩掉。
         pv = inputs["pixel_values"].to(device=mdevice, dtype=mdtype)
@@ -371,7 +375,8 @@ def _compare_target_llm(backend: Any, inputs_list: list, cfg: Config,
     mdtype, mdevice = _param_dtype_device(decoder)
 
     per_image: list[list[dict]] = []
-    for si, inputs in enumerate(inputs_list):
+    prog = tqdm(inputs_list, desc="onnx-precision:llm", unit="img", leave=False)
+    for si, inputs in enumerate(prog):
         # 先把整份输入搬到模型 device(build_inputs 产出的是 CPU 张量;device!=cpu 时不搬会崩)。
         inputs = {k: (v.to(mdevice) if torch.is_tensor(v) else v) for k, v in inputs.items()}
         with torch.inference_mode():
@@ -390,7 +395,19 @@ def _compare_target_llm(backend: Any, inputs_list: list, cfg: Config,
             pos = torch.arange(seq, device=mdevice).view(1, 1, seq).expand(
                 3, embeds.shape[0], seq).contiguous()
 
-        args = (embeds, attn, pos)
+        # 传给解码器的 attention_mask 用**预构的 4D 加性因果 mask**:transformers 新版
+        # create_causal_mask 见 ndim==4 会原样早退(_preprocess_mask_arguments),从而绕开
+        # sdpa_mask/eager_mask 里对 q_length 做张量索引的分支——那条分支在 TorchScript ONNX
+        # 追踪时会 IndexError(q_length 被追成 0 维标量)。单图无 padding,纯下三角因果即可
+        # (attn 全 1);上三角(j>i)置 dtype 最小值、其余 0,forward 里与注意力分数相加。
+        q_len = int(embeds.shape[1])
+        min_val = torch.finfo(mdtype).min
+        attn4d = torch.triu(
+            torch.full((q_len, q_len), min_val, dtype=mdtype, device=mdevice),
+            diagonal=1,
+        ).view(1, 1, q_len, q_len)
+
+        args = (embeds, attn4d, pos)
         probe = build_layer_probe(decoder, layers, invoke)
         try:
             ref = torch_reference_activations(probe, args)
@@ -402,7 +419,7 @@ def _compare_target_llm(backend: Any, inputs_list: list, cfg: Config,
             probe.close()
         feed = {
             "inputs_embeds": embeds.cpu().numpy(),
-            "attention_mask": attn.cpu().numpy(),
+            "attention_mask": attn4d.cpu().numpy(),
             "position_ids": pos.cpu().numpy(),
         }
         cand = ort_activations(onnx_path, names, feed)

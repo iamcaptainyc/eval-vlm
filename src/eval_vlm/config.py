@@ -379,8 +379,8 @@ class ONNXPrecisionConfig:
     onnxruntime(ONNX 候选)与 torch(safetensors 参考)的**中间激活**(cosine / 相对 L2 误差),
     定位**第一个发散的层**。校验的是 torch→ONNX 导出保真度(管线 safetensors→ONNX→MNN 的前半段)。
 
-    仅支持 Qwen3.5-VL / Qwen2-VL 家族(visual.blocks[i] / model.layers[i]);参考权重复用
-    inference.hf.model_path。需要 torch + onnx + onnxruntime(惰性 import,未装才报错)。
+    仅支持 Qwen3.5-VL 系列(model.model.visual.blocks[i] / model.model.language_model.layers[i]);
+    参考权重复用 inference.hf.model_path。需要 torch + onnx + onnxruntime(惰性 import,未装才报错)。
     """
     targets: list = field(default_factory=lambda: ["vit", "llm"])  # 对比哪些子模型:vit(视觉塔)/ llm(解码器)
     num_samples: int = 8                  # 取几张图做逐层对比(逐层前向较贵,默认小批)

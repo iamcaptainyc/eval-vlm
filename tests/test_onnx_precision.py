@@ -83,18 +83,19 @@ def test_diverged_predicate():
 
 
 def test_call_rope_index_adapts_to_signature():
-    """get_rope_index 签名跨代不同:Qwen2/2.5-VL 无 mm_token_type_ids,Qwen3/3.5-VL 必须传。
-    _call_rope_index 应按签名反射选参——两代都不报 TypeError,且新代确实把 mm 透传进去。"""
+    """_call_rope_index 按 get_rope_index 的实际签名反射选参。Qwen3.5-VL 的 get_rope_index
+    必须传 mm_token_type_ids;点版本间签名可能微调(增删形参),故:签名含 mm 时必须把
+    processor 的 mm_token_type_ids 透传进去,签名不含某形参时不应因多喂而报 TypeError。"""
     pytest.importorskip("torch")
     seen = {}
 
-    # Qwen3/3.5-VL 风格:mm_token_type_ids 是必需位置参
+    # Qwen3.5-VL 风格:mm_token_type_ids 是必需位置参
     def rope_new(input_ids, mm_token_type_ids, image_grid_thw=None, attention_mask=None):
         seen["mm"] = mm_token_type_ids
         seen["gthw"] = image_grid_thw
         return ("POS_NEW",)          # 返回元组 -> helper 取 [0]
 
-    # Qwen2/2.5-VL 风格:没有 mm_token_type_ids 形参
+    # 签名不含 mm_token_type_ids 形参(签名收窄的兜底场景):多喂 mm 不应报错
     def rope_old(input_ids, image_grid_thw=None, attention_mask=None):
         seen["old_called"] = True
         return "POS_OLD"

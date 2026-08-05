@@ -398,7 +398,7 @@ onnxruntime(ONNX 候选)vs torch(safetensors 参考)的中间激活,**定位第�
 > 导出/ORT 数值实现——对齐不脆弱、自包含。两端喂**完全相同的预处理输入**(复用 `precision` 那套对齐
 > LlamaFactory 的 `HFBackend` 预处理),统一 **float32** 隔离 dtype 噪声,只测导出保真度。
 
-**仅支持 Qwen2-VL / 2.5-VL / 3-VL 家族**(`visual.blocks[i]` / 解码器 `layers[i]`);参考权重复用
+**仅支持 Qwen3.5-VL 系列**(`model.model.visual.blocks[i]` / `model.model.language_model.layers[i]`);参考权重复用
 `inference.hf.model_path`;需 `torch + onnx + onnxruntime`(惰性 import,未装才在用本命令时报错)。
 
 ```bash
