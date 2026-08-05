@@ -131,6 +131,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `score --dataset <名\|路径>` | 已存在数据集 | 评分 → `<数据集>/<模型>/<后端>/` 下 metrics/scored/failures/summary |
 | `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **pred + score**(不含 split) |
 | `precision --dataset <名\|路径>` | 已存在数据集 | 对比 **mnn(转换后) vs hf(转换前)** 的行为级精度误差 → `<数据集>/<mnn模型>/precision.{json,md}` |
+| `onnx-precision --dataset <名\|路径>` | 已存在数据集 | **逐层数值级**校验 torch(safetensors) vs ONNX(probe 模式,ViT+LLM)→ `<数据集>/<模型>/onnx-precision/onnx_precision.{json,md}`(需 torch+onnx+onnxruntime) |
 | `report --dataset <名\|路径>` | 已存在数据集 | **跨格式合并报告**:扫描该数据集下**全部已跑格式**(HF/各 MNN 变体),出质量并排 + 净质量Δ + 诊断 → `<数据集>/report.{json,md}`(纯读取,不跑模型) |
 
 > `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
@@ -343,9 +344,10 @@ inference:
 
 > **为什么是行为级、不是 logits 级**:MNN 高层 API(`MNN.llm.response`)只返回解码文本、拿不到 logits,
 > 因此张量级 cosine/KL/SNR 在此架构下做不了。`precision` 改测两端**文本输出的一致性 + 输入对齐**——
-> 对定位「预处理不对齐」这一 VLM 最常见(也是本项目已记录的)根因最有效。真·数值级校验需在
-> `llmexport` 产出的 `llm.onnx` 中间件上用 MNN 原生 `tools/script/testMNNFromOnnx.py`(1% 相对误差阈 +
-> `DEBUG` 支配树二分定位坏算子),属另一条路径,不在本命令内。
+> 对定位「预处理不对齐」这一 VLM 最常见(也是本项目已记录的)根因最有效。**真·数值级、逐层**校验
+> 见下面的 `onnx-precision`(校验管线 safetensors→ONNX 前半段的逐层导出保真度);而 `llmexport` 产出的
+> `llm.onnx` 中间件也可用 MNN 原生 `tools/script/testMNNFromOnnx.py`(1% 相对误差阈 + `DEBUG` 支配树
+> 二分定位坏算子),属再下一段(ONNX→MNN)的另一条路径。
 
 **三步流程**(候选与参考可在不同机器分别产出——MNN 边缘机 / HF GPU 机):
 
@@ -383,6 +385,37 @@ eval-vlm precision --dataset <数据集>
 > 净回归率超 `precision.quality_regression_max`(默认 0.05)标 🔴 —— 这把「行为漂移」升级成「确实掉了质量」。
 > 二值 scorer(exact_match / prefix_match)才做 ✓/✗ 交叉;连续 scorer(token_f1)改记两端均分差。缺任一端
 > `scored.jsonl` 则优雅跳过(报告注明「先跑 score」)。
+
+### 逐层数值级校验(`onnx-precision`)
+
+`precision` 只能到**行为级**(MNN 无 logits)。转换管线是 `safetensors →(llmexport)→ ONNX → MNN`,
+`onnx-precision` 补上前半段(`safetensors → ONNX`)的**数值级、逐层**校验:把参考模型的**视觉塔(ViT)**
+与 **LLM 解码器**各自包装成「每层边界都是具名输出」的 **probe ONNX**,对一组图做前向,**逐层**比对
+onnxruntime(ONNX 候选)vs torch(safetensors 参考)的中间激活,**定位第一个发散的层**。
+
+> **probe 模式(不解析 llmexport 大图)**:对**同一个** probe 模块,① eager 跑一次得 torch 参考激活;
+> ② `torch.onnx.export` 导出、onnxruntime 跑一次得 ONNX 候选激活。两侧层定义完全同一,差异纯来自
+> 导出/ORT 数值实现——对齐不脆弱、自包含。两端喂**完全相同的预处理输入**(复用 `precision` 那套对齐
+> LlamaFactory 的 `HFBackend` 预处理),统一 **float32** 隔离 dtype 噪声,只测导出保真度。
+
+**仅支持 Qwen2-VL / 2.5-VL / 3-VL 家族**(`visual.blocks[i]` / 解码器 `layers[i]`);参考权重复用
+`inference.hf.model_path`;需 `torch + onnx + onnxruntime`(惰性 import,未装才在用本命令时报错)。
+
+```bash
+# 在有权重的 GPU/CPU 机上跑(参考权重 = safetensors 目录)
+eval-vlm onnx-precision --dataset <数据集> --hf-model /path/to/safetensors --targets vit,llm --num-samples 8
+# -> <数据集>/<模型名>/onnx-precision/onnx_precision.md（逐层指标表 + 首发散层判定）+ .json
+```
+
+**报告怎么读**:每个 target 一段逐层表,列 `cosine` / `rel_l2`(‖候选-参考‖/‖参考‖)/ `max_abs`;
+达标判定 = `cosine ≥ cosine_min`(默认 0.9999)**且** `rel_l2 ≤ rel_l2_max`(默认 0.01);跨图取每层
+**最差**(任一图发散即算)。顶部判定给出**首发散层**——若 ViT 第 k 个 block 起就发散,基本是该 block
+的算子在 torch→ONNX 导出时失真;解码器同理。阈值 / 取图数 / 精度可在 `config.yaml` 的 `onnx_precision:`
+段调整,或用 `--cosine-min` / `--rel-l2-max` / `--num-samples` / `--dtype` / `--keep-onnx` 覆盖。
+
+> 与行为级 `precision` 互补:`precision` 回答「MNN 端到端文本差多少」,`onnx-precision` 回答「导出到 ONNX
+> 时哪一层先开始数值失真」。两者都达标而 MNN 仍差,则问题在再下一段 `ONNX → MNN`(用 MNN 原生
+> `testMNNFromOnnx.py` 继续二分)。
 
 ### 一键合并报告(`report`)
 
@@ -571,6 +604,7 @@ src/eval_vlm/
 ├── runner.py            # 执行测试(并发编排)
 ├── predict.py           # 无标注图片文件夹 -> 单轮描述(不评分)
 ├── precision.py         # mnn(转换后) vs hf(转换前) 行为级精度误差对比(+ 净质量Δ)
+├── onnx_precision.py    # torch(safetensors) vs ONNX 逐层激活数值级校验(probe 模式,ViT+LLM)
 ├── compare.py           # 两份 scored.jsonl 交叉出净质量Δ(precision/report 共用)
 ├── report.py            # 跨格式合并质量报告(HF vs 各 MNN 变体:质量并排 + 净质量Δ + 诊断)
 ├── evaluate.py          # 评分编排

@@ -238,6 +238,33 @@ class HFBackend(InferenceBackend):
             "downsample_mode": downsample_mode,  # str:forward 显式形参,透传;非张量不 .to()
         }
 
+    def build_inputs(self, context: list[Turn], images: list[str], sample_id: str):
+        """通用 Qwen 路径:加载单图 + 复刻 LlamaFactory 预处理,返回 (processor 输入, 预处理后 PIL 图)。
+
+        由 complete 与 onnx_precision 共用,保证 torch(safetensors)与 ONNX 两端喂**同源输入**
+        (否则逐层数值对比无意义)。返回的 BatchFeature 仍在 CPU 上(未 .to(device)),
+        含 input_ids / attention_mask / pixel_values / image_grid_thw。
+        MiniCPM-V-4.6 有专属预处理(_build_minicpmv46_inputs),不走这里。
+        """
+        from PIL import Image
+
+        if len(images) != 1:
+            raise ValueError(
+                f"样本 {sample_id}:hf 参考后端仅支持单图推理,当前 {len(images)} 张。"
+            )
+        img_path = resolve_image_path(images[0], self.cfg)
+        if not img_path.exists():
+            raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
+        pil_img = self._maybe_resize_max_side(Image.open(img_path).convert("RGB"))
+        messages = self._build_messages(context, sample_id)
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.processor(
+            text=[text], images=[pil_img], padding=True, return_tensors="pt"
+        )
+        return inputs, pil_img
+
     def _to_device(self, obj, device):
         """把(可能嵌套 list/tuple 的)张量搬到 device;非张量(如 downsample_mode 字符串)原样返回。"""
         if self._torch.is_tensor(obj):
@@ -281,29 +308,23 @@ class HFBackend(InferenceBackend):
         hc = self.cfg.inference.hf
         start = time.time()
         try:
-            if len(images) != 1:
-                raise ValueError(
-                    f"样本 {sample_id}:hf 参考后端仅支持单图推理,当前 {len(images)} 张。"
-                )
-            from PIL import Image
-
-            img_path = resolve_image_path(images[0], self.cfg)
-            if not img_path.exists():
-                raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
-            pil_img = Image.open(img_path).convert("RGB")
             if self._model_type == "minicpmv4_6":
                 # MiniCPM-V-4.6:走复刻 LlamaFactory 的专属预处理(image_processor 直调 +
                 # 手工占位符 + downsample_mode);其自身 image_processor 负责切片/尺寸,故不预缩放。
+                from PIL import Image
+
+                if len(images) != 1:
+                    raise ValueError(
+                        f"样本 {sample_id}:hf 参考后端仅支持单图推理,当前 {len(images)} 张。"
+                    )
+                img_path = resolve_image_path(images[0], self.cfg)
+                if not img_path.exists():
+                    raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
+                pil_img = Image.open(img_path).convert("RGB")
                 inputs = self._build_minicpmv46_inputs(context, sample_id, pil_img)
             else:
-                pil_img = self._maybe_resize_max_side(pil_img)  # 纯等比缩放(不 patch 对齐)
-                messages = self._build_messages(context, sample_id)
-                text = self.processor.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-                inputs = self.processor(
-                    text=[text], images=[pil_img], padding=True, return_tensors="pt"
-                )
+                # 通用 Qwen 路径:抽出的 build_inputs(与 onnx_precision 共用),含图片加载 + 等比缩放。
+                inputs, pil_img = self.build_inputs(context, images, sample_id)
         except Exception as e:  # 构造阶段失败(缺图/占位符不符等)
             self._raise_if_fail_fast()  # fail-fast:直接抛出带完整 traceback
             return Prediction(id=sample_id, error=f"build_prompt: {e}")

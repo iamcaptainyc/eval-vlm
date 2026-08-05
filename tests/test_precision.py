@@ -221,6 +221,8 @@ class _Inputs(dict):
 class _FakeProcessor:
     def __init__(self):
         self.image_processor = types.SimpleNamespace(merge_size=2, patch_size=14)
+        # generate 用 tokenizer.pad_token_id(回落 eos_token_id)显式给 pad,压掉警告。
+        self.tokenizer = types.SimpleNamespace(pad_token_id=None, eos_token_id=0)
         self.apply_calls = []
 
     def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
@@ -256,6 +258,9 @@ def fake_hf(monkeypatch):
     torch_mod.inference_mode = lambda: contextlib.nullcontext()
     torch_mod.bfloat16 = "bfloat16"
     torch_mod.float16 = "float16"
+    # 假张量替身(_Batch/_Row/_Inputs)都不是真张量 -> is_tensor 恒 False,
+    # _to_device 遇到它们原样返回(等价于旧 inputs.to(device) 的透传)。
+    torch_mod.is_tensor = lambda obj: False
 
     tf_mod = types.ModuleType("transformers")
     proc = _FakeProcessor()

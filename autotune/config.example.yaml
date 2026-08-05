@@ -80,9 +80,10 @@ search_space:
   lora_rank:        {type: categorical, choices: [8, 16, 32, 64]}            # 不搜 8(实测差);alpha=2×rank 自动派生
   image_max_pixels: {type: categorical, choices: [589824, 1048576, 1638400]}  # 768²/1024²/1280²:1024>768,继续往高推(显存不够就去掉 1280²)
   gradient_accumulation_steps: {type: categorical, choices: [8, 16, 32]}  # 有效batch=4×{8,16,32}={32,64,128};per_device 固定 4(本机上限,8 必 OOM)
+  num_train_epochs:  {type: categorical, choices: [2.0, 3.0, 4.0, 5.0]}   # epoch:实验用 3.0,搜以找欠/过拟合平衡(每 trial 时长随之变)
   # 想再扩(需更多 trial):
-  # num_train_epochs: {type: categorical, choices: [2.0, 3.0, 4.0]}
   # neftune_noise_alpha: {type: float, low: 0.0, high: 5.0}
+  # freeze_multi_modal_projector: {type: categorical, choices: [true, false]}   # 解冻投影器(对症视觉字段瓶颈)
 
 # --- 优化目标(可选参数)---
 objective:

@@ -44,6 +44,7 @@ from .field_eval import run_field_eval
 from .evaluate import score_predictions
 from .data.loader import load_samples
 from .precision import compare_precision
+from .onnx_precision import run_onnx_precision
 from .report import build_report, render_report_md
 from .results import store
 from .scoring import available_scorers
@@ -321,6 +322,40 @@ def _cmd_precision(args: argparse.Namespace) -> int:
     for f in summary["flags"]:
         print("  " + f)
     print(f"[precision] 报告 -> {summary['report_md']}")
+    return 0
+
+
+def _cmd_onnx_precision(args: argparse.Namespace) -> int:
+    """把参考模型的 ViT / LLM 解码器导成 probe ONNX,逐层对比 torch(safetensors)vs onnxruntime。
+
+    校验 torch→ONNX 导出的**数值级逐层保真度**(管线 safetensors→ONNX→MNN 前半段),
+    与行为级 precision(MNN vs safetensors 文本一致性)互补。参考权重取 --hf-model
+    或 config.yaml 的 inference.hf.model_path。需 torch + onnx + onnxruntime。
+    """
+    folder = _resolve_folder(args)
+    # --hf-model 写回 config(与 pred/eval 一致),再读回。
+    persisted = _persist_overrides(folder, args)
+    cfg = load_dataset_config(folder)
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)
+    if args.cosine_min is not None:
+        cfg.onnx_precision.cosine_min = args.cosine_min
+    if args.rel_l2_max is not None:
+        cfg.onnx_precision.rel_l2_max = args.rel_l2_max
+    if args.dtype is not None:
+        cfg.onnx_precision.dtype = args.dtype
+    _report_persist("onnx-precision", persisted, folder)
+
+    targets = [t.strip() for t in args.targets.split(",") if t.strip()] if args.targets else None
+    summary = run_onnx_precision(
+        cfg, hf_model=None,   # --hf-model 已写回 config,这里不再重复覆盖
+        targets=targets,
+        num_samples=args.num_samples,
+        keep_onnx=(True if args.keep_onnx else None),
+    )
+    print(f"[onnx-precision] 模型 `{summary['model']}`:对比 {summary['num_samples']} 张图")
+    for f in summary["flags"]:
+        print("  " + f)
+    print(f"[onnx-precision] 报告 -> {summary['report_md']}")
     return 0
 
 
@@ -611,6 +646,31 @@ def build_parser() -> argparse.ArgumentParser:
                         help="参考(转换前·HF)模型子目录名;默认取 inference.hf.model_path 的目录名")
     _add_workspace_arg(p_prec)
     p_prec.set_defaults(func=_cmd_precision)
+
+    # onnx-precision(torch/safetensors ↔ ONNX 逐层激活数值校验:probe 模式,ViT + LLM 解码器)
+    p_onnx = sub.add_parser(
+        "onnx-precision",
+        help="把 ViT/LLM 解码器导成 probe ONNX,逐层对比 torch(safetensors) vs onnxruntime(数值级)")
+    p_onnx.add_argument("--dataset", "-d", required=True,
+                        help="数据集名(或文件夹路径):从其 test.json 取图做逐层前向对比")
+    p_onnx.add_argument("--hf-model", dest="hf_model", default=None,
+                        help="参考(safetensors)权重目录;写回 inference.hf.model_path(缺省用配置里的)")
+    p_onnx.add_argument("--targets", default=None,
+                        help="对比哪些子模型,逗号分隔(vit,llm);缺省用 onnx_precision.targets")
+    p_onnx.add_argument("--num-samples", dest="num_samples", type=int, default=None,
+                        help="取几张图做逐层对比(缺省用 onnx_precision.num_samples)")
+    p_onnx.add_argument("--dtype", default=None,
+                        help="torch 参考 + 导出精度(缺省 float32;隔离 dtype 噪声、只测导出保真度)")
+    p_onnx.add_argument("--cosine-min", dest="cosine_min", type=float, default=None,
+                        help="逐层 cosine 达标下限(缺省用 onnx_precision.cosine_min)")
+    p_onnx.add_argument("--rel-l2-max", dest="rel_l2_max", type=float, default=None,
+                        help="逐层相对 L2 误差达标上限(缺省用 onnx_precision.rel_l2_max)")
+    p_onnx.add_argument("--keep-onnx", dest="keep_onnx", action="store_true",
+                        help="保留导出的 probe onnx 到 <模型>/onnx-precision/probe_onnx/(默认跑完删临时文件)")
+    p_onnx.add_argument("--fail-fast", dest="fail_fast", action="store_true",
+                        help="某 target 导出/对比出错就抛出完整 traceback 并中断(调试用;默认记原因继续)")
+    _add_workspace_arg(p_onnx)
+    p_onnx.set_defaults(func=_cmd_onnx_precision)
 
     # report(跨格式合并质量报告:HF vs 各 MNN 变体,读全部已跑产物)
     p_report = sub.add_parser(

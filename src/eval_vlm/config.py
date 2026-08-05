@@ -369,6 +369,29 @@ class PrecisionConfig:
 
 
 @dataclass
+class ONNXPrecisionConfig:
+    """ONNX 逐层激活精度校验(onnx-precision 命令)设置。
+
+    与行为级 precision 互补:把 safetensors(torch/HF)模型的**视觉塔 / LLM 解码器**各自包装成
+    「每层边界都是具名输出」的 **probe ONNX**(torch.onnx.export),对一组图片做前向,逐层比对
+    onnxruntime(ONNX 候选)与 torch(safetensors 参考)的**中间激活**(cosine / 相对 L2 误差),
+    定位**第一个发散的层**。校验的是 torch→ONNX 导出保真度(管线 safetensors→ONNX→MNN 的前半段)。
+
+    仅支持 Qwen3.5-VL / Qwen2-VL 家族(visual.blocks[i] / model.layers[i]);参考权重复用
+    inference.hf.model_path。需要 torch + onnx + onnxruntime(惰性 import,未装才报错)。
+    """
+    targets: list = field(default_factory=lambda: ["vit", "llm"])  # 对比哪些子模型:vit(视觉塔)/ llm(解码器)
+    num_samples: int = 8                  # 取几张图做逐层对比(逐层前向较贵,默认小批)
+    dtype: str = "float32"                # torch 参考 + 导出统一精度;float32 隔离 dtype 噪声、只测导出保真度
+    device: str = "cpu"                   # 导出/参考跑在哪(cpu 最稳,与 ORT CPU 对齐)
+    cosine_min: float = 0.9999            # 逐层 cosine 低于此 -> 判该层发散
+    rel_l2_max: float = 1e-2              # 逐层相对 L2 误差高于此 -> 判该层发散
+    opset: int = 17                       # torch.onnx.export 的 opset
+    keep_onnx: bool = False               # True 保留导出的 probe onnx(默认跑完删临时文件)
+    max_layers_in_report: int = 64        # onnx_precision.md 逐层表最多展开的层数
+
+
+@dataclass
 class Config:
     run_name: str = "default_run"
     output_dir: str = "outputs"
@@ -380,6 +403,7 @@ class Config:
     pred: PredConfig = field(default_factory=PredConfig)
     label_extract: LabelExtractConfig = field(default_factory=LabelExtractConfig)
     precision: "PrecisionConfig" = field(default_factory=lambda: PrecisionConfig())
+    onnx_precision: "ONNXPrecisionConfig" = field(default_factory=lambda: ONNXPrecisionConfig())
 
     # 配置文件所在目录,用于把相对路径解析成绝对路径。
     config_dir: Path = field(default_factory=lambda: Path.cwd())
@@ -574,6 +598,7 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
     nested = {"data": DataConfig, "split": SplitConfig, "inference": InferenceConfig,
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
               "label_extract": LabelExtractConfig, "precision": PrecisionConfig,
+              "onnx_precision": ONNXPrecisionConfig,
               "mapping": Mapping, "tags": Tags,
               "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
               "hf": HFBackendConfig, "vllm_offline": VLLMOfflineBackendConfig}
