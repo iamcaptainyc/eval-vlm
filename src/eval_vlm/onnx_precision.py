@@ -174,6 +174,42 @@ def _rope_index_fn(model: Any):
     return None
 
 
+def _call_rope_index(rope_fn, model: Any, inputs: dict, attn, gthw):
+    """按 get_rope_index 的**实际签名**喂参,兼容各代 Qwen-VL:
+      - Qwen2/2.5-VL:(input_ids, image_grid_thw, attention_mask)。
+      - Qwen3/3.5-VL:还必须传 mm_token_type_ids(processor 随 input_ids 产出,标记 文本0/图1/视频2)。
+    用签名反射按需选参;mm_token_type_ids 若 processor 没给,则按 config 的 image/video token id
+    从 input_ids 现构(兜底)。返回 3D position_ids。"""
+    import inspect
+    import torch
+
+    params = inspect.signature(rope_fn).parameters
+    kw: dict = {}
+    if "input_ids" in params:
+        kw["input_ids"] = inputs.get("input_ids")
+    if "image_grid_thw" in params:
+        kw["image_grid_thw"] = gthw
+    if "video_grid_thw" in params and inputs.get("video_grid_thw") is not None:
+        kw["video_grid_thw"] = inputs.get("video_grid_thw")
+    if "attention_mask" in params:
+        kw["attention_mask"] = attn
+    if "mm_token_type_ids" in params:
+        mm = inputs.get("mm_token_type_ids")
+        if mm is None:      # processor 未产出 -> 按 token id 现构(文本0/图1/视频2)
+            ids = inputs["input_ids"]
+            mm = torch.zeros_like(ids)
+            cfg_obj = getattr(model, "config", None)
+            img_id = getattr(cfg_obj, "image_token_id", None)
+            vid_id = getattr(cfg_obj, "video_token_id", None)
+            if img_id is not None:
+                mm[ids == img_id] = 1
+            if vid_id is not None:
+                mm[ids == vid_id] = 2
+        kw["mm_token_type_ids"] = mm
+    pos = rope_fn(**kw)
+    return pos[0] if isinstance(pos, (tuple, list)) else pos
+
+
 # ---------------------------------------------------------------------------
 # probe 包装器 + 导出 + onnxruntime(惰性依赖 torch/onnx/onnxruntime)
 # ---------------------------------------------------------------------------
@@ -347,9 +383,7 @@ def _compare_target_llm(backend: Any, inputs_list: list, cfg: Config,
             attn = torch.ones(embeds.shape[:2], dtype=torch.long, device=mdevice)
         gthw = inputs.get("image_grid_thw")
         if rope_fn is not None:
-            pos = rope_fn(input_ids=inputs["input_ids"], image_grid_thw=gthw,
-                          attention_mask=attn)
-            pos = pos[0] if isinstance(pos, (tuple, list)) else pos
+            pos = _call_rope_index(rope_fn, model, inputs, attn, gthw)
         else:
             # 无 get_rope_index 时退化为 1D 顺序位置(仅玩具/非 Qwen 兜底)。
             seq = embeds.shape[1]
@@ -443,6 +477,10 @@ def _build_reference_backend(cfg: Config):
     ref_cfg.inference.backend = "hf"
     ref_cfg.inference.hf.dtype = cfg.onnx_precision.dtype
     ref_cfg.inference.hf.device = cfg.onnx_precision.device
+    # 强制 eager 注意力:sdpa 的 GQA 路径(scaled_dot_product_attention enable_gqa=True)
+    # 无法被 TorchScript 导出器转成 ONNX;eager 是纯 matmul+softmax,可导出且数值等价。
+    # 探针两端(torch 参考 / ONNX 候选)用同一 eager 定义,导出保真度对比仍自洽。
+    ref_cfg.inference.hf.attn_implementation = "eager"
     return HFBackend(ref_cfg)
 
 

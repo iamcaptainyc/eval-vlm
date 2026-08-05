@@ -116,6 +116,8 @@ class HFBackendConfig:
     device: str = "auto"                        # auto/cuda/cpu,传给 from_pretrained(device_map)
     dtype: str = "auto"                         # auto/bfloat16/float16/float32
     greedy: bool = True                         # True=贪心解码(确定可复现);False=按模型默认采样
+    attn_implementation: Optional[str] = None   # None=模型默认(通常 sdpa);"eager"=纯 matmul 注意力
+                                                # (onnx-precision 导出时强制 eager:sdpa 的 GQA 路径导不出 ONNX)
 
 
 @dataclass

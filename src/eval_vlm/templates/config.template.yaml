@@ -134,6 +134,7 @@ inference:
     device: auto              # auto/cuda/cpu(传给 from_pretrained 的 device_map)
     dtype: auto               # auto/bfloat16/float16/float32
     greedy: true              # true=贪心解码(确定可复现,便于与 mnn 逐条对齐);false=模型默认采样
+    attn_implementation: null # null=模型默认(通常 sdpa);"eager"=纯 matmul 注意力。onnx-precision 导出时会自动强制 eager(sdpa 的 GQA 路径导不出 ONNX),此处一般无需设置
   # vllm_offline 本地离线后端:进程内 vllm 的 LLM() 加载**合并后的全精度权重**推理,不起 HTTP 服务
   # (与 openai/vllm 那种连远端服务的在线后端不同)。主要给自动调参闭环用。需在 backend=hf/mnn 之外
   # 的环境装 vllm;产物 <模型名>=vllm_offline.model_path 目录名。CLI 覆盖:--vllm-model/--vllm-gpu-util/

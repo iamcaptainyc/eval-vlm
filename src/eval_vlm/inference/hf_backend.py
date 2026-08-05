@@ -70,13 +70,17 @@ class HFBackend(InferenceBackend):
         self.processor = AutoProcessor.from_pretrained(hc.model_path, **proc_kwargs)
 
         dtype = self._resolve_dtype(hc.dtype)
+        # 可选强制注意力实现:onnx-precision 导出时用 "eager"(sdpa 的 GQA 路径导不出 ONNX)。
+        extra = {}
+        if getattr(hc, "attn_implementation", None):
+            extra["attn_implementation"] = hc.attn_implementation
         if hc.device == "auto":
             self.model = _AutoVLM.from_pretrained(
-                hc.model_path, torch_dtype=dtype, device_map="auto"
+                hc.model_path, torch_dtype=dtype, device_map="auto", **extra
             )
         else:
             self.model = _AutoVLM.from_pretrained(
-                hc.model_path, torch_dtype=dtype
+                hc.model_path, torch_dtype=dtype, **extra
             ).to(hc.device)
         self.model.eval()
         # 模型架构标识:MiniCPM-V-4.6(NaViT 切片视觉)不能走通用 processor(text,images)——

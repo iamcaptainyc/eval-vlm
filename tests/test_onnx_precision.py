@@ -82,6 +82,37 @@ def test_diverged_predicate():
     assert op._diverged(1.0, 0.0, cosine_min=0.9999, rel_l2_max=1e-2) is False
 
 
+def test_call_rope_index_adapts_to_signature():
+    """get_rope_index 签名跨代不同:Qwen2/2.5-VL 无 mm_token_type_ids,Qwen3/3.5-VL 必须传。
+    _call_rope_index 应按签名反射选参——两代都不报 TypeError,且新代确实把 mm 透传进去。"""
+    pytest.importorskip("torch")
+    seen = {}
+
+    # Qwen3/3.5-VL 风格:mm_token_type_ids 是必需位置参
+    def rope_new(input_ids, mm_token_type_ids, image_grid_thw=None, attention_mask=None):
+        seen["mm"] = mm_token_type_ids
+        seen["gthw"] = image_grid_thw
+        return ("POS_NEW",)          # 返回元组 -> helper 取 [0]
+
+    # Qwen2/2.5-VL 风格:没有 mm_token_type_ids 形参
+    def rope_old(input_ids, image_grid_thw=None, attention_mask=None):
+        seen["old_called"] = True
+        return "POS_OLD"
+
+    inputs = {"input_ids": "IDS", "image_grid_thw": "GTHW",
+              "mm_token_type_ids": "MM"}
+
+    pos_new = op._call_rope_index(rope_new, model=None, inputs=inputs, attn="ATTN", gthw="GTHW")
+    assert pos_new == "POS_NEW"      # 元组被解包
+    assert seen["mm"] == "MM"        # processor 的 mm_token_type_ids 被透传
+    assert seen["gthw"] == "GTHW"
+
+    # 老签名不含 mm 形参:不应因多喂 mm 而报 TypeError
+    pos_old = op._call_rope_index(rope_old, model=None, inputs=inputs, attn="ATTN", gthw="GTHW")
+    assert pos_old == "POS_OLD"
+    assert seen.get("old_called") is True
+
+
 # ---------------------------------------------------------------------------
 # 2) config 构建 + CLI 参数解析
 # ---------------------------------------------------------------------------
