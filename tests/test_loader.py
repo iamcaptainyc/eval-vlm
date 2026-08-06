@@ -54,6 +54,19 @@ def test_targets_last_mode(tworound_config):
     assert len(s.turns) == 4
 
 
+def test_targets_first_mode(tworound_config):
+    """eval.targets=first 时仅评第一轮(描述):给 MNN 等慢/单轮后端只推一次描述。"""
+    tworound_config.eval.targets = "first"
+    src = json.loads(tworound_config.source_path.read_text(encoding="utf-8"))
+    samples = load_samples(tworound_config)
+    s = samples[0]
+    assert len(s.targets) == 1
+    assert s.targets[0].turn_index == 1                       # 首个 assistant 轮
+    assert s.targets[0].reference == src[0]["messages"][1]["content"]  # 描述,非标签
+    # 完整对话仍保留(供构造上下文)
+    assert len(s.turns) == 4
+
+
 def test_load_conversations_format(conversations_config):
     samples = load_samples(conversations_config)
     assert len(samples) == 2

@@ -173,7 +173,7 @@ inference:
 # 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
 # ---------------------------------------------------------------------------
 eval:
-  targets: all                # all=每个 assistant 轮都评;last=仅最后一轮
+  targets: all                # all=每个 assistant 轮都评;last=仅最后一轮;first=仅第一轮描述(给 MNN 等慢/单轮后端,配 field-eval)
   context: rollout            # rollout=用模型自己生成的前文;gold=用数据集标准前文
 
 # ---------------------------------------------------------------------------
@@ -258,3 +258,34 @@ onnx_precision:
   opset: 17                   # torch.onnx.export 的 opset
   keep_onnx: false            # true 保留导出的 probe onnx 到 <模型>/onnx-precision/probe_onnx/(默认跑完删)
   max_layers_in_report: 64    # onnx_precision.md 逐层表最多展开的层数
+
+# ---------------------------------------------------------------------------
+# quant-precision:float 权重 ↔ MNN **量化后**权重的**逐层激活**对比(补齐量化本身对激活的影响)。
+#   命令:quant-precision --dataset <本数据集> [--hf-model <safetensors目录>] [--targets llm,vit]
+#         [--quant-bit 4] [--quant-block 128] [--hqq/--no-hqq] [--visual-quant-bit 4]
+# 在 torch 里模拟 MNN llmexport 的 **weight-only** 权重量化(基础仿射 / HQQ proximal),把它作用到
+# 参考 safetensors 权重上(量化再反量化回 float),对同一组图跑 float 权重 vs 反量化权重两遍前向,
+# 逐层比中间激活,定位量化从哪层起把激活拉崩、ViT 还是解码器更敏感。参数请对齐你实际的 llmexport 命令。
+# 诚实边界:测的是**权重量化**这一主因(MNN 激活本为 fp16),不含 MNN fp16 运行时 / 融合算子差异——
+# 那部分由行为级 precision 端到端覆盖,三者互补。仅需 torch(不需要 onnx/onnxruntime/MNN)。
+# 仅支持 Qwen3.5-VL 系列;参考权重复用 inference.hf.model_path。
+# ---------------------------------------------------------------------------
+quant_precision:
+  targets: ["llm"]            # 对比哪些子模型:llm(解码器,MNN 默认只量化它)/ vit(需设 visual_quant_bit)
+  num_samples: 8              # 取几张图做逐层前向对比(两遍前向较贵,默认小批)
+  dtype: float32              # 参考前向精度;float32 隔离 dtype 噪声、只显权重量化效应
+  device: cpu                 # 跑在哪(cpu / cuda)
+  quant_bit: 4                # LLM 量化位宽(对齐你的 llmexport --quant_bit)
+  quant_block: 128            # 量化分块大小(对齐 llmexport --quant_block;0=按输出通道整行)
+  sym: false                  # 对称量化;false=非对称(MNN 默认)
+  hqq: true                   # 是否走 HQQ proximal 迭代(你的配方为 HQQ,默认开);false=纯基础仿射
+  hqq_lp_norm: 0.7            # HQQ Lp 收缩的 p
+  hqq_beta: 10.0             # HQQ 近端 β 初值
+  hqq_kappa: 1.01            # 每次迭代 β *= kappa
+  hqq_iters: 20              # HQQ 迭代次数(0=退化回基础仿射)
+  hqq_scale_only: false       # true=迭代更新 scale;false=更新 zero-point(经典 HQQ)
+  visual_quant_bit: null      # 视觉塔量化位宽;null=ViT 不量化(对齐 MNN 默认)。设 4/8 才对比 vit
+  visual_quant_block: 128     # 视觉塔量化分块大小
+  cosine_min: 0.99            # 逐层 cosine 低于此 -> 判该层「崩」(比 onnx-precision 宽,4bit 误差本就大)
+  rel_l2_max: 0.1             # 逐层相对 L2 误差高于此 -> 判该层「崩」
+  max_layers_in_report: 64    # quant_precision.md 逐层表最多展开的层数

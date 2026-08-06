@@ -285,8 +285,10 @@ class EvalConfig:
     """多轮评测策略。
 
     targets — 评测哪些 assistant 轮:
-        "all"  : 每个 assistant 轮都评(默认,轮1描述 + 轮2标签 ...)。
-        "last" : 仅最后一个 assistant 轮(退回旧的"只评标签"行为)。
+        "all"   : 每个 assistant 轮都评(默认,轮1描述 + 轮2标签 ...)。
+        "last"  : 仅最后一个 assistant 轮(退回旧的"只评标签"行为)。
+        "first" : 仅第一个 assistant 轮(第一轮描述)。给 MNN 等慢/单轮后端用:
+                  每图只推一次描述,再交 field-eval 抽字段评分,避免逐轮 rollout 的 N 倍开销。
     context — 生成某一轮时,前面 assistant 轮用什么内容作上下文:
         "rollout" : 用模型**自己生成**的前文(真·连续对话,误差会累积,默认)。
         "gold"    : 用数据集里的标准前文(教师强制,各轮独立评测)。
@@ -394,6 +396,41 @@ class ONNXPrecisionConfig:
 
 
 @dataclass
+class QuantPrecisionConfig:
+    """量化精度校验(quant-precision 命令)设置。
+
+    诊断链路里 `onnx-precision`(torch→ONNX 导出保真度)与行为级 `precision`(MNN vs HF 文本)
+    之间缺的一环:**权重量化本身对逐层激活的影响**。MNN 的量化在 `llmexport.py` 导出阶段对 torch
+    权重张量做(weight-only,`act_bit=16` 激活保持 fp16),是一套确定性变换,可在 torch 里逐字复刻。
+
+    本命令把 MNN 的量化(基础仿射 / HQQ proximal 迭代)作用到参考 safetensors 权重上(量化再反量化
+    回 float),对同一组图跑两遍前向(float 权重 vs 反量化权重),**逐层比中间激活**,定位量化从哪层
+    起把激活拉崩、ViT 还是解码器更敏感。测的是**权重量化**这一主因,不含 MNN fp16 运行时/融合算子
+    差异(那部分由行为级 precision 端到端覆盖)。参数应对齐你实际的 llmexport 量化命令。
+
+    仅支持 Qwen3.5-VL 系列;参考权重复用 inference.hf.model_path。需要 torch(惰性 import,未装才报错)。
+    """
+    targets: list = field(default_factory=lambda: ["llm"])  # 对比哪些子模型:llm(解码器)/ vit(视觉塔)。默认只测 LLM(MNN 默认只量化 LLM)
+    num_samples: int = 8                  # 取几张图做逐层对比
+    dtype: str = "float32"                # 参考/前向统一精度;float32 隔离 dtype 噪声、只显权重量化效应
+    device: str = "cpu"                   # 前向跑在哪(cpu 最稳)
+    quant_bit: int = 4                    # LLM 权重量化位数(4 或 8),对齐 llmexport --quant_bit
+    quant_block: int = 128                # 分块大小(沿输入通道);0=按输出通道(整行),对齐 --quant_block
+    sym: bool = False                     # 对称量化;MNN 默认 False(非对称/带符号仿射),对齐 --sym
+    hqq: bool = True                      # 是否用 HQQ proximal 迭代优化(用户配方为 HQQ,默认开),对齐 --hqq
+    hqq_lp_norm: float = 0.7              # HQQ Lp 收缩的 p(经典 HQQ 默认 0.7)
+    hqq_beta: float = 10.0                # HQQ 半二次分裂初始 β
+    hqq_kappa: float = 1.01              # 每次迭代 β *= kappa
+    hqq_iters: int = 20                   # HQQ 迭代次数(0=退化回基础仿射)
+    hqq_scale_only: bool = False          # True:HQQ 更新 scale;False:更新 zero-point(MNN 默认路径)
+    visual_quant_bit: Optional[int] = None  # ViT 权重量化位数;None=ViT 不量化(对齐 MNN --visual_quant_bit 默认 null)
+    visual_quant_block: int = 128         # ViT 分块大小,对齐 --visual_quant_block
+    cosine_min: float = 0.99              # 逐层 cosine 低于此 -> 判该层「崩」(比 onnx-precision 宽:量化误差本就大)
+    rel_l2_max: float = 0.1               # 逐层相对 L2 误差高于此 -> 判该层「崩」
+    max_layers_in_report: int = 64        # quant_precision.md 逐层表最多展开的层数
+
+
+@dataclass
 class Config:
     run_name: str = "default_run"
     output_dir: str = "outputs"
@@ -406,6 +443,7 @@ class Config:
     label_extract: LabelExtractConfig = field(default_factory=LabelExtractConfig)
     precision: "PrecisionConfig" = field(default_factory=lambda: PrecisionConfig())
     onnx_precision: "ONNXPrecisionConfig" = field(default_factory=lambda: ONNXPrecisionConfig())
+    quant_precision: "QuantPrecisionConfig" = field(default_factory=lambda: QuantPrecisionConfig())
 
     # 配置文件所在目录,用于把相对路径解析成绝对路径。
     config_dir: Path = field(default_factory=lambda: Path.cwd())
@@ -601,6 +639,7 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
               "eval": EvalConfig, "scoring": ScoringConfig, "pred": PredConfig,
               "label_extract": LabelExtractConfig, "precision": PrecisionConfig,
               "onnx_precision": ONNXPrecisionConfig,
+              "quant_precision": QuantPrecisionConfig,
               "mapping": Mapping, "tags": Tags,
               "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
               "hf": HFBackendConfig, "vllm_offline": VLLMOfflineBackendConfig}

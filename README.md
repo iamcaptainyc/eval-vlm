@@ -132,6 +132,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `eval --dataset <名\|路径>` | 已存在数据集 | 一键 **pred + score**(不含 split) |
 | `precision --dataset <名\|路径>` | 已存在数据集 | 对比 **mnn(转换后) vs hf(转换前)** 的行为级精度误差 → `<数据集>/<mnn模型>/precision.{json,md}` |
 | `onnx-precision --dataset <名\|路径>` | 已存在数据集 | **逐层数值级**校验 torch(safetensors) vs ONNX(probe 模式,ViT+LLM)→ `<数据集>/<模型>/onnx-precision/onnx_precision.{json,md}`(需 torch+onnx+onnxruntime) |
+| `quant-precision --dataset <名\|路径>` | 已存在数据集 | 模拟 MNN 权重量化(仿射/HQQ),**逐层**比 float 权重 vs 反量化权重的激活 → `<数据集>/<模型>/quant-precision/quant_precision.{json,md}`(定位量化崩点;仅需 torch) |
 | `report --dataset <名\|路径>` | 已存在数据集 | **跨格式合并报告**:扫描该数据集下**全部已跑格式**(HF/各 MNN 变体),出质量并排 + 净质量Δ + 诊断 → `<数据集>/report.{json,md}`(纯读取,不跑模型) |
 
 > `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
@@ -417,6 +418,31 @@ eval-vlm onnx-precision --dataset <数据集> --hf-model /path/to/safetensors --
 > 时哪一层先开始数值失真」。两者都达标而 MNN 仍差,则问题在再下一段 `ONNX → MNN`(用 MNN 原生
 > `testMNNFromOnnx.py` 继续二分)。
 
+### 量化逐层激活校验(`quant-precision`)
+
+`onnx-precision` 证明的是 **float→float** 的导出无损;但 MNN 转换时会把权重量化成 4bit/8bit(HQQ),
+这一步才是效果退化最可疑的来源,而它**只发生在 MNN 转换阶段**(`llmexport --quant_bit/--quant_block`),
+torch 侧并没有量化模型可比。`quant-precision` 补上这一环:在 torch 里**逐字模拟 MNN llmexport 的
+weight-only 权重量化**(基础仿射 / HQQ proximal 迭代),把它作用到参考 safetensors 权重上(量化再反量化
+回 float),对同一组图跑 **float 权重 vs 反量化权重两遍前向**,逐层比中间激活,定位量化从哪层起把激活
+拉崩、ViT 还是解码器更敏感。全程 torch,绕开「MNN 高层 API 无 logits」限制,只需 torch(不需 onnx/MNN)。
+
+```bash
+eval-vlm quant-precision --dataset <数据集> --hf-model /path/to/safetensors \
+    --targets llm --quant-bit 4 --quant-block 128 --hqq --num-samples 8
+# -> <数据集>/<模型名>/quant-precision/quant_precision.md（逐层指标 + 每层权重误差 + 首「崩」层）+ .json
+```
+
+**参数务必对齐你实际的 `llmexport` 命令**(`--quant-bit` / `--quant-block` / `--hqq`/`--no-hqq` / `--sym`);
+MNN 默认只量化 LLM(故 `targets` 默认 `llm`),要测视觉塔需显式 `--visual-quant-bit 4/8`。报告每层除
+`cosine`/`rel_l2` 外多一列**权重 rel_l2**(该层各 Linear 反量化误差均值),解释「激活为何在此层发散」;
+阈值比 onnx-precision 宽(默认 `cosine_min=0.99`、`rel_l2_max=0.1`——4bit 量化误差本就远大于导出噪声),
+重点看误差沿层增长曲线 + 最差层 + 首「崩」层。可在 `config.yaml` 的 `quant_precision:` 段调 HQQ 超参。
+
+> **诚实边界**:测的是**权重量化**这一主因(MNN 激活本就是 fp16、误差主来源即权重 round),**不含** MNN
+> fp16 运行时累加 / 融合算子差异——那部分由行为级 `precision` 端到端覆盖。三条校验互补:`precision`(端到端
+> 行为)+ `onnx-precision`(导出保真度)+ `quant-precision`(量化对激活的影响),共同二分定位退化根因。
+
 ### 一键合并报告(`report`)
 
 多个格式(HF 基准 + 4bit / 8bit 等 MNN 变体)分别 `eval` 完后,`report` 把它们**汇成一页**——
@@ -605,6 +631,7 @@ src/eval_vlm/
 ├── predict.py           # 无标注图片文件夹 -> 单轮描述(不评分)
 ├── precision.py         # mnn(转换后) vs hf(转换前) 行为级精度误差对比(+ 净质量Δ)
 ├── onnx_precision.py    # torch(safetensors) vs ONNX 逐层激活数值级校验(probe 模式,ViT+LLM)
+├── quant_precision.py   # float 权重 vs MNN 量化权重 逐层激活对比(模拟 llmexport 仿射/HQQ,仅需 torch)
 ├── compare.py           # 两份 scored.jsonl 交叉出净质量Δ(precision/report 共用)
 ├── report.py            # 跨格式合并质量报告(HF vs 各 MNN 变体:质量并排 + 净质量Δ + 诊断)
 ├── evaluate.py          # 评分编排

@@ -45,6 +45,7 @@ from .evaluate import score_predictions
 from .data.loader import load_samples
 from .precision import compare_precision
 from .onnx_precision import run_onnx_precision
+from .quant_precision import run_quant_precision
 from .report import build_report, render_report_md
 from .results import store
 from .scoring import available_scorers
@@ -356,6 +357,50 @@ def _cmd_onnx_precision(args: argparse.Namespace) -> int:
     for f in summary["flags"]:
         print("  " + f)
     print(f"[onnx-precision] 报告 -> {summary['report_md']}")
+    return 0
+
+
+def _cmd_quant_precision(args: argparse.Namespace) -> int:
+    """把 MNN llmexport 的 **weight-only** 权重量化(基础仿射 / HQQ)模拟到参考模型,
+    对同一组图跑 float 权重 vs 反量化权重两遍前向,逐层比中间激活,定位量化从哪层起把激活拉崩。
+
+    补齐 precision(行为级,MNN 无 logits)与 onnx-precision(导出保真度,float32)之间缺的
+    「量化本身对激活的影响」一环。参考权重取 --hf-model 或 config.yaml 的 inference.hf.model_path。
+    仅需 torch(不需要 onnx/onnxruntime/MNN)。
+    """
+    folder = _resolve_folder(args)
+    persisted = _persist_overrides(folder, args)   # --hf-model 写回 config
+    cfg = load_dataset_config(folder)
+    cfg.inference.fail_fast = getattr(args, "fail_fast", False)
+    qp = cfg.quant_precision
+    if args.quant_bit is not None:
+        qp.quant_bit = args.quant_bit
+    if args.quant_block is not None:
+        qp.quant_block = args.quant_block
+    if args.sym:
+        qp.sym = True
+    if args.hqq is not None:
+        qp.hqq = args.hqq
+    if args.visual_quant_bit is not None:
+        qp.visual_quant_bit = args.visual_quant_bit
+    if args.dtype is not None:
+        qp.dtype = args.dtype
+    if args.cosine_min is not None:
+        qp.cosine_min = args.cosine_min
+    if args.rel_l2_max is not None:
+        qp.rel_l2_max = args.rel_l2_max
+    _report_persist("quant-precision", persisted, folder)
+
+    targets = [t.strip() for t in args.targets.split(",") if t.strip()] if args.targets else None
+    summary = run_quant_precision(
+        cfg, hf_model=None,   # --hf-model 已写回 config
+        targets=targets,
+        num_samples=args.num_samples,
+    )
+    print(f"[quant-precision] 模型 `{summary['model']}`:对比 {summary['num_samples']} 张图")
+    for f in summary["flags"]:
+        print("  " + f)
+    print(f"[quant-precision] 报告 -> {summary['report_md']}")
     return 0
 
 
@@ -671,6 +716,39 @@ def build_parser() -> argparse.ArgumentParser:
                         help="某 target 导出/对比出错就抛出完整 traceback 并中断(调试用;默认记原因继续)")
     _add_workspace_arg(p_onnx)
     p_onnx.set_defaults(func=_cmd_onnx_precision)
+
+    # quant-precision(float 权重 ↔ MNN 量化权重的逐层激活对比:模拟 llmexport weight-only 量化)
+    p_quant = sub.add_parser(
+        "quant-precision",
+        help="模拟 MNN 权重量化(仿射/HQQ),逐层对比 float 权重 vs 反量化权重的激活(定位量化崩点)")
+    p_quant.add_argument("--dataset", "-d", required=True,
+                         help="数据集名(或文件夹路径):从其 test.json 取图做逐层前向对比")
+    p_quant.add_argument("--hf-model", dest="hf_model", default=None,
+                         help="参考(safetensors)权重目录;写回 inference.hf.model_path(缺省用配置里的)")
+    p_quant.add_argument("--targets", default=None,
+                         help="对比哪些子模型,逗号分隔(llm,vit);缺省用 quant_precision.targets(默认 llm)")
+    p_quant.add_argument("--num-samples", dest="num_samples", type=int, default=None,
+                         help="取几张图做逐层对比(缺省用 quant_precision.num_samples)")
+    p_quant.add_argument("--quant-bit", dest="quant_bit", type=int, default=None,
+                         help="LLM 量化位宽(对齐你的 llmexport --quant_bit;缺省 4)")
+    p_quant.add_argument("--quant-block", dest="quant_block", type=int, default=None,
+                         help="量化分块大小(对齐 llmexport --quant_block;缺省 128,0=按输出通道整行)")
+    p_quant.add_argument("--sym", action="store_true",
+                         help="对称量化(缺省非对称,与 MNN 默认一致)")
+    p_quant.add_argument("--hqq", dest="hqq", action=argparse.BooleanOptionalAction, default=None,
+                         help="是否用 HQQ proximal 迭代(--hqq/--no-hqq;缺省用配置,默认开)")
+    p_quant.add_argument("--visual-quant-bit", dest="visual_quant_bit", type=int, default=None,
+                         help="视觉塔量化位宽;不设=ViT 不量化(对齐 MNN 默认,仅测 llm 时无需)")
+    p_quant.add_argument("--dtype", default=None,
+                         help="参考前向精度(缺省 float32;隔离 dtype 噪声,只显权重量化效应)")
+    p_quant.add_argument("--cosine-min", dest="cosine_min", type=float, default=None,
+                         help="逐层 cosine 达标下限(缺省用 quant_precision.cosine_min)")
+    p_quant.add_argument("--rel-l2-max", dest="rel_l2_max", type=float, default=None,
+                         help="逐层相对 L2 误差达标上限(缺省用 quant_precision.rel_l2_max)")
+    p_quant.add_argument("--fail-fast", dest="fail_fast", action="store_true",
+                         help="某 target 对比出错就抛出完整 traceback 并中断(调试用;默认记原因继续)")
+    _add_workspace_arg(p_quant)
+    p_quant.set_defaults(func=_cmd_quant_precision)
 
     # report(跨格式合并质量报告:HF vs 各 MNN 变体,读全部已跑产物)
     p_report = sub.add_parser(

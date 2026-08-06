@@ -96,9 +96,13 @@ def _parse_record(index: int, rec: dict[str, Any], m: Any, targets_mode: str) ->
             norm_role = str(role_val)
         turns.append(Turn(role=norm_role, content=content_val))
 
-    # 选出要评测的 assistant 轮:all=全部,last=仅最后一个。
+    # 选出要评测的 assistant 轮:all=全部,last=仅最后一个,first=仅第一个(描述轮)。
     if targets_mode == "last":
         chosen = assistant_indices[-1:]
+    elif targets_mode == "first":
+        # 仅评首个 assistant 轮(第一轮描述)。用于 MNN 等慢/单轮后端:每图只推一次
+        # 描述,再交 field-eval 抽字段评分,避免逐轮 rollout 的 N 倍开销。
+        chosen = assistant_indices[:1]
     else:  # "all"(默认)
         chosen = assistant_indices
     targets = [EvalTurn(turn_index=i, reference=turns[i].content) for i in chosen]

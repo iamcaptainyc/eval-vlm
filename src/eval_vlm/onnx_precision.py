@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import contextlib
 import tempfile
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -269,7 +270,13 @@ def export_probe_onnx(probe: Any, args: tuple, path: Path,
     import torch
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with torch.inference_mode():
+    with torch.inference_mode(), warnings.catch_warnings():
+        # 屏蔽经典导出器的两类纯噪音告警(不影响图正确性/数值):
+        #   - "Constant folding - Only steps=1 can be constant folded ...":含 steps>1 的
+        #     onnx::Slice 不做常量折叠(仅少折一步优化,结果不变);
+        #   - "legacy TorchScript-based ONNX export ..." 弃用提示(我们刻意用经典导出器,见下)。
+        warnings.filterwarnings("ignore", message=".*[Cc]onstant folding.*")
+        warnings.filterwarnings("ignore", message=".*TorchScript-based ONNX export.*")
         # dynamo=False:显式走经典 TorchScript 导出器。我们的 probe 靠 forward hook 收集每层输出、
         # 按 output_names 逐位命名边界张量——这正是经典导出器的行为;新版 dynamo 导出器
         # (torch≥2.9 默认)对 output_names 语义不同且需额外装 onnxscript。
