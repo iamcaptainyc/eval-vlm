@@ -359,6 +359,33 @@ def test_mnn_matches_latest_pymnn_wrapper(fake_mnn, tmp_path):
     # 统计从 context 属性对象收集(非 get_context dict)。
     assert pred.raw["prompt_len"] == 11 and pred.raw["decode_us"] == 8000
     assert pred.raw["pixels_mp"] == 0.18
+    # 从引擎计时派生的 vLLM 风格指标(prompt_len=11, decode_len=9,
+    # vision=2000us, prefill=5000us, decode=8000us):
+    assert pred.raw["ttft_ms"] == 7.0                       # (2000+5000)/1000
+    assert pred.raw["e2e_ms"] == 15.0                       # (2000+5000+8000)/1000
+    assert pred.raw["tpot_ms"] == round(8000 / 1000.0 / 9, 3)
+    assert pred.raw["prefill_toks_per_s"] == round(11 / (5000 / 1e6), 2)
+    assert pred.raw["decode_toks_per_s"] == round(9 / (8000 / 1e6), 2)
+    assert pred.raw["total_toks_per_s"] == round((11 + 9) / (15000 / 1e6), 2)
+
+
+def test_mnn_perf_metrics_skipped_when_timings_absent(fake_mnn, tmp_path):
+    """context 只给 prompt_len/gen_seq_len/vision_us(无 prefill_us/decode_us)时,
+    需 prefill/decode 的派生指标应缺省不产出,而非写 0 或崩溃(best-effort)。"""
+    from eval_vlm.inference.mnn_backend import MNNBackend
+
+    cfg = _mnn_cfg(tmp_path)
+    backend = MNNBackend(cfg)          # _FakeModel.get_context 无 prefill_us/decode_us
+
+    ctx = [Turn(role="user", content="<image>请描述图片")]
+    pred = backend.complete(ctx, ["a.jpg"], "a.jpg")
+
+    assert pred.error is None
+    # vision_us=1234 存在 -> ttft 可算;prefill/decode 缺失 -> 相关指标不产出。
+    assert pred.raw["ttft_ms"] == round(1234 / 1000.0, 3)
+    assert "tpot_ms" not in pred.raw
+    assert "decode_toks_per_s" not in pred.raw
+    assert "prefill_toks_per_s" not in pred.raw
 
 
 class _CfgModel:

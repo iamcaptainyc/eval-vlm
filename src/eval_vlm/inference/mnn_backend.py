@@ -297,6 +297,7 @@ class MNNBackend(InferenceBackend):
                     continue
                 if v is not None:
                     raw[k] = v
+            self._add_perf_metrics(raw)
             return raw
         try:
             d = ctx if isinstance(ctx, dict) else self.model.get_context()
@@ -306,7 +307,40 @@ class MNNBackend(InferenceBackend):
                         raw[k] = d[k]
         except Exception:  # noqa: BLE001 - 统计可选
             pass
+        self._add_perf_metrics(raw)
         return raw
+
+    @staticmethod
+    def _add_perf_metrics(raw: dict) -> None:
+        """从引擎计时(vision_us/prefill_us/decode_us + token 数)派生 vLLM 风格性能指标,
+        并入 raw,随 predictions.jsonl 每条落盘。缺某项计时则跳过对应指标(best-effort)。
+
+        - ttft_ms:首 token 时延 = 视觉编码 + prefill(多模态必须含 vision);
+        - tpot_ms:decode 阶段每 token 平均时延(ITL,近似,分母用 decode_len);
+        - e2e_ms:引擎端到端(vision+prefill+decode);**不含**图片 IO / Python 开销
+          ——那部分在 Prediction.latency(顶层墙钟)里,两者对照可看出预处理占比;
+        - prefill/decode/total_toks_per_s:各阶段吞吐。
+        时间单位:context 的 *_us 为微秒。所有值缺失(None)按 0 处理。
+        """
+        vision_us = raw.get("vision_us") or 0
+        prefill_us = raw.get("prefill_us") or 0
+        decode_us = raw.get("decode_us") or 0
+        prompt_len = raw.get("prompt_len") or 0
+        decode_len = raw.get("gen_seq_len") or 0
+
+        if vision_us > 0 or prefill_us > 0:
+            raw["ttft_ms"] = round((vision_us + prefill_us) / 1000.0, 3)
+        if decode_us > 0 and decode_len > 0:
+            raw["tpot_ms"] = round(decode_us / 1000.0 / decode_len, 3)
+        e2e_us = vision_us + prefill_us + decode_us
+        if e2e_us > 0:
+            raw["e2e_ms"] = round(e2e_us / 1000.0, 3)
+        if prefill_us > 0 and prompt_len > 0:
+            raw["prefill_toks_per_s"] = round(prompt_len / (prefill_us / 1e6), 2)
+        if decode_us > 0 and decode_len > 0:
+            raw["decode_toks_per_s"] = round(decode_len / (decode_us / 1e6), 2)
+        if e2e_us > 0 and (prompt_len + decode_len) > 0:
+            raw["total_toks_per_s"] = round((prompt_len + decode_len) / (e2e_us / 1e6), 2)
 
     def _build_query_text(self, context: list[Turn], sample_id: str) -> str:
         """从对话上下文取出含 <image> 的 user 轮,转成 MNN 的单条多模态查询文本。
