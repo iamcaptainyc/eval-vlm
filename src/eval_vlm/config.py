@@ -205,6 +205,9 @@ class VLLMOfflineBackendConfig:
     top_k: int = -1                             # -1 => 关闭
     repetition_penalty: float = 1.0             # 1.0 => 关闭
     system_prompt: Optional[str] = None         # 应与训练一致;None/空 = 不加
+    # vLLM 引擎允许单 prompt 中包含的最大图片数(传给 limit_mm_per_prompt={"image": N})。
+    # 多轮多图对话需设为 ≥ 实际图片数;单图数据集用默认值即可。
+    max_images_per_prompt: int = 4
 
 
 @dataclass

@@ -13,8 +13,11 @@
     返回 RequestOutput 列表,取 ``[0].outputs[0].text``。
   - 图片用 **base64 data URI** 传入(免去 vllm 的本地文件白名单 allowed_local_media_path 配置)。
 
-约束(对齐 mnn/hf):单图、由含 <image> 的 user 轮驱动;单个 LLM 对象有状态、不可多线程并发。
-但 **supports_batch=True**:runner 走批量路径,把每一轮所有样本一次性交给 ``llm.chat([多对话])``,
+支持多图多轮:按 context 中 ``<image>`` 出现顺序从 images 列表头部取对应数量的图片,
+与 OpenAI 后端的队列消费模式一致。``limit_mm_per_prompt`` 由配置项
+``max_images_per_prompt``(默认 4)控制。
+
+**supports_batch=True**:runner 走批量路径,把每一轮所有样本一次性交给 ``llm.chat([多对话])``,
 由 vLLM 引擎内部 continuous batching 提速(而非逐条串行)——这是相对 openai/mnn/hf 后端的关键差异。
 """
 from __future__ import annotations
@@ -74,7 +77,7 @@ class VLLMOfflineBackend(InferenceBackend):
             max_num_batched_tokens=vc.max_num_batched_tokens,
             trust_remote_code=vc.trust_remote_code,
             dtype=vc.dtype,
-            limit_mm_per_prompt={"image": 1},
+            limit_mm_per_prompt={"image": vc.max_images_per_prompt},
             mm_processor_kwargs={
                 "min_pixels": vc.image_min_pixels,
                 "max_pixels": vc.image_max_pixels,
@@ -98,18 +101,14 @@ class VLLMOfflineBackend(InferenceBackend):
         b64 = base64.b64encode(img_path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{b64}"
 
-    def _build_messages(self, context: list[Turn], sample_id: str, data_uri: str) -> list[dict]:
-        """把对话上下文转成 vllm.chat 认的多模态 messages(仿 hf_backend._build_messages)。
+    def _build_messages(self, context: list[Turn], sample_id: str, data_uris: list[str]) -> list[dict]:
+        """把对话上下文转成 vllm.chat 认的多模态 messages。
 
-        含 <image> 的 user 轮拆成 text/image_url 块(单图 -> 一个 image_url 块,用 data URI);
-        其它轮纯文本原样带上(支持 few-shot/多轮)。system_prompt(若配置)作首个 system 轮。
+        含 <image> 的 user 轮拆成 text/image_url 块,按 <image> 出现顺序从 data_uris
+        队列中消费 data URI(支持多图多轮)。其它轮纯文本原样带上(支持 few-shot/多轮)。
+        system_prompt(若配置)作首个 system 轮。
         """
-        img_turns = [t for t in context if _INTERNAL_PLACEHOLDER in t.content]
-        if len(img_turns) != 1:
-            raise ValueError(
-                f"样本 {sample_id}:vllm_offline 后端要求对话恰好含 1 个 {_INTERNAL_PLACEHOLDER} "
-                f"占位符,当前 {len(img_turns)} 个。"
-            )
+        img_queue = list(data_uris)
         messages: list[dict] = []
         if self._vc.system_prompt:
             messages.append({"role": "system",
@@ -125,20 +124,39 @@ class VLLMOfflineBackend(InferenceBackend):
                 if seg:
                     parts.append({"type": "text", "text": seg})
                 if si < len(segments) - 1:
-                    parts.append({"type": "image_url", "image_url": {"url": data_uri}})
+                    if not img_queue:
+                        raise ValueError(
+                            f"样本 {sample_id}：<image> 占位符多于可用图片数"
+                        )
+                    parts.append({"type": "image_url", "image_url": {"url": img_queue.pop(0)}})
             messages.append({"role": turn.role, "content": parts})
         return messages
 
     def _messages_for(self, context: list[Turn], images: list[str], sample_id: str) -> list[dict]:
-        """校验单图 + 解析路径 + 组多模态 messages(构造失败抛异常,由调用方兜)。"""
-        if len(images) != 1:
+        """按 context 中 <image> 占位符数量取图 + 解析路径 + 组多模态 messages。
+
+        统计 context 里的 <image> 数量,从 images 列表头部取对应数量的图片
+        (LlamaFactory 约定:images 按 <image> 出现顺序排列;runner 逐轮 rollout
+        时 context 逐渐变长,占位符数也随之增加,每次从头取即可)。
+        构造失败抛异常,由调用方兜。
+        """
+        n_placeholders = sum(t.content.count(_INTERNAL_PLACEHOLDER) for t in context)
+        if n_placeholders == 0:
             raise ValueError(
-                f"样本 {sample_id}:vllm_offline 后端仅支持单图推理,当前 {len(images)} 张。"
+                f"样本 {sample_id}：context 中没有 {_INTERNAL_PLACEHOLDER} 占位符"
             )
-        img_path = resolve_image_path(images[0], self.cfg)
-        if not img_path.exists():
-            raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {images[0]})")
-        return self._build_messages(context, sample_id, self._data_uri(img_path))
+        if n_placeholders > len(images):
+            raise ValueError(
+                f"样本 {sample_id}：<image> 占位符({n_placeholders})多于图片数({len(images)})"
+            )
+        needed = images[:n_placeholders]
+        data_uris: list[str] = []
+        for img in needed:
+            img_path = resolve_image_path(img, self.cfg)
+            if not img_path.exists():
+                raise FileNotFoundError(f"图片不存在: {img_path}(原始引用: {img})")
+            data_uris.append(self._data_uri(img_path))
+        return self._build_messages(context, sample_id, data_uris)
 
     @staticmethod
     def _out_to_pred(out, sample_id: str, latency: Optional[float]) -> Prediction:

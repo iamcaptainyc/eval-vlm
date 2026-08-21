@@ -123,7 +123,7 @@ def test_build_backend_dispatches_vllm_offline(fake_vllm):
     # LLM 构建参数透传正确
     init = _FakeLLM.last_init
     assert init["model"] == "/models/m"
-    assert init["limit_mm_per_prompt"] == {"image": 1}
+    assert init["limit_mm_per_prompt"] == {"image": 4}
     assert init["mm_processor_kwargs"]["max_pixels"] == cfg_max_pixels()
 
 
@@ -192,13 +192,21 @@ def test_complete_system_prompt_prepended(fake_vllm, tmp_path):
     assert msg[1]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_complete_rejects_multi_image(fake_vllm, tmp_path):
-    img = tmp_path / "a.jpg"
-    img.write_bytes(b"x")
+def test_complete_multi_image_takes_needed(fake_vllm, tmp_path):
+    """多图样本 + 单 <image> context → 只取第 1 张图,不报错。"""
+    img1 = tmp_path / "a.jpg"
+    img1.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+    img2 = tmp_path / "b.jpg"
+    img2.write_bytes(b"\xff\xd8\xff\xe0fakejpeg2")
     backend = build_backend(_cfg("/models/m"))
     pred = backend.complete([Turn(role="user", content="<image>x")],
-                            [str(img), str(img)], "s")
-    assert pred.error and "单图" in pred.error
+                            [str(img1), str(img2)], "s")
+    assert pred.error is None
+    assert pred.prediction == "主辅路：主路"
+    # 消息中只有 1 个 image_url 块(只消费了 1 张图)
+    msg = _FakeLLM.last_chat
+    img_parts = [p for m in msg for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"]
+    assert len(img_parts) == 1
 
 
 def test_complete_missing_image_records_error(fake_vllm, tmp_path):
@@ -259,3 +267,85 @@ def test_complete_batch_build_error_isolated(fake_vllm, tmp_path):
     assert preds[1].id == "good" and preds[1].error is None
     # 只有 1 条进了批(good)
     assert len(_FakeLLM.last_chat) == 1
+
+
+def test_complete_multi_turn_multi_image(fake_vllm, tmp_path):
+    """多轮多图:3 张图 / 3 个 <image>,逐轮 rollout 时 context 逐渐变长。"""
+    imgs = []
+    for n in ("1.jpg", "2.jpg", "3.jpg"):
+        p = tmp_path / n
+        p.write_bytes(b"\xff\xd8\xff\xe0fake")
+        imgs.append(str(p))
+    backend = build_backend(_cfg("/models/m"))
+
+    # 第 1 轮: context 含 1 个 <image> → 取 imgs[0]
+    ctx1 = [Turn("user", "<image>描述")]
+    pred1 = backend.complete(ctx1, imgs, "s1")
+    assert pred1.error is None
+    msg1 = _FakeLLM.last_chat
+    img_parts1 = [p for m in msg1 for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"]
+    assert len(img_parts1) == 1
+
+    # 第 2 轮: context 含 2 个 <image> → 取 imgs[0:2]
+    ctx2 = [
+        Turn("user", "<image>描述"),
+        Turn("assistant", "雪景"),
+        Turn("user", "<image>天气"),
+    ]
+    pred2 = backend.complete(ctx2, imgs, "s2")
+    assert pred2.error is None
+    msg2 = _FakeLLM.last_chat
+    img_parts2 = [p for m in msg2 for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"]
+    assert len(img_parts2) == 2
+
+    # 第 3 轮: context 含 3 个 <image> → 取全部
+    ctx3 = [
+        Turn("user", "<image>描述"),
+        Turn("assistant", "雪景"),
+        Turn("user", "<image>天气"),
+        Turn("assistant", "下雪"),
+        Turn("user", "<image>查看天气"),
+    ]
+    pred3 = backend.complete(ctx3, imgs, "s3")
+    assert pred3.error is None
+    msg3 = _FakeLLM.last_chat
+    img_parts3 = [p for m in msg3 for p in m["content"] if isinstance(p, dict) and p.get("type") == "image_url"]
+    assert len(img_parts3) == 3
+
+
+def test_complete_placeholder_exceeds_images_errors(fake_vllm, tmp_path):
+    """<image> 占位符数 > images 数 → 报错。"""
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"x")
+    backend = build_backend(_cfg("/models/m"))
+    ctx = [Turn("user", "<image>x"), Turn("assistant", "y"), Turn("user", "<image>z")]
+    pred = backend.complete(ctx, [str(img)], "s")
+    assert pred.error and "占位符" in pred.error
+
+
+def test_complete_batch_multi_image(fake_vllm, tmp_path):
+    """批处理路径也能正确处理多图多轮。"""
+    from eval_vlm.inference.base import BatchItem
+    imgs = []
+    for n in ("a.jpg", "b.jpg"):
+        p = tmp_path / n
+        p.write_bytes(b"\xff\xd8\xffdata")
+        imgs.append(str(p))
+    backend = build_backend(_cfg("/models/m"))
+    # 2 个样本:每个样本 2 张图 / 2 个 <image>
+    ctx = [Turn("user", "<image>描述"), Turn("assistant", "x"), Turn("user", "<image>天气")]
+    items = [
+        BatchItem(ctx, imgs, "s0"),
+        BatchItem(ctx, imgs, "s1"),
+    ]
+    preds = backend.complete_batch(items)
+    assert len(preds) == 2
+    assert all(p.error is None for p in preds)
+
+
+def test_max_images_per_prompt_config(fake_vllm):
+    """max_images_per_prompt 配置透传到 limit_mm_per_prompt。"""
+    cfg = _cfg("/models/m")
+    cfg.inference.vllm_offline.max_images_per_prompt = 8
+    build_backend(cfg)
+    assert _FakeLLM.last_init["limit_mm_per_prompt"] == {"image": 8}
