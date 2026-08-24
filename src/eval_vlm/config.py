@@ -148,7 +148,7 @@ class MNNBackendConfig:
     # "You are a helpful assistant."),推理也应保持一致,否则小模型行为易漂移。
     # None/空串 = 不下发,沿用模型 config.json 自带的 system_prompt。
     system_prompt: Optional[str] = None
-    max_tokens: int = 512                       # 作为 response 的 max_new_tokens
+    max_tokens: int = 1024                       # 作为 response 的 max_new_tokens
 
     # --- 采样 / 重复抑制(value-gated:每个旋钮按值开关,后端自动翻译成 MNN 采样管线)---
     # 无需关心 MNN 的 sampler_type / mixed_samplers:后端据下面哪些值被打开,自动拼装

@@ -25,6 +25,7 @@ CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持
     --hf-model               pred/eval 写回 inference.hf.model_path
     --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
     --label-extract-url / --label-extract-token  pred 写回 label_extract.base_url / auth_token
+    --value-path              field-eval 写回 label_extract.value_path(不同数据集可用不同抽取路由)
 """
 from __future__ import annotations
 
@@ -152,6 +153,7 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("system_prompt", "pred.system_prompt"),
     ("label_extract_url", "label_extract.base_url"),
     ("label_extract_token", "label_extract.auth_token"),
+    ("value_path", "label_extract.value_path"),
 )
 
 
@@ -562,6 +564,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="临时覆盖抽取服务地址 base_url(永久写回 label_extract.base_url)")
     p_fe.add_argument("--label-extract-token", dest="label_extract_token", default=None,
                       help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
+    p_fe.add_argument("--value-path", dest="value_path", default=None,
+                      help="临时覆盖 value-extract 路由路径(永久写回 label_extract.value_path;"
+                           "不同数据集的固定枚举字段结构不同时可指定各自的抽取路由)")
     # field-eval 自给自足:没预测就用当前 backend 先跑 pred。下面这些 flag 指定/覆盖该 backend
     # 及其模型(与 pred/eval 一致,持久化到 config.yaml),既决定 run_dir 也决定自动 pred 用哪个后端。
     p_fe.add_argument("--backend", default=None,

@@ -210,11 +210,12 @@ pred:
 # 描述完成后,把每张图的描述 POST 给远程标签服务({base_url}{path},请求体 {"text":描述}),
 # 解析响应 data.labels.cn 里非「无」的中文标签,扁平合并写到 label.jsonl(每行 {image, labels});
 # 失败记 label_failures.jsonl,不中断整批,可重跑补齐。断点续跑跳过已完成,--overwrite 整份重抽。
-# CLI 覆盖永久写回:--label-extract-url -> base_url;--label-extract-token -> auth_token。
+# CLI 覆盖永久写回:--label-extract-url -> base_url;--label-extract-token -> auth_token;
+#   --value-path -> value_path(field-eval 专用,不同数据集的固定枚举字段结构不同时按需覆盖)。
 # ---------------------------------------------------------------------------
 label_extract:
   base_url: https://canghai-agent-api-test.aijidou.com/   # 服务根地址(--label-extract-url 永久写回)
-  path: api/v1/vlm/label-extract                           # 接口路径
+  path: api/v1/vlm/label-extract                           # 接口路径(label-extract 命令用,13 类标签)
   # Authorization 头完整值(含 bearer 前缀)。测试 token 会过期,过期后用
   # --label-extract-token 覆盖(永久写回),或直接改这里。
   auth_token: bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJleHAiOjE3ODMzMjM4NDJ9.ggJb41tshiLZ-cmNEobWf9BygqlYynFmfj5OPEQARqs
@@ -222,6 +223,7 @@ label_extract:
   max_retries: 3              # 失败重试次数(指数退避)
   max_concurrency: 4          # 抽取并发(纯 I/O,与推理后端是否串行无关)
   none_label: 无              # cn 中表示「无该类目」的占位值,过滤掉
+  value_path: api/v1/vlm/value-extract   # field-eval 命令专用路由(固定枚举字段);与上面 path 独立,--value-path 永久写回
 
 # ---------------------------------------------------------------------------
 # 精度对比(仅 precision 命令;其它命令忽略本段)
