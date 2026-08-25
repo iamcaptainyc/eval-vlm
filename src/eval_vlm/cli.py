@@ -27,6 +27,7 @@ CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持
     --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
     --label-extract-url / --label-extract-token  pred 写回 label_extract.base_url / auth_token
     --value-path              field-eval 写回 label_extract.value_path(不同数据集可用不同抽取路由)
+    --targets                 field-eval 写回 eval.targets(评哪个 assistant 轮:all/last/first/数字,如 2=第2轮)
     --method                  sweep 写回各数据集的 eval.method(批量覆盖评测方法)
 """
 from __future__ import annotations
@@ -157,7 +158,19 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("label_extract_url", "label_extract.base_url"),
     ("label_extract_token", "label_extract.auth_token"),
     ("value_path", "label_extract.value_path"),
+    ("targets", "eval.targets"),
 )
+
+
+def _parse_targets(s: str) -> str | int:
+    """把 --targets 的字符串转成合法值:all/last/first 原样保留,纯数字转成 int(第 N 轮)。
+
+    这样 `--targets 2` 持久化为 eval.targets: 2(int),loader 据它选中第 2 个 assistant 轮。
+    """
+    t = str(s).strip()
+    if t.isdigit():
+        return int(t)
+    return t
 
 
 def _persist_overrides(folder: Path, args: argparse.Namespace) -> list[str]:
@@ -586,11 +599,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_arg(p_score)
     p_score.set_defaults(func=_cmd_score)
 
-    # field-eval:第一轮描述 -> value-extract 服务抽固定字段 -> 逐字段准确率
+    # field-eval:指定轮描述(默认第一轮,eval.targets 决定) -> value-extract 服务抽固定字段 -> 逐字段准确率
     p_fe = sub.add_parser(
         "field-eval",
-        help="第一轮描述逐字段准确率:无预测则自动用当前 backend 跑 pred,再发 value-extract 抽字段严格比对(--dataset=名|路径)")
+        help="描述轮逐字段准确率(轮由 eval.targets 决定,默认第一轮):无预测则自动用当前 backend 跑 pred,再发 value-extract 抽字段严格比对(--dataset=名|路径)")
     p_fe.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_fe.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
+                      help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)"
+                           "(永久写回 eval.targets;field-eval 与自动补 pred 都按此轮)")
     p_fe.add_argument("--overwrite", action="store_true",
                       help="无视已有 fields_ref/fields_pred 整份重抽;默认断点续跑只补未完成")
     p_fe.add_argument("--label-extract-url", dest="label_extract_url", default=None,
@@ -662,6 +678,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="转给 field-eval 类型数据集:覆盖 Authorization 头(需含 bearer 前缀)")
     p_sweep.add_argument("--value-path", dest="value_path", default=None,
                          help="转给 field-eval 类型数据集:覆盖 value-extract 路由路径(永久写回 label_extract.value_path)")
+    p_sweep.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
+                         help="批量覆盖每个数据集的 eval.targets(all/last/first/数字如 2=第2轮)并永久写回")
     p_sweep.add_argument("--backend", default=None,
                          choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
                          help="临时覆盖推理后端(写回 inference.backend);决定 run_dir 与自动 pred 用哪个后端")

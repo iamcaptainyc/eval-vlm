@@ -560,7 +560,7 @@ pred:
 | `data` | 数据源路径、图片根目录、LlamaFactory 字段映射(对齐 `dataset_info.json`) |
 | `split` | `ratio` 或 `count`、`seed`(确定性)、`stratify_by`(分层抽样) |
 | `inference` | `backend` 选后端;`openai:` 块(base_url/model/并发/重试/超时等)与 `mnn:` 块(config_path/image_max_side/max_tokens/采样项)各自独立 |
-| `eval` | `targets`(all/last)、`context`(rollout/gold):控制评测哪些轮、上下文来源 |
+| `eval` | `targets`(all/last/first/数字=第N轮)、`context`(rollout/gold):控制评测哪些轮、上下文来源 |
 | `scoring` | `scorer`(默认,可被 `--scorer` 覆盖)、`turn_scorers`(逐轮指定) |
 
 ### LlamaFactory 两种格式

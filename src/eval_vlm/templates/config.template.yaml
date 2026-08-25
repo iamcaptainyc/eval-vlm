@@ -174,9 +174,9 @@ inference:
 # 数据常是两轮:轮1 让模型描述图片,轮2 让模型选情绪标签。
 # ---------------------------------------------------------------------------
 eval:
-  targets: all                # all=每个 assistant 轮都评;last=仅最后一轮;first=仅第一轮描述(给 MNN 等慢/单轮后端,配 field-eval)
+  targets: all                # all=每个 assistant 轮都评;last=仅最后一轮;first=仅第一轮描述(给 MNN 等慢/单轮后端,配 field-eval);数字(如 2)=仅第2个 assistant 轮(1 起始,配 field-eval 评指定轮;field-eval 跟随此轮,自动补 pred 也只生成该轮)
   context: rollout            # rollout=用模型自己生成的前文;gold=用数据集标准前文
-  method: eval                # 仅 sweep 命令读取:eval=整段对话逐轮打分 | field-eval=第一轮描述逐字段准确率(--method 永久写回)
+  method: eval                # 仅 sweep 命令读取:eval=整段对话逐轮打分 | field-eval=描述逐字段准确率(评哪轮由 targets 决定,--method 永久写回)
 
 # ---------------------------------------------------------------------------
 # 评分(仅 score·eval;pred 忽略本段)

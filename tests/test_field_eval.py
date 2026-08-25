@@ -13,7 +13,7 @@ import pytest
 from eval_vlm import field_eval
 from eval_vlm.cli import build_parser, _cmd_field_eval
 from eval_vlm.config import Config, LabelExtractConfig
-from eval_vlm.data.schema import Sample, Turn
+from eval_vlm.data.schema import Sample, Turn, EvalTurn
 
 
 # ---------------------------------------------------------------------------
@@ -186,8 +186,10 @@ _EXTRACT = {
 
 def _install_fakes(cfg: Config, monkeypatch, calls: dict) -> None:
     samples = [
-        Sample(id="a", turns=[Turn("user", "q"), Turn("assistant", "ref_a")]),
-        Sample(id="b", turns=[Turn("user", "q"), Turn("assistant", "ref_b")]),
+        Sample(id="a", turns=[Turn("user", "q"), Turn("assistant", "ref_a")],
+               targets=[EvalTurn(turn_index=1, reference="ref_a")]),
+        Sample(id="b", turns=[Turn("user", "q"), Turn("assistant", "ref_b")],
+               targets=[EvalTurn(turn_index=1, reference="ref_b")]),
     ]
     monkeypatch.setattr(field_eval, "load_samples", lambda cfg, source=None: samples)
 
@@ -256,6 +258,63 @@ def test_run_field_eval_missing_predictions(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 描述轮跟随 eval.targets:取第 2 个 assistant 轮
+# ---------------------------------------------------------------------------
+def test_description_target_follows_eval_targets():
+    """描述轮 = eval.targets 选中的目标轮:数字 2 -> 第 2 个 assistant 轮(而非第一轮)。"""
+    s = Sample(id="a", turns=[
+        Turn("user", "q1"), Turn("assistant", "r1"),
+        Turn("user", "q2"), Turn("assistant", "r2"),
+    ], targets=[EvalTurn(turn_index=3, reference="r2")])
+    assert field_eval._description_target(s) == (3, "r2")
+    # all 模式(多目标)回落第一个目标轮 = 第一轮描述
+    s_all = Sample(id="a", turns=[Turn("user", "q"), Turn("assistant", "r1")],
+                   targets=[EvalTurn(turn_index=1, reference="r1"),
+                            EvalTurn(turn_index=1, reference="r1")])
+    assert field_eval._description_target(s_all) == (1, "r1")
+    # 无 targets(异常) -> (-1, "")
+    assert field_eval._description_target(Sample(id="x")) == (-1, "")
+
+
+def test_run_field_eval_second_round(tmp_path, monkeypatch):
+    """eval.targets=2 时,field-eval 抽取并比对第 2 个 assistant 轮(不是第一轮)。"""
+    cfg = _cfg(tmp_path)
+    cfg.eval.targets = 2
+    samples = [
+        Sample(id="a", turns=[
+            Turn("user", "<image>q1"), Turn("assistant", "ref_a1"),
+            Turn("user", "q2"), Turn("assistant", "ref_a2"),
+        ], targets=[EvalTurn(turn_index=3, reference="ref_a2")]),
+        Sample(id="b", turns=[
+            Turn("user", "<image>q1"), Turn("assistant", "ref_b1"),
+            Turn("user", "q2"), Turn("assistant", "ref_b2"),
+        ], targets=[EvalTurn(turn_index=3, reference="ref_b2")]),
+    ]
+    monkeypatch.setattr(field_eval, "load_samples", lambda cfg, source=None: samples)
+    calls: dict = {}
+
+    def fake_extract(text, le):
+        calls[text] = calls.get(text, 0) + 1
+        return dict({"主辅路": ["主路"]} if text.startswith(("ref_", "pred_")) else {})
+
+    monkeypatch.setattr(field_eval, "extract_fields_one", fake_extract)
+    cfg.test_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.test_path.write_text("[]", encoding="utf-8")
+    # 运行级预测只含第 2 个 assistant 轮(turn=3)
+    cfg.predictions_path.parent.mkdir(parents=True, exist_ok=True)
+    with cfg.predictions_path.open("w", encoding="utf-8") as f:
+        for sid in ("a", "b"):
+            f.write(json.dumps({"id": sid, "turn": 3, "prediction": f"pred_{sid}2"}) + "\n")
+
+    metrics = field_eval.run_field_eval(cfg)
+
+    # 抽取的全是第二轮文本(ref_a2/pred_a2…),第一轮文本未被动过
+    assert set(calls) == {"ref_a2", "pred_a2", "ref_b2", "pred_b2"}
+    assert metrics["num_scored"] == 2
+    assert metrics["per_field"]["主辅路"] == {"correct": 2, "total": 2, "accuracy": 1.0}
+
+
+# ---------------------------------------------------------------------------
 # CLI 解析
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -318,3 +377,36 @@ def test_parser_field_eval_flags():
     ])
     assert args2.overwrite is True
     assert args2.label_extract_url == "http://h/" and args2.label_extract_token == "bearer T"
+
+
+def test_parser_field_eval_targets_flag():
+    """--targets 纯数字转 int(第 N 轮)、字符串原样保留。"""
+    from eval_vlm import cli
+    parser = build_parser()
+    assert parser.parse_args(["field-eval", "-d", "mydata", "--targets", "2"]).targets == 2
+    assert parser.parse_args(["field-eval", "-d", "mydata", "--targets", "first"]).targets == "first"
+    assert parser.parse_args(["field-eval", "-d", "mydata", "--targets", "all"]).targets == "all"
+    assert cli._parse_targets("2") == 2
+    assert cli._parse_targets(" 2 ") == 2
+    assert cli._parse_targets("last") == "last"
+    assert cli._parse_targets("0") == 0
+
+
+def test_persist_targets_int_roundtrip(tmp_path):
+    """field-eval --targets 2 永久写回 eval.targets 为 int,重读仍为 int。"""
+    import argparse
+
+    from eval_vlm import cli, workspace
+    from eval_vlm.config import load_dataset_config
+    from eval_vlm.data.loader import load_samples
+
+    ws = tmp_path / "ws"
+    folder = workspace.init_dataset(
+        str(Path(__file__).parent / "fixtures" / "llamafactory_tworound.json"),
+        ws, name="ds", media_root=str(Path(__file__).parent / "fixtures"))
+    cli._persist_overrides(folder, argparse.Namespace(targets=2))
+
+    cfg = load_dataset_config(folder)
+    assert cfg.eval.targets == 2                        # int,不是字符串
+    s = load_samples(cfg, source=cfg.source_path)[0]
+    assert s.targets[0].turn_index == 3                 # 第 2 个 assistant 轮

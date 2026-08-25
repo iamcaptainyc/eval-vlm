@@ -89,7 +89,7 @@ _DATASET_LEVEL_HINTS: tuple[tuple[str, str], ...] = (
      "temperature / top_k / top_p / sampler_config)",
      "mnn 后端设置(--mnn-config/--mnn-image-max-side 永久写回);图片预处理项对齐 LlamaFactory 训练规则;采样项 value-gated 防小模型满屏换行退化;产物目录名取 config_path 所在目录名"),
     ("eval.targets / eval.context",
-     "评测哪些 assistant 轮(all|last)、用什么上下文(rollout|gold)"),
+     "评测哪些 assistant 轮(all|last|first|数字=第N轮)、用什么上下文(rollout|gold)"),
     ("scoring.scorer / scoring.turn_scorers",
      "评分器与逐轮评分器(scorer 可用 --scorer 临时覆盖)"),
     ("split.train_out / val_out / test_out",

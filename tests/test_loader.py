@@ -67,6 +67,26 @@ def test_targets_first_mode(tworound_config):
     assert len(s.turns) == 4
 
 
+def test_targets_numeric_mode(tworound_config):
+    """eval.targets=2(数字)时仅评第 2 个 assistant 轮(标签轮),配 field-eval。"""
+    tworound_config.eval.targets = 2
+    src = json.loads(tworound_config.source_path.read_text(encoding="utf-8"))
+    samples = load_samples(tworound_config)
+    s = samples[0]
+    assert len(s.targets) == 1
+    assert s.targets[0].turn_index == 3                       # 第 2 个 assistant 轮
+    assert s.targets[0].reference == src[0]["messages"][3]["content"]  # 轮2 内容
+    # 完整对话仍保留(供构造上下文)
+    assert len(s.turns) == 4
+
+
+def test_targets_numeric_out_of_range(tworound_config):
+    """数字超过实际 assistant 轮数 -> 该样本无目标(整样本跳过)。"""
+    tworound_config.eval.targets = 5
+    samples = load_samples(tworound_config)
+    assert all(len(s.targets) == 0 for s in samples)
+
+
 def test_load_conversations_format(conversations_config):
     samples = load_samples(conversations_config)
     assert len(samples) == 2

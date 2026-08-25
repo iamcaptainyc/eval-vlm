@@ -292,11 +292,13 @@ class EvalConfig:
         "last"  : 仅最后一个 assistant 轮(退回旧的"只评标签"行为)。
         "first" : 仅第一个 assistant 轮(第一轮描述)。给 MNN 等慢/单轮后端用:
                   每图只推一次描述,再交 field-eval 抽字段评分,避免逐轮 rollout 的 N 倍开销。
+        <数字 N>: 仅第 N 个 assistant 轮(1 起始)。配 field-eval 评指定轮(如 targets: 2
+                  评第二轮):pred 只生成该轮、field-eval 只抽该轮,三者天然一致。
     context — 生成某一轮时,前面 assistant 轮用什么内容作上下文:
         "rollout" : 用模型**自己生成**的前文(真·连续对话,误差会累积,默认)。
         "gold"    : 用数据集里的标准前文(教师强制,各轮独立评测)。
     """
-    targets: str = "all"
+    targets: str | int = "all"
     context: str = "rollout"
     # sweep 命令据此选择跑哪条评测路径:eval(整段对话逐轮打分)| field-eval(第一轮描述
     # 逐字段准确率)。单独跑 eval / field-eval 子命令时忽略本字段(子命令本身已指明方法)。

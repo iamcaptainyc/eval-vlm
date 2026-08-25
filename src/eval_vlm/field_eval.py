@@ -1,6 +1,6 @@
-"""第一轮描述的「字段抽取 -> 逐字段准确率」评测(field-eval 子命令)。
+"""描述轮(默认第一轮,由 eval.targets 决定)的「字段抽取 -> 逐字段准确率」评测(field-eval 子命令)。
 
-第一轮是自由文本描述,表面字符串 scorer(exact_match/token_f1…)难以衡量其质量。本模块把
+要评的那轮是自由文本描述,表面字符串 scorer(exact_match/token_f1…)难以衡量其质量。本模块把
 ref(标准答案)与 pred(模型输出)两段描述**分别**发给 value-extract 服务(见服务端
 `/vlm/value-extract`),各自解析成一组**固定枚举字段**(主辅路/道路结构/车道位置/警示标志),
 再**逐字段严格相等**比对,得出每字段准确率——既可聚合成数字,又能定位模型在哪个维度弱。
@@ -198,15 +198,17 @@ def _extract_batch(items: list[tuple[str, str]], le: LabelExtractConfig,
 # ---------------------------------------------------------------------------
 # 取描述文本:ref 从 test.json、pred 从 predictions.jsonl
 # ---------------------------------------------------------------------------
-def _first_assistant(sample: Sample) -> tuple[int, str]:
-    """取样本第一个 assistant 轮的 (turn_index, content);无则 (-1, "")。
+def _description_target(sample: Sample) -> tuple[int, str]:
+    """取 field-eval 要评的描述轮的 (turn_index, content);无则 (-1, "")。
 
-    第一轮描述 = 首个 assistant 轮,不依赖 cfg.eval.targets 模式。
+    描述轮 = eval.targets 选中的目标轮(load_samples 据此填 sample.targets),取第一个目标。
+    first/last/数字(如 2=第2轮)模式下 targets 恰好一个;all 模式(多目标)下取第一个
+    目标轮 = 第一轮描述,保持旧行为。
     """
-    for i, t in enumerate(sample.turns):
-        if getattr(t, "role", "") == "assistant":
-            return i, str(getattr(t, "content", "") or "")
-    return -1, ""
+    if not sample.targets:
+        return -1, ""
+    t = sample.targets[0]
+    return t.turn_index, str(getattr(t, "reference", "") or "")
 
 
 def _ref_items(samples: list[Sample]) -> tuple[list[tuple[str, str]], dict[str, int]]:
@@ -214,7 +216,7 @@ def _ref_items(samples: list[Sample]) -> tuple[list[tuple[str, str]], dict[str, 
     items: list[tuple[str, str]] = []
     desc_turn: dict[str, int] = {}
     for s in samples:
-        idx, text = _first_assistant(s)
+        idx, text = _description_target(s)
         if idx < 0 or not text.strip():
             continue
         items.append((s.id, text))
