@@ -298,6 +298,9 @@ class EvalConfig:
     """
     targets: str = "all"
     context: str = "rollout"
+    # sweep 命令据此选择跑哪条评测路径:eval(整段对话逐轮打分)| field-eval(第一轮描述
+    # 逐字段准确率)。单独跑 eval / field-eval 子命令时忽略本字段(子命令本身已指明方法)。
+    method: str = "eval"
 
 
 @dataclass

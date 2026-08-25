@@ -11,6 +11,7 @@
               --datadir = 无标注图片文件夹;逐张单轮描述,产物落 workspace/<同名>/
     score   : 读取已有 —— predictions.jsonl -> metrics.json / scored.jsonl / failures.md / summary.md
     eval    : 读取已有 —— 一键连续执行 pred(--dataset)+ score(不含 split:split 后需先部署模型)
+    sweep   : 批量评测 —— 同一模型对一批数据集依次跑各自的 eval/field-eval(方法由各数据集 eval.method 决定)
 
 产物按 模型/后端 分目录:pred/score/eval 的结果落在 工作目录/<数据集>/<模型名>/<后端类型>/,
 同一模型的不同后端互不覆盖(openai/vllm/fake 模型名取 inference.openai.model;
@@ -26,6 +27,7 @@ CLI 覆盖会「永久写回」该数据集 config.yaml(用户参数优先且持
     --prompt / --system-prompt            pred --datadir 写回 pred.prompt / pred.system_prompt
     --label-extract-url / --label-extract-token  pred 写回 label_extract.base_url / auth_token
     --value-path              field-eval 写回 label_extract.value_path(不同数据集可用不同抽取路由)
+    --method                  sweep 写回各数据集的 eval.method(批量覆盖评测方法)
 """
 from __future__ import annotations
 
@@ -49,6 +51,7 @@ from .report import build_report, render_report_md
 from .results import store
 from .scoring import available_scorers
 from . import workspace
+from .sweep import run_sweep
 
 
 # ---------------------------------------------------------------------------
@@ -240,11 +243,12 @@ def _cmd_score(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_field_eval(args: argparse.Namespace) -> int:
-    """field-eval:逐字段准确率。自给自足——用 config.inference.backend 解析 run_dir,
-    没有 predictions.jsonl 就先用当前 backend 跑 pred,有则直接评(避免 pred/field-eval 后端不一致)。
+def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
+    """对一个数据集跑 field-eval(自给自足:无预测先补跑 pred),返回结构化结果。
+
+    与 _cmd_field_eval 同逻辑,只是多返回 {dataset, method, model, backend, metrics, report}
+    供 sweep 汇总;单独跑 `eval-vlm field-eval` 时由 _cmd_field_eval 薄封装,行为不变。
     """
-    folder = _resolve_folder(args)
     persisted = _persist_overrides(folder, args)      # --backend/--vllm-model/--label-extract-* 等永久写回
     cfg = load_dataset_config(folder)
     cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
@@ -280,19 +284,48 @@ def _cmd_field_eval(args: argparse.Namespace) -> int:
         for v, d in (metrics.get("per_value", {}).get(f) or {}).items():
             print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
+    return {"dataset": folder.name, "method": "field-eval",
+            "model": cfg.inference.result_name, "backend": cfg.inference.backend,
+            "metrics": metrics, "report": str(cfg.field_summary_path)}
+
+
+def _cmd_field_eval(args: argparse.Namespace) -> int:
+    """field-eval:逐字段准确率。自给自足——用 config.inference.backend 解析 run_dir,
+    没有 predictions.jsonl 就先用当前 backend 跑 pred,有则直接评(避免 pred/field-eval 后端不一致)。
+    """
+    folder = _resolve_folder(args)
+    run_field_eval_once(folder, args)
     return 0
 
 
-def _cmd_eval(args: argparse.Namespace) -> int:
-    """一键连续执行 预测 + 评分(不含 split)。"""
-    folder = _resolve_folder(args)
+def run_eval_once(folder: Path, args: argparse.Namespace) -> dict:
+    """对一个数据集跑 eval(预测 + 评分),返回结构化结果。
+
+    与 _cmd_eval 同逻辑,只是多返回 {dataset, method, model, backend, metrics, report}
+    供 sweep 汇总;单独跑 `eval-vlm eval` 时由 _cmd_eval 薄封装,行为不变。
+    """
     persisted = _persist_overrides(folder, args)      # --base-url/--model/--scorer 永久写回
     cfg = load_dataset_config(folder)
     cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("eval", persisted, folder)
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg, "eval")
-    _do_score(cfg, args.scorer)
+    metrics = _do_score(cfg, args.scorer)
+    return {"dataset": folder.name, "method": "eval",
+            "model": cfg.inference.result_name, "backend": cfg.inference.backend,
+            "metrics": metrics, "report": str(cfg.summary_path)}
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    """一键连续执行 预测 + 评分(不含 split)。"""
+    folder = _resolve_folder(args)
+    run_eval_once(folder, args)
+    return 0
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    """批量评测:同一模型(后端)对一批数据集依次跑各自的 eval / field-eval。"""
+    run_sweep(args)
     return 0
 
 
@@ -605,6 +638,41 @@ def build_parser() -> argparse.ArgumentParser:
     _add_vllm_offline_args(p_eval)
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
+
+    # sweep = 同一模型对一批数据集依次跑各自的 eval / field-eval(方法由各数据集 eval.method 决定)
+    p_sweep = sub.add_parser(
+        "sweep",
+        help="批量评测:同一模型(后端)对一批数据集依次跑各自的 eval/field-eval(方法由各数据集 eval.method 决定)")
+    p_sweep.add_argument("--dataset", "-d", default=None,
+                         help="要跑的数据集名(逗号分隔,可重复);可与 --dataset-list 并用")
+    p_sweep.add_argument("--dataset-list", dest="dataset_list", default=None,
+                         help="数据集名清单文件(每行一个,# 开头为注释);可与 --dataset 并用")
+    p_sweep.add_argument("--method", default=None, choices=["eval", "field-eval"],
+                         help="批量覆盖每个数据集的 eval.method 并永久写回(不传则各数据集用自己配置里的值)")
+    p_sweep.add_argument("--overwrite", action="store_true",
+                         help="转给 field-eval 类型数据集:无视已有 fields_ref/fields_pred 整份重抽")
+    p_sweep.add_argument("--stop-on-error", dest="stop_on_error", action="store_true",
+                         help="任一数据集失败即整批中止(默认记 error 继续下一个)")
+    p_sweep.add_argument("--dry-run", dest="dry_run", action="store_true",
+                         help="只打印「数据集 -> 方法」计划表,不执行任何评测")
+    p_sweep.add_argument("--scorer", default=None, help="转给 eval 类型数据集:临时覆盖评分器")
+    p_sweep.add_argument("--label-extract-url", dest="label_extract_url", default=None,
+                         help="转给 field-eval 类型数据集:覆盖抽取服务地址 base_url")
+    p_sweep.add_argument("--label-extract-token", dest="label_extract_token", default=None,
+                         help="转给 field-eval 类型数据集:覆盖 Authorization 头(需含 bearer 前缀)")
+    p_sweep.add_argument("--value-path", dest="value_path", default=None,
+                         help="转给 field-eval 类型数据集:覆盖 value-extract 路由路径(永久写回 label_extract.value_path)")
+    p_sweep.add_argument("--backend", default=None,
+                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                         help="临时覆盖推理后端(写回 inference.backend);决定 run_dir 与自动 pred 用哪个后端")
+    p_sweep.add_argument("--hf-model", dest="hf_model", default=None,
+                         help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path)")
+    p_sweep.add_argument("--mnn-config", dest="mnn_config", default=None,
+                         help="backend=mnn 时:转换产物 config.json 路径(写回 inference.mnn.config_path)")
+    _add_inference_args(p_sweep)       # --base-url / --model / --fail-fast
+    _add_vllm_offline_args(p_sweep)    # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
+    _add_workspace_arg(p_sweep)
+    p_sweep.set_defaults(func=_cmd_sweep)
 
     # precision(对比 mnn 转换后 vs hf 转换前 的行为级精度误差)
     p_prec = sub.add_parser(

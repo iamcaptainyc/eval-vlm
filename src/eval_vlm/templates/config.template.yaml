@@ -15,6 +15,7 @@
 #
 # 一份配置覆盖全部命令,每段都标了「谁用」。与你当前命令无关的段保持默认即可,不会有副作用:
 #   data.source / data.mapping / split / eval / scoring  -> split·pred(--dataset)·score·eval 使用
+#   eval.method                                            -> sweep(批量评测)使用
 #   data.media_root / image_strip_prefix / inference     -> 所有命令共用
 #   pred(下方段)                                        -> 仅 pred --datadir 使用
 
@@ -175,6 +176,7 @@ inference:
 eval:
   targets: all                # all=每个 assistant 轮都评;last=仅最后一轮;first=仅第一轮描述(给 MNN 等慢/单轮后端,配 field-eval)
   context: rollout            # rollout=用模型自己生成的前文;gold=用数据集标准前文
+  method: eval                # 仅 sweep 命令读取:eval=整段对话逐轮打分 | field-eval=第一轮描述逐字段准确率(--method 永久写回)
 
 # ---------------------------------------------------------------------------
 # 评分(仅 score·eval;pred 忽略本段)
