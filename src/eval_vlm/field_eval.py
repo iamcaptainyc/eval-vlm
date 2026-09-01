@@ -508,10 +508,12 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
         src, err = image_ref_to_html_src(img, cfg)
         if src is None:
             imgs_html.append(
-                f'<div class="img-placeholder" title="{_html_escape(err)}">'
-                f'图片不可用<br>{_html_escape(img)}</div>')
+                f'<figure class="img-item"><div class="img-placeholder" title="{_html_escape(err)}">'
+                f'图片不可用</div><figcaption class="img-path">{_html_escape(img)}</figcaption></figure>')
         else:
-            imgs_html.append(f'<img src="{src}" alt="{_html_escape(img)}" loading="lazy">')
+            imgs_html.append(
+                f'<figure class="img-item"><img src="{src}" alt="{_html_escape(img)}" loading="lazy">'
+                f'<figcaption class="img-path">{_html_escape(img)}</figcaption></figure>')
     images_block = f'<div class="images">{"".join(imgs_html)}</div>' if imgs_html else ""
 
     pred_desc = str(row.get("pred_desc") or "")
@@ -550,9 +552,12 @@ header.summary {{ margin-bottom: 20px; padding: 12px 16px; background: #fff;
 .card {{ background: #fff; border: 1px solid #ddd; border-radius: 8px;
          padding: 16px; margin-bottom: 16px; }}
 .card.pred-missing {{ border-left: 4px solid #d9822b; }}
-.images {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }}
-.images img {{ max-width: 100%; max-height: 560px; width: auto; object-fit: contain;
-               border: 1px solid #ccc; border-radius: 4px; cursor: zoom-in; }}
+.images {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; align-items: flex-start; }}
+.img-item {{ margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }}
+.img-item img {{ max-width: 100%; max-height: 560px; width: auto; object-fit: contain;
+                 border: 1px solid #ccc; border-radius: 4px; cursor: zoom-in; }}
+.img-path {{ font-size: 12px; color: #888; word-break: break-all; max-width: 560px;
+             text-align: center; }}
 .img-placeholder {{ width: 560px; max-width: 100%; height: 120px; display: flex; align-items: center;
                     justify-content: center; background: #f2f2f2; color: #999;
                     border: 1px dashed #ccc; font-size: 12px; text-align: center;

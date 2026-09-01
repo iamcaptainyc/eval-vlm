@@ -546,6 +546,8 @@ def test_render_mismatch_card_embeds_local_image():
            "fields": [{"field": "主辅路", "ref": ["主路"], "pred": ["主路"], "correct": True}]}
     card = field_eval._render_mismatch_card(row, cfg)
     assert '<img src="data:image/jpeg;base64,' in card
+    # 图片下方显示原始地址(路径 caption)
+    assert '<figcaption class="img-path">sample1.png</figcaption>' in card
 
 
 def test_render_mismatch_card_missing_image_placeholder(tmp_path):
