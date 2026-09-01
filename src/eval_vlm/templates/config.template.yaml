@@ -96,7 +96,7 @@ inference:
     config_path: null         # 训练后转 mnn 的模型目录里 config.json 的路径,传给 MNN.llm.create();例: /root/autodl-tmp/qwen2-vl-mnn/config.json(--mnn-config 永久写回;也据其所在目录名定产物子目录)
     # 图片预处理(对齐 LlamaFactory 训练时的 mm_plugin 规则;不对齐会导致视觉 token 数
     # 偏离训练分布,推理效果明显变差):
-    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 LlamaFactory);超过按 sqrt 因子等比缩小;<=0 关闭
+    image_max_pixels: 1048576  # 总像素上限(默认 768*768,同 LlamaFactory);超过按 sqrt 因子等比缩小;<=0 关闭
     image_min_pixels: 1024    # 总像素下限(默认 32*32,同 LlamaFactory);不足按 sqrt 因子等比放大;<=0 关闭
     image_max_side: 2048      # 最长边像素上限(native OOM 兜底;经 image_max_pixels 后一般不触发;设 0 关闭)(--mnn-image-max-side 永久写回)
     system_prompt: null       # 系统提示,经 set_config 下发、由 MNN 引擎拼进对话模板;应与训练一致(LlamaFactory qwen2_vl 模板默认 "You are a helpful assistant.");null=沿用模型 config.json
@@ -128,7 +128,7 @@ inference:
     max_tokens: 1024           # generate 的 max_new_tokens
     # 图片预处理:与 mnn 块同一套规则(对齐 LlamaFactory 训练),下发给 processor 的 min/max_pixels,
     # 使参考端与候选端喂给视觉编码器的 token 分布一致(precision 的对齐审计据此比对)。
-    image_max_pixels: 589824  # 总像素上限(默认 768*768,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
+    image_max_pixels: 1048576  # 总像素上限(默认 768*768,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
     image_min_pixels: 1024    # 总像素下限(默认 32*32,同 mnn);下发给 processor(Qwen2-VL 专属);<=0 关闭
     image_max_side: 0         # 最长边上限:纯等比缩放不 patch 对齐(同 mnn:image_max_side)。非 Qwen 切片模型(如 MiniCPM-V)建议把上面两项设 0、改用本项;<=0 关闭(--hf-image-max-side 永久写回)
     system_prompt: null       # 系统提示(应与训练一致);null=不加
@@ -150,7 +150,7 @@ inference:
     # 图片像素上下限:经 mm_processor_kwargs 交给 Qwen-VL processor 内部缩放,**建议与训练 image_max_pixels 对齐**,
     # 否则视觉 token 分布偏离训练。默认 28*28 ~ 720*28*28。
     image_min_pixels: 784     # 28*28
-    image_max_pixels: 564480  # 720*28*28(--vllm-image-max-pixels 永久写回)
+    image_max_pixels: 1048576  # 720*28*28(--vllm-image-max-pixels 永久写回)
     dtype: auto               # auto/bfloat16/float16/float32
     trust_remote_code: true   # Qwen-VL 等自定义模型需 true
     # vLLM 环境变量:在 import vllm 之前写入 os.environ(部分变量 import 期就读,晚设无效)。

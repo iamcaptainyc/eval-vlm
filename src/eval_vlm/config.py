@@ -622,6 +622,16 @@ class Config:
         """逐字段失配清单(按 id 列 ref vs pred 每字段值 + ✓/✗),供人工核查。"""
         return self.run_dir / "field_mismatches.md"
 
+    @property
+    def field_mismatches_json_path(self) -> Path:
+        """逐字段失配清单的结构化 JSON 版(rows 原始数据),供离线重渲染 HTML 而不必重新调用抽取服务。"""
+        return self.run_dir / "field_mismatches.json"
+
+    @property
+    def field_mismatches_html_path(self) -> Path:
+        """逐字段失配清单的 HTML 版(图片以 base64 内嵌,单文件可直接分享/打开)。"""
+        return self.run_dir / "field_mismatches.html"
+
     def _resolve(self, p: str | os.PathLike[str]) -> Path:
         """相对路径相对当前工作目录(CWD)解析,绝对路径原样返回。
 

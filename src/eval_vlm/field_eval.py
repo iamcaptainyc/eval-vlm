@@ -34,6 +34,7 @@ from .config import Config, LabelExtractConfig
 from .data.loader import load_samples
 from .data.schema import Sample
 from .label_extract import LabelExtractError, _endpoint, _retry_extract
+from .report_assets import image_ref_to_html_src
 from .results import store
 
 
@@ -483,6 +484,125 @@ def _render_mismatches(rows: list[dict], metrics: dict, cfg: Config) -> str:
 
 
 # ---------------------------------------------------------------------------
+# HTML 渲染:图文合一的失配清单(图片 base64 内嵌,单文件自包含)
+# ---------------------------------------------------------------------------
+def _html_escape(s: object) -> str:
+    """统一转字符串再转义(id/字段名/取值均来自外部服务响应,不可信)。"""
+    import html
+    return html.escape(str(s), quote=True)
+
+
+def _render_mismatch_card(row: dict, cfg: Config) -> str:
+    """渲染单个失配样本的卡片:图片(或占位符)+ ref/pred/✓✗ 对比表。"""
+    sid = _html_escape(row["id"])
+    is_missing = row["state"] == "pred_missing"
+    tag = ('<span class="tag-pred-missing">⚠️ 模型未产出描述</span>' if is_missing else "")
+    bad_fields = [fr["field"] for fr in row["fields"] if not fr["correct"]]
+    data_attr = _html_escape("|".join(bad_fields))
+
+    imgs_html: list[str] = []
+    for img in (row.get("images") or []):
+        src, err = image_ref_to_html_src(img, cfg)
+        if src is None:
+            imgs_html.append(
+                f'<div class="img-placeholder" title="{_html_escape(err)}">'
+                f'图片不可用<br>{_html_escape(img)}</div>')
+        else:
+            imgs_html.append(f'<img src="{src}" alt="{_html_escape(img)}" loading="lazy">')
+    images_block = f'<div class="images">{"".join(imgs_html)}</div>' if imgs_html else ""
+
+    trs: list[str] = []
+    for fr in row["fields"]:
+        cls = "ok" if fr["correct"] else "bad"
+        mark = "✓" if fr["correct"] else "✗"
+        trs.append(
+            f"<tr><td>{_html_escape(fr['field'])}</td>"
+            f"<td>{_html_escape(_fmt(fr['ref']))}</td>"
+            f"<td>{_html_escape(_fmt(fr['pred']))}</td>"
+            f'<td class="{cls}">{mark}</td></tr>')
+    table = ("<table><tr><th>字段</th><th>ref</th><th>pred</th><th></th></tr>"
+             + "".join(trs) + "</table>")
+
+    card_class = "card pred-missing" if is_missing else "card"
+    return (f'<section class="{card_class}" data-bad-fields="{data_attr}">'
+            f"<h3>样本 <code>{sid}</code> {tag}</h3>"
+            f"{images_block}{table}</section>")
+
+
+def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str:
+    """把失配样本渲染成图文合一的单文件 HTML。"""
+    ov = metrics["overall"]
+    header = f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>{_html_escape(f"字段失配清单 — {cfg.run_name}")}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 24px; background: #fafafa; color: #222; }}
+header.summary {{ margin-bottom: 20px; padding: 12px 16px; background: #fff;
+                 border: 1px solid #ddd; border-radius: 8px; }}
+.card {{ background: #fff; border: 1px solid #ddd; border-radius: 8px;
+         padding: 16px; margin-bottom: 16px; }}
+.card.pred-missing {{ border-left: 4px solid #d9822b; }}
+.images {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }}
+.images img {{ max-width: 280px; max-height: 280px; object-fit: contain;
+               border: 1px solid #ccc; border-radius: 4px; }}
+.img-placeholder {{ width: 280px; height: 120px; display: flex; align-items: center;
+                    justify-content: center; background: #f2f2f2; color: #999;
+                    border: 1px dashed #ccc; font-size: 12px; text-align: center;
+                    padding: 8px; box-sizing: border-box; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 14px; }}
+td.ok {{ color: #1a7f37; font-weight: 600; }}
+td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
+.tag-pred-missing {{ color: #d9822b; font-weight: 600; }}
+#filters {{ margin-bottom: 16px; }}
+#filters label {{ margin-right: 16px; font-size: 14px; }}
+</style></head><body>
+"""
+    header += f"""<header class="summary">
+<h1>字段失配清单 — {_html_escape(cfg.run_name)}</h1>
+<p>模型: <code>{_html_escape(cfg.inference.result_name)}</code>
+   后端: <code>{_html_escape(cfg.inference.backend)}</code></p>
+<p>有失配的样本: {len(rows)} / 已评 {metrics['num_scored']}
+   &nbsp; micro={ov['micro_accuracy']} macro={ov['macro_accuracy']}
+   &nbsp; 模型无输出(pred_missing): {metrics['num_pred_missing']}</p>
+</header>
+"""
+    if not rows:
+        return header + "<p>✅ 无字段失配。</p></body></html>"
+
+    field_options = "".join(
+        f'<option value="{_html_escape(f)}">{_html_escape(f)}</option>' for f in metrics["fields"])
+    filters = f"""<div id="filters">
+<label><input type="checkbox" id="flt-pred-missing"> 仅看 pred_missing</label>
+<label>按字段过滤:
+  <select id="flt-field"><option value="">(全部)</option>{field_options}</select>
+</label>
+</div><div id="cards">"""
+
+    cards = "".join(_render_mismatch_card(row, cfg) for row in rows)
+
+    script = """<script>
+(function () {
+  var cb = document.getElementById('flt-pred-missing');
+  var sel = document.getElementById('flt-field');
+  function apply() {
+    var onlyMissing = cb.checked;
+    var field = sel.value;
+    document.querySelectorAll('.card').forEach(function (card) {
+      var okMissing = !onlyMissing || card.classList.contains('pred-missing');
+      var badFields = (card.getAttribute('data-bad-fields') || '').split('|');
+      var okField = !field || badFields.indexOf(field) !== -1;
+      card.style.display = (okMissing && okField) ? '' : 'none';
+    });
+  }
+  cb.addEventListener('change', apply);
+  sel.addEventListener('change', apply);
+})();
+</script>"""
+
+    return header + filters + cards + "</div>" + script + "</body></html>"
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
@@ -529,4 +649,9 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
     store.write_json(cfg.field_metrics_path, metrics)
     store.write_text(cfg.field_summary_path, _render_summary(metrics, cfg))
     store.write_text(cfg.field_mismatches_path, _render_mismatches(rows, metrics, cfg))
+    store.write_json(cfg.field_mismatches_json_path, {
+        "run_name": cfg.run_name, "model": cfg.inference.result_name,
+        "backend": cfg.inference.backend, "num_scored": metrics["num_scored"], "rows": rows,
+    })
+    store.write_text(cfg.field_mismatches_html_path, _render_mismatches_html(rows, metrics, cfg))
     return metrics

@@ -297,6 +297,7 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
         for v, d in (metrics.get("per_value", {}).get(f) or {}).items():
             print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
+    print(f"[field-eval] 失配清单(HTML,含图片) -> {cfg.field_mismatches_html_path}")
     return {"dataset": folder.name, "method": "field-eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
             "metrics": metrics, "report": str(cfg.field_summary_path)}

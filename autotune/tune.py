@@ -84,12 +84,13 @@ def conda_prefix(cfg: dict, env: str) -> list[str]:
 
 
 def safe_name(s: str) -> str:
-    """把模型名清洗成合法目录名,并与 eval-vlm 的 safe_model_dirname 结果对齐。
+    """把名字清洗成合法目录名:只保留字母/数字,**其余特殊符号(含 .、- 等)一律折成 _**。
 
-    只保留 [0-9A-Za-z._-],其余折成 _;再 strip 首尾的空格/点/下划线(与 eval-vlm 一致),
-    保证 tune.py 拼出的 run_dir 与 eval-vlm 实际写入的目录名完全相同。
+    与 eval-vlm 的 safe_model_dirname 对齐:本函数产物是其安全字符集的子集,传给
+    eval-vlm 不会再被二次改写,保证 tune.py 拼出的 run_dir 与 eval-vlm 实际写入的一致。
+    如 Qwen3.5-0.8B -> Qwen3_5_0_8B。
     """
-    return re.sub(r"[^0-9A-Za-z._-]+", "_", s).strip(" ._") or "model"
+    return re.sub(r"[^0-9A-Za-z]+", "_", s).strip("_") or "model"
 
 
 _METRIC_MAP = {
@@ -158,7 +159,10 @@ def build_objective(cfg: dict):
     eval_proc_env = ({**os.environ, **{str(k): str(v) for k, v in eval_env_vars.items()}}
                      if eval_env_vars else None)
 
-    model_tag = safe_name(Path(cfg["base_model"]).name)   # 如 Qwen3.5-0.8B;进 merged 目录名/result_name
+    # merged 目录名 = 基座名_study名_trial_000N:基座名清洗掉特殊符号,study 名作实验标识,
+    # 让同一 work_root 下不同实验(不同 study)不撞名,eval-vlm 的 result_name(取目录名)也带全标识。
+    base_tag = safe_name(Path(cfg["base_model"]).name)               # Qwen3.5-0.8B -> Qwen3_5_0_8B
+    study_tag = safe_name(cfg["optuna"].get("study_name", "autotune"))  # 与 main() 里 study 名默认值一致
 
     def objective(trial: "optuna.Trial") -> float:
         params = {name: suggest(trial, name, spec) for name, spec in cfg["search_space"].items()}
@@ -166,9 +170,10 @@ def build_objective(cfg: dict):
         alpha_ratio = cfg.get("lora_alpha_ratio")
         if alpha_ratio and "lora_rank" in params:
             params["lora_alpha"] = int(round(alpha_ratio * params["lora_rank"]))
-        # merged 目录名 = 模型名_trial_000N:既唯一(修掉 run_dir 撞名),又让 eval-vlm 的
-        # result_name(取目录名)带模型信息。adapter 为临时产物,合并成功后删除,只留合并权重。
-        trial_tag = f"{model_tag}_trial_{trial.number:04d}"
+        # merged 目录名 = 基座名_study名_trial_000N:同一 work_root 下不同实验不撞名;
+        # eval-vlm 的 result_name(取目录名)随之带全基座+实验标识。adapter 为临时产物,
+        # 合并成功后删除,只留合并权重。
+        trial_tag = f"{base_tag}_{study_tag}_trial_{trial.number:04d}"
         merged_dir = work_root / trial_tag
         adapter_dir = work_root / f".{trial_tag}.adapter"     # 临时:合并后删
         merge_path = work_root / f"{trial_tag}.merge.yaml"    # 小配置,留存供复现

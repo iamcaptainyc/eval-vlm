@@ -225,6 +225,15 @@ def test_run_field_eval_end_to_end(tmp_path, monkeypatch):
     mm = cfg.field_mismatches_path.read_text(encoding="utf-8")
     assert "样本 `b`" in mm and "样本 `a`" not in mm
 
+    # 结构化 JSON(供离线重渲染)+ 图文 HTML(图片内嵌)
+    assert cfg.field_mismatches_json_path.exists()
+    assert cfg.field_mismatches_html_path.exists()
+    payload = json.loads(cfg.field_mismatches_json_path.read_text(encoding="utf-8"))
+    assert payload["num_scored"] == 2
+    assert [r["id"] for r in payload["rows"]] == ["b"]
+    html = cfg.field_mismatches_html_path.read_text(encoding="utf-8")
+    assert "样本 <code>b</code>" in html and "样本 <code>a</code>" not in html
+
 
 def test_run_field_eval_resume_skips_done(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
@@ -410,3 +419,121 @@ def test_persist_targets_int_roundtrip(tmp_path):
     assert cfg.eval.targets == 2                        # int,不是字符串
     s = load_samples(cfg, source=cfg.source_path)[0]
     assert s.targets[0].turn_index == 3                 # 第 2 个 assistant 轮
+
+
+# ---------------------------------------------------------------------------
+# report_assets.image_ref_to_html_src:本地缩放内嵌 / URL 透传 / 缺失占位
+# ---------------------------------------------------------------------------
+def _fixtures_images_dir() -> Path:
+    return Path(__file__).parent / "fixtures" / "images"
+
+
+def test_image_ref_to_html_src_embeds_local(tmp_path):
+    from eval_vlm.report_assets import image_ref_to_html_src
+    cfg = Config()
+    cfg.data.media_root = str(_fixtures_images_dir())
+    src, err = image_ref_to_html_src("sample1.png", cfg)
+    assert err is None
+    assert src.startswith("data:image/jpeg;base64,")
+
+
+def test_image_ref_to_html_src_resizes_large(tmp_path):
+    from PIL import Image
+    import base64
+    import io
+
+    from eval_vlm.report_assets import image_ref_to_html_src
+
+    big = tmp_path / "big.png"
+    Image.new("RGB", (2000, 1000), (255, 0, 0)).save(big)
+
+    cfg = Config()
+    cfg.data.media_root = str(tmp_path)
+    src, err = image_ref_to_html_src("big.png", cfg)
+    assert err is None
+    raw = base64.b64decode(src.split(",", 1)[1])
+    with Image.open(io.BytesIO(raw)) as im:
+        assert max(im.size) <= 960                        # 长边被缩到上限内
+
+
+def test_image_ref_to_html_src_missing_file(tmp_path):
+    from eval_vlm.report_assets import image_ref_to_html_src
+    cfg = Config()
+    cfg.data.media_root = str(tmp_path)
+    src, err = image_ref_to_html_src("nope.png", cfg)
+    assert src is None
+    assert err and "nope.png" in err
+
+
+def test_image_ref_to_html_src_passthrough_urls():
+    from eval_vlm.report_assets import image_ref_to_html_src
+    cfg = Config()
+    assert image_ref_to_html_src("https://example.com/a.jpg", cfg) == \
+        ("https://example.com/a.jpg", None)
+    assert image_ref_to_html_src("data:image/png;base64,AAAA", cfg) == \
+        ("data:image/png;base64,AAAA", None)
+
+
+# ---------------------------------------------------------------------------
+# HTML 渲染:转义 / ✓✗ 标记 / pred_missing 标签 / 图片内嵌 / 占位符
+# ---------------------------------------------------------------------------
+def _render_metrics(**over) -> dict:
+    m = {"overall": {"micro_accuracy": 0.5, "macro_accuracy": 0.5, "exact_match_rate": 0.5},
+         "num_scored": 2, "num_pred_missing": 0,
+         "fields": ["主辅路", "警示标志"]}
+    m.update(over)
+    return m
+
+
+def test_render_mismatches_html_escapes_and_marks():
+    rows = [{
+        "id": "b", "images": [], "state": "compared",
+        "fields": [
+            {"field": "主辅路", "ref": ["主路"], "pred": ["主路"], "correct": True},
+            {"field": "警示标志", "ref": ["<b>学校路口</b>"], "pred": ["礼让行人"], "correct": False},
+        ],
+    }]
+    cfg = Config()
+    html = field_eval._render_mismatches_html(rows, _render_metrics(), cfg)
+    assert "<html" in html and "</html>" in html
+    assert "✓" in html and "✗" in html
+    assert "&lt;b&gt;学校路口&lt;/b&gt;" in html        # 转义后
+    assert "<b>学校路口</b>" not in html                # 原文不残留
+    assert "样本 <code>b</code>" in html
+
+
+def test_render_mismatches_html_pred_missing_tagged():
+    rows = [{
+        "id": "c", "images": [], "state": "pred_missing",
+        "fields": [{"field": "主辅路", "ref": ["主路"], "pred": [], "correct": False}],
+    }]
+    cfg = Config()
+    html = field_eval._render_mismatches_html(rows, _render_metrics(num_pred_missing=1), cfg)
+    assert 'class="card pred-missing"' in html
+    assert "模型未产出描述" in html
+    assert 'data-bad-fields="主辅路"' in html
+
+
+def test_render_mismatches_html_no_rows():
+    cfg = Config()
+    html = field_eval._render_mismatches_html([], _render_metrics(), cfg)
+    assert "无字段失配" in html
+
+
+def test_render_mismatch_card_embeds_local_image():
+    cfg = Config()
+    cfg.data.media_root = str(_fixtures_images_dir())
+    row = {"id": "a", "images": ["sample1.png"], "state": "compared",
+           "fields": [{"field": "主辅路", "ref": ["主路"], "pred": ["主路"], "correct": True}]}
+    card = field_eval._render_mismatch_card(row, cfg)
+    assert '<img src="data:image/jpeg;base64,' in card
+
+
+def test_render_mismatch_card_missing_image_placeholder(tmp_path):
+    cfg = Config()
+    cfg.data.media_root = str(tmp_path)                 # 空目录,图片必缺失
+    row = {"id": "a", "images": ["nope.png"], "state": "compared",
+           "fields": [{"field": "主辅路", "ref": ["主路"], "pred": [], "correct": False}]}
+    card = field_eval._render_mismatch_card(row, cfg)
+    assert 'class="img-placeholder"' in card
+    assert "nope.png" in card

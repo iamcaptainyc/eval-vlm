@@ -34,12 +34,12 @@ conda run -n <driver_env> python tune.py --config config.yaml
 
 ```
 <work_root>/
-  <模型名>_trial_0007/           # 合并后全精度权重(唯一命名 = 模型名_trial号,eval-vlm 加载它)
-  <模型名>_trial_0007.merge.yaml # 本 trial 的合并配置(留存,可复现)
+  <基座名>_<study名>_trial_0007/          # 合并后全精度权重(eval-vlm 加载它)
+  <基座名>_<study名>_trial_0007.merge.yaml # 本 trial 的合并配置(留存,可复现)
 ```
-训练用的 LoRA adapter 是**临时目录**(`.<模型名>_trial_0007.adapter/`),合并成功后自动删除——只保留合并权重,省磁盘。
+命名规则 = **基座模型名(特殊符号全部折 `_`,如 Qwen3.5-0.8B → Qwen3_5_0_8B) + study 名 + trial 序号**,例如 `Qwen3_5_0_8B_Qwen3_5_0_8B_4dimroad_trial_0007`——每个 trial 唯一,且同一 `work_root` 下不同实验(不同 study 名)互不撞名。训练用的 LoRA adapter 是**临时目录**(`.<同上>.adapter/`),合并成功后自动删除——只保留合并权重,省磁盘。
 
-评测结果在 eval-vlm 侧:`<eval_vlm_dataset>/<模型名>_trial_0007/vllm_offline/field_metrics.json`。合并目录名带模型信息且每 trial 唯一 → **run_dir 互不覆盖**;`result_name` 也因此含模型名。ref 字段抽取结果缓存在数据集级(`<eval_vlm_dataset>/fields_ref.jsonl`),**跨 trial 只抽一次**。
+评测结果在 eval-vlm 侧:`<eval_vlm_dataset>/<上述目录名>/vllm_offline/field_metrics.json`。合并目录名带完整基座+实验标识且每 trial 唯一 → **run_dir 互不覆盖**;`result_name` 也因此含模型名。ref 字段抽取结果缓存在数据集级(`<eval_vlm_dataset>/fields_ref.jsonl`),**跨 trial 只抽一次**。
 
 ## 配置要点(详见 config.example.yaml 注释)
 
