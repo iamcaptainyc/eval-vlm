@@ -291,7 +291,8 @@ def _canonical_fields(ref_fields: dict[str, dict[str, list[str]]]) -> list[str]:
 def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                ref_fields: dict[str, dict[str, list[str]]],
                pred_fields: dict[str, dict[str, list[str]]],
-               pred_desc_ids: set[str]) -> tuple[dict, list[dict]]:
+               pred_desc_ids: set[str],
+               pred_text: Optional[dict[str, str]] = None) -> tuple[dict, list[dict]]:
     """逐字段严格相等比对并聚合。返回 (metrics, rows) —— rows 供渲染失配清单。
 
     判定规则:
@@ -301,6 +302,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
       - 两侧都有 -> 逐字段 set(ref)==set(pred) 即对(两侧皆空=对,某字段缺=空集参与)。
     """
     fields = _canonical_fields(ref_fields)
+    pred_text = pred_text or {}
     per_field = {f: {"correct": 0, "total": 0} for f in fields}
     # 逐取值(per-class):{字段: {取值: {correct, support}}}。support=该取值在 ref 出现的样本数,
     # correct=其中 pred 也含该取值的数;accuracy=correct/support(即该取值的召回)。
@@ -361,6 +363,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
             n_exact += 1
         if not all_correct:                 # 只把有失配(含 pred_missing)的 id 列入清单
             rows.append({"id": sid, "images": list(s.images), "state": state,
+                         "pred_desc": pred_text.get(sid, ""),
                          "fields": field_rows})
 
     # 聚合指标
@@ -511,6 +514,12 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
             imgs_html.append(f'<img src="{src}" alt="{_html_escape(img)}" loading="lazy">')
     images_block = f'<div class="images">{"".join(imgs_html)}</div>' if imgs_html else ""
 
+    pred_desc = str(row.get("pred_desc") or "")
+    desc_block = ""
+    if pred_desc:
+        desc_block = ('<div class="pred-desc"><strong>模型描述:</strong><br>'
+                      f'{_html_escape(pred_desc)}</div>')
+
     trs: list[str] = []
     for fr in row["fields"]:
         cls = "ok" if fr["correct"] else "bad"
@@ -526,7 +535,7 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
     card_class = "card pred-missing" if is_missing else "card"
     return (f'<section class="{card_class}" data-bad-fields="{data_attr}">'
             f"<h3>样本 <code>{sid}</code> {tag}</h3>"
-            f"{images_block}{table}</section>")
+            f"{images_block}{desc_block}{table}</section>")
 
 
 def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str:
@@ -548,6 +557,8 @@ header.summary {{ margin-bottom: 20px; padding: 12px 16px; background: #fff;
                     justify-content: center; background: #f2f2f2; color: #999;
                     border: 1px dashed #ccc; font-size: 12px; text-align: center;
                     padding: 8px; box-sizing: border-box; }}
+.pred-desc {{ margin-bottom: 12px; padding: 8px 10px; background: #f7f7f7;
+              border-radius: 4px; white-space: pre-wrap; font-size: 14px; line-height: 1.5; }}
 .lightbox {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85);
              z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }}
 .lightbox img {{ max-width: 96vw; max-height: 96vh; object-fit: contain;
@@ -645,13 +656,14 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
     # ---- B. 抽 pred 字段(运行级)----
     pred_items, pred_images = _pred_items(cfg.predictions_path, desc_turn)
     pred_desc_ids = {sid for sid, _ in pred_items}
+    pred_text = dict(pred_items)
     pred_stats = _extract_batch(pred_items, le, cfg.field_pred_path, cfg.field_pred_failures_path,
                                 label="pred", overwrite=overwrite, images_by_id=pred_images)
 
     # ---- C. 比对 + 聚合 ----
     ref_fields = load_fields(cfg.field_ref_path)
     pred_fields = load_fields(cfg.field_pred_path)
-    metrics, rows = _aggregate(samples, desc_turn, ref_fields, pred_fields, pred_desc_ids)
+    metrics, rows = _aggregate(samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, pred_text)
 
     metrics = {
         "run_name": cfg.run_name,

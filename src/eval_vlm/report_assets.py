@@ -12,8 +12,8 @@ from typing import Optional
 from .config import Config
 from .data.loader import resolve_image_path
 
-MAX_SIDE = 960
-JPEG_QUALITY = 85
+MAX_SIDE = 768
+JPEG_QUALITY = 75
 
 
 def image_ref_to_html_src(img: str, cfg: Config) -> tuple[Optional[str], Optional[str]]:
@@ -44,7 +44,7 @@ def image_ref_to_html_src(img: str, cfg: Config) -> tuple[Optional[str], Optiona
                 scale = MAX_SIDE / max(w, h)
                 im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.BICUBIC)
             buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=JPEG_QUALITY)
+            im.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
         return f"data:image/jpeg;base64,{b64}", None
     except Exception as e:  # noqa: BLE001 - 单张图片失败不应打断整份报告

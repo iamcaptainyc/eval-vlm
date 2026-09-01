@@ -156,6 +156,25 @@ def test_canonical_fields_union_and_fallback():
     assert field_eval._canonical_fields({}) == ["主辅路", "道路结构", "车道位置", "警示标志"]
 
 
+def test_aggregate_includes_pred_desc():
+    """失配行的 rows 里带 pred 描述文本(供 HTML 贴到图片下方)。"""
+    samples = [Sample(id="a")]
+    metrics, rows = field_eval._aggregate(
+        samples, {"a": 1},
+        ref_fields={"a": {"主辅路": ["主路"]}},
+        pred_fields={"a": {"主辅路": ["辅路"]}},        # 错 -> 进 rows
+        pred_desc_ids={"a"},
+        pred_text={"a": "前方是主路,无警示标志。"},
+    )
+    assert rows[0]["pred_desc"] == "前方是主路,无警示标志。"
+    # pred_missing(模型无输出)时 pred_desc 为空
+    metrics2, rows2 = field_eval._aggregate(
+        [Sample(id="b")], {"b": 1},
+        ref_fields={"b": {"主辅路": ["主路"]}},
+        pred_fields={}, pred_desc_ids=set(), pred_text={})
+    assert rows2[0]["pred_desc"] == ""
+
+
 # ---------------------------------------------------------------------------
 # run_field_eval:端到端(monkeypatch load_samples + extract_fields_one)
 # ---------------------------------------------------------------------------
@@ -442,7 +461,7 @@ def test_image_ref_to_html_src_resizes_large(tmp_path):
     import base64
     import io
 
-    from eval_vlm.report_assets import image_ref_to_html_src
+    from eval_vlm.report_assets import image_ref_to_html_src, MAX_SIDE
 
     big = tmp_path / "big.png"
     Image.new("RGB", (2000, 1000), (255, 0, 0)).save(big)
@@ -453,7 +472,7 @@ def test_image_ref_to_html_src_resizes_large(tmp_path):
     assert err is None
     raw = base64.b64decode(src.split(",", 1)[1])
     with Image.open(io.BytesIO(raw)) as im:
-        assert max(im.size) <= 960                        # 长边被缩到上限内
+        assert max(im.size) <= MAX_SIDE                   # 长边被缩到上限内
 
 
 def test_image_ref_to_html_src_missing_file(tmp_path):
@@ -537,3 +556,24 @@ def test_render_mismatch_card_missing_image_placeholder(tmp_path):
     card = field_eval._render_mismatch_card(row, cfg)
     assert 'class="img-placeholder"' in card
     assert "nope.png" in card
+
+
+def test_render_mismatch_card_shows_pred_desc():
+    """模型预测的描述贴在图片下方(仅 pred 描述,不含 ref)。"""
+    cfg = Config()
+    row = {"id": "a", "images": [], "state": "compared",
+           "pred_desc": "前方是主路,无警示标志。",
+           "fields": [{"field": "主辅路", "ref": ["主路"], "pred": ["辅路"], "correct": False}]}
+    card = field_eval._render_mismatch_card(row, cfg)
+    assert "模型描述" in card
+    assert "前方是主路,无警示标志。" in card
+    assert 'class="pred-desc"' in card
+
+
+def test_render_mismatch_card_no_desc_when_empty():
+    """pred 无描述(pred_missing / 空文本)时不渲染描述块。"""
+    cfg = Config()
+    row = {"id": "c", "images": [], "state": "pred_missing", "pred_desc": "",
+           "fields": [{"field": "主辅路", "ref": ["主路"], "pred": [], "correct": False}]}
+    card = field_eval._render_mismatch_card(row, cfg)
+    assert "模型描述" not in card
