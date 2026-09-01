@@ -542,12 +542,16 @@ header.summary {{ margin-bottom: 20px; padding: 12px 16px; background: #fff;
          padding: 16px; margin-bottom: 16px; }}
 .card.pred-missing {{ border-left: 4px solid #d9822b; }}
 .images {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }}
-.images img {{ max-width: 280px; max-height: 280px; object-fit: contain;
-               border: 1px solid #ccc; border-radius: 4px; }}
-.img-placeholder {{ width: 280px; height: 120px; display: flex; align-items: center;
+.images img {{ max-width: 100%; max-height: 560px; width: auto; object-fit: contain;
+               border: 1px solid #ccc; border-radius: 4px; cursor: zoom-in; }}
+.img-placeholder {{ width: 560px; max-width: 100%; height: 120px; display: flex; align-items: center;
                     justify-content: center; background: #f2f2f2; color: #999;
                     border: 1px dashed #ccc; font-size: 12px; text-align: center;
                     padding: 8px; box-sizing: border-box; }}
+.lightbox {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85);
+             z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }}
+.lightbox img {{ max-width: 96vw; max-height: 96vh; object-fit: contain;
+                 box-shadow: 0 0 24px rgba(0,0,0,.5); }}
 table {{ border-collapse: collapse; width: 100%; }}
 th, td {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 14px; }}
 td.ok {{ color: #1a7f37; font-weight: 600; }}
@@ -596,10 +600,23 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
   }
   cb.addEventListener('change', apply);
   sel.addEventListener('change', apply);
+
+  // 点击图片放大查看(lightbox),再点关闭
+  var lb = document.getElementById('lightbox');
+  var lbImg = document.getElementById('lightbox-img');
+  document.querySelectorAll('.images img').forEach(function (img) {
+    img.addEventListener('click', function () {
+      lbImg.src = img.src;
+      lb.style.display = 'flex';
+    });
+  });
+  lb.addEventListener('click', function () { lb.style.display = 'none'; });
 })();
 </script>"""
 
-    return header + filters + cards + "</div>" + script + "</body></html>"
+    return (header + filters + cards + "</div>" + script
+            + '<div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>'
+            + "</body></html>")
 
 
 # ---------------------------------------------------------------------------
