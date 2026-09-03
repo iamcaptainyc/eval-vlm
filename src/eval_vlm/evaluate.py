@@ -16,6 +16,10 @@ from .data.loader import load_samples
 from .report_assets import image_ref_to_html_src
 from .results import store
 from .scoring import Scorer, get_scorer
+from .scoring.confusion_matrix import (
+    format_confusion_matrix_html,
+    format_confusion_matrix_markdown,
+)
 
 
 def _scorer_for(ordinal: int, default_name: str, turn_names: list[str],
@@ -159,9 +163,12 @@ def _render_summary(metrics: dict) -> str:
         lines.append("| 指标 | 值 |")
         lines.append("| --- | --- |")
         for k, v in agg.items():
-            if k == "scorer":
+            if k in ("scorer", "confusion_matrix"):
                 continue
             lines.append(f"| {k} | {v} |")
+        if agg.get("confusion_matrix"):
+            lines.append("")
+            lines.append(format_confusion_matrix_markdown(agg["confusion_matrix"]))
     lines.append("")
     return "\n".join(lines)
 
@@ -445,6 +452,19 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
 #filters label {{ font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; }}
 #flt-search {{ padding: 4px 10px; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; width: 220px; }}
 .empty-notice {{ padding: 20px; background: #dafbe1; color: #1a7f37; border-radius: 8px; font-size: 15px; font-weight: 500; }}
+.cm-section {{ background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
+.cm-section h3 {{ margin: 0 0 12px 0; font-size: 16px; color: #24292f; }}
+.cm-table-wrapper, .cm-report-wrapper {{ overflow-x: auto; margin-bottom: 12px; }}
+.cm-table, .cm-report-table {{ border-collapse: collapse; width: 100%; font-size: 13px; text-align: right; margin-bottom: 8px; }}
+.cm-table th, .cm-table td, .cm-report-table th, .cm-report-table td {{ border: 1px solid #d0d7de; padding: 6px 10px; }}
+.cm-table th, .cm-report-table th {{ background: #f6f8fa; color: #24292f; font-weight: 600; text-align: center; }}
+.cm-table th.row-label {{ text-align: left; background: #f6f8fa; font-weight: 600; }}
+.cm-report-table td.cat-name {{ text-align: left; font-weight: 600; }}
+.cm-table td {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }}
+.cm-diag {{ background: #dafbe1; color: #1a7f37; font-weight: 700; }}
+.cm-zero {{ color: #8c959f; }}
+.cm-total {{ background: #f6f8fa; font-weight: 600; color: #57606a; }}
+.cm-total-all {{ background: #eaeef2; font-weight: 700; color: #24292f; }}
 .lightbox {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }}
 .lightbox img {{ max-width: 96vw; max-height: 96vh; object-fit: contain; box-shadow: 0 0 24px rgba(0,0,0,.6); }}
 </style></head><body>
@@ -455,6 +475,14 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
 <p>未命中样本: <strong>{len(failed_ids)}</strong> / 已评 {metrics.get('num_samples', 0)} (涉及 {metrics.get('num_failed_targets', 0)} 个错误目标轮) &nbsp; 总体均分: {metrics.get('overall_mean_score', 0.0)}</p>
 </header>
 """
+    # 混淆矩阵展示 (若有)
+    for turn_key, turn_data in (metrics.get("per_turn") or {}).items():
+        if "confusion_matrix" in turn_data:
+            header += format_confusion_matrix_html(
+                turn_data["confusion_matrix"],
+                title=f"混淆矩阵 — {turn_key} (scorer: {turn_data.get('scorer', '')})",
+            )
+
     if not failed_ids:
         return header + '<p class="empty-notice">✅ 无 exact_match 未命中。</p></body></html>'
 

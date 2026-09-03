@@ -99,3 +99,40 @@ def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
     assert metrics["num_failed_samples"] == 0       # 但非 exact_match -> 不计入
     assert "无 exact_match 未命中" in cfg.failures_path.read_text(encoding="utf-8")
     assert "无 exact_match 未命中" in cfg.failures_html_path.read_text(encoding="utf-8")
+
+
+def test_confusion_matrix_in_summary_and_html(messages_config, monkeypatch):
+    """分类任务下 score 阶段自动输出混淆矩阵至 metrics.json / summary.md / failures.html。"""
+    cfg = messages_config
+    split_dataset(cfg)
+
+    # 修改 test.json 中的 reference，使其具备多类别（"cat", "dog"）
+    test_data = json.loads(cfg.test_path.read_text(encoding="utf-8"))
+    for idx, rec in enumerate(test_data):
+        rec["messages"][1]["content"] = "cat" if idx % 2 == 0 else "dog"
+    cfg.test_path.write_text(json.dumps(test_data, ensure_ascii=False), encoding="utf-8")
+
+    # 模拟预测结果：部分预测对，部分预测为未知的 "bird"
+    def mock_pred(self, context, images, sample_id, expected=None):
+        ans = "cat" if sample_id.endswith("0") else "bird"
+        return Prediction(id=sample_id, prediction=ans)
+
+    monkeypatch.setattr(FakeBackend, "complete", mock_pred)
+    run_inference(cfg)
+    metrics = score_predictions(cfg)
+
+    turn_0 = metrics["per_turn"]["turn_0"]
+    assert "confusion_matrix" in turn_0
+    assert turn_0["confusion_matrix"]["ref_classes"] == ["cat", "dog"]
+
+    # summary.md 包含 Markdown 混淆矩阵表格与指标详情
+    summary_text = cfg.summary_path.read_text(encoding="utf-8")
+    assert "#### 混淆矩阵 (Confusion Matrix)" in summary_text
+    assert "Classification Report" in summary_text
+
+    # failures.html 包含 HTML 混淆矩阵组件与对角线高亮
+    html_text = cfg.failures_html_path.read_text(encoding="utf-8")
+    assert '<table class="cm-table">' in html_text
+    assert "cm-diag" in html_text
+    assert '<table class="cm-report-table">' in html_text
+

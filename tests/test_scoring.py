@@ -226,3 +226,92 @@ def test_contain_acc_skipped_when_no_reference():
     r = sc.score_one("anything", None, _sample())
     assert r.detail.get("skipped") is True
 
+
+# ---- 混淆矩阵 (Confusion Matrix) ----
+
+def test_compute_confusion_matrix_basic():
+    from eval_vlm.scoring.confusion_matrix import compute_confusion_matrix
+    pairs = [
+        ("car", "car"),
+        ("car", "car"),
+        ("car", "bus"),
+        ("bus", "bus"),
+        ("bus", "car"),
+        ("bus", "truck"),  # truck 在已知类别中
+        ("truck", "truck"),
+        ("truck", "bike"),  # bike 不在真值类别中 -> 归入 (其他)
+    ]
+    cm = compute_confusion_matrix(pairs)
+    assert cm is not None
+    assert cm["ref_classes"] == ["bus", "car", "truck"]
+    assert cm["classes"] == ["bus", "car", "truck", "(其他)"]
+    # 行: bus, car, truck
+    # bus行: [bus: 1, car: 1, truck: 1, 其他: 0] -> sum = 3
+    assert cm["matrix"][0] == [1, 1, 1, 0]
+    # car行: [bus: 1, car: 2, truck: 0, 其他: 0] -> sum = 3
+    assert cm["matrix"][1] == [1, 2, 0, 0]
+    # truck行: [bus: 0, car: 0, truck: 1, 其他: 1] -> sum = 2
+    assert cm["matrix"][2] == [0, 0, 1, 1]
+
+    # 指标验证
+    assert cm["per_class"]["car"]["support"] == 3
+    assert cm["per_class"]["car"]["recall"] == round(2 / 3, 4)
+    assert cm["per_class"]["car"]["precision"] == round(2 / 3, 4)  # 预测car的有 bus(1) + car(2) = 3
+    assert cm["per_class"]["truck"]["support"] == 2
+    assert cm["per_class"]["truck"]["recall"] == 0.5  # 1/2
+    assert cm["accuracy"] == 0.5  # 4/8
+
+
+def test_confusion_matrix_thresholds():
+    from eval_vlm.scoring.confusion_matrix import compute_confusion_matrix
+    # 类别数 < 2 -> None
+    assert compute_confusion_matrix([("single", "single")]) is None
+    assert compute_confusion_matrix([]) is None
+
+    # 类别数 > max_classes -> None
+    many_pairs = [(f"class_{i}", f"class_{i}") for i in range(55)]
+    assert compute_confusion_matrix(many_pairs, max_classes=50) is None
+
+
+def test_confusion_matrix_formatters():
+    from eval_vlm.scoring.confusion_matrix import (
+        compute_confusion_matrix,
+        format_confusion_matrix_text,
+        format_confusion_matrix_markdown,
+        format_confusion_matrix_html,
+    )
+    pairs = [("A", "A"), ("A", "B"), ("B", "B"), ("B", "C")]
+    cm = compute_confusion_matrix(pairs)
+    assert cm is not None
+
+    text = format_confusion_matrix_text(cm)
+    assert "真实 \\ 预测" in text
+    assert "Macro Avg" in text
+    assert "Classification Report" in text
+
+    md = format_confusion_matrix_markdown(cm)
+    assert "#### 混淆矩阵 (Confusion Matrix)" in md
+    assert "| 真实 \\ 预测 |" in md
+    assert "##### 分类指标详情" in md
+
+    html_str = format_confusion_matrix_html(cm)
+    assert '<table class="cm-table">' in html_str
+    assert 'class="cm-diag"' in html_str
+    assert '<table class="cm-report-table">' in html_str
+
+
+def test_exact_match_scorer_generates_confusion_matrix():
+    sc = get_scorer("exact_match")
+    s = _sample()
+    results = [
+        sc.score_one("A", "A", s),
+        sc.score_one("B", "A", s),
+        sc.score_one("B", "B", s),
+    ]
+    agg = sc.aggregate(results)
+    assert "confusion_matrix" in agg
+    cm = agg["confusion_matrix"]
+    assert cm["ref_classes"] == ["a", "b"]
+    assert cm["accuracy"] == round(2 / 3, 4)
+
+

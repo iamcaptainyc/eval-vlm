@@ -228,6 +228,13 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
               f"(共 {metrics.get('num_failed_targets', 0)} 个错误轮),"
               f"人类可读清单 -> {cfg.failures_path}")
         print(f"[score] 错误样本可视化(HTML,含图片) -> {cfg.failures_html_path}")
+    for turn_key, turn_data in per_turn.items():
+        if "confusion_matrix" in turn_data:
+            from .scoring.confusion_matrix import format_confusion_matrix_text
+            print(format_confusion_matrix_text(
+                turn_data["confusion_matrix"],
+                title=f"混淆矩阵 — {turn_key} (scorer: {turn_data.get('scorer', '')})",
+            ))
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     return metrics
 
@@ -280,10 +287,11 @@ def _pred_dataset(args: argparse.Namespace) -> int:
 
 def _cmd_score(args: argparse.Namespace) -> int:
     folder = _resolve_folder(args)
-    persisted = _persist_overrides(folder, args)      # --scorer 永久写回
+    persisted = _persist_overrides(folder, args)      # --scorer 等永久写回
     cfg = load_dataset_config(folder)
     _report_persist("score", persisted, folder)
     _do_score(cfg, args.scorer)
+    _maybe_generate_mnn_report(cfg)
     return 0
 
 
@@ -630,6 +638,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     p_score.add_argument("--scorer", default=None,
                          help=f"临时覆盖评分器。可用: {', '.join(available_scorers())}")
+    p_score.add_argument("--backend", default=None,
+                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                         help="临时覆盖推理后端(写回 inference.backend);定位对应后端的 predictions.jsonl")
+    p_score.add_argument("--mnn-config", dest="mnn_config", default=None,
+                         help="backend=mnn 时:转换产物目录里 config.json 路径(写回 inference.mnn.config_path)")
     _add_workspace_arg(p_score)
     p_score.set_defaults(func=_cmd_score)
 

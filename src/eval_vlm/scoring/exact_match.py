@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..data.schema import Sample
 from .base import ScoreResult, Scorer
+from .confusion_matrix import compute_confusion_matrix
 from .registry import register
 
 _PUNCT_TABLE = {ord(c): " " for c in string.punctuation}
@@ -45,6 +46,8 @@ class ExactMatchScorer(Scorer):
                 "contains": contains,
                 "prediction_norm": pred_n,
                 "reference_norm": ref_n,
+                "prediction_raw": prediction,
+                "reference_raw": reference,
             },
         )
 
@@ -55,4 +58,16 @@ class ExactMatchScorer(Scorer):
         contains = sum(r.detail.get("contains", 0.0) for r in valid) / n if n else 0.0
         base["accuracy"] = base.pop("mean_score")  # exact_match 下主指标即 accuracy
         base["contains_rate"] = round(contains, 4)
+
+        # 针对分类任务计算混淆矩阵 (2 <= 独立类别 <= 50)
+        pairs = []
+        for r in valid:
+            ref = r.detail.get("reference_norm")
+            pred = r.detail.get("prediction_norm")
+            if ref is not None:
+                pairs.append((str(ref), str(pred) if pred is not None else ""))
+        cm = compute_confusion_matrix(pairs)
+        if cm is not None:
+            base["confusion_matrix"] = cm
+
         return base
