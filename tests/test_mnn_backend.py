@@ -579,3 +579,101 @@ def test_parser_pred_mnn_flags():
     # vllm 别名也能解析
     args2 = parser.parse_args(["pred", "--datadir", "imgs", "--backend", "vllm"])
     assert args2.backend == "vllm" and args2.mnn_config is None
+
+
+# ---------------------------------------------------------------------------
+# 推理性能指标统计与报告生成测试
+# ---------------------------------------------------------------------------
+def test_generate_mnn_inference_report(tmp_path):
+    import json
+    from eval_vlm.inference.mnn_backend import MNNBackend, generate_mnn_inference_report
+
+    pred_file = tmp_path / "predictions.jsonl"
+    lines = [
+        json.dumps({
+            "id": "s1", "latency": 10.0, "error": None,
+            "raw": {
+                "backend": "mnn", "prompt_len": 100, "gen_seq_len": 50,
+                "vision_us": 2000000, "prefill_us": 3000000, "decode_us": 4000000,
+            }
+        }),
+        json.dumps({
+            "id": "s2", "latency": 5.0, "error": None,
+            "raw": {
+                "backend": "mnn", "prompt_len": 80, "gen_seq_len": 1,
+                "vision_us": 1000000, "prefill_us": 1500000, "decode_us": 0,
+            }
+        }),
+        json.dumps({
+            "id": "s3", "latency": None, "error": "timeout",
+            "raw": {"backend": "mnn"}
+        }),
+    ]
+    pred_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    summary, report = generate_mnn_inference_report(pred_file, out_dir=tmp_path, print_report=False)
+    assert summary["samples"]["total"] == 3
+    assert summary["samples"]["analyzed"] == 2
+    assert summary["samples"]["skipped"] == 1
+    assert "error field: timeout" in summary["samples"]["skip_reasons"]
+
+    # 校验各指标存在
+    m = summary["metrics"]
+    assert "vision_s" in m and "prefill_s" in m and "ttft_s" in m
+    assert "tpot_ms" in m and "e2e_s" in m and "decode_tps" in m and "prefill_tps" in m
+    assert m["vision_s"]["count"] == 2
+    assert m["vision_s"]["min"] == 1.0
+    assert m["vision_s"]["max"] == 2.0
+    assert m["tpot_ms"]["count"] == 2  # s2 gen_seq_len=1 时 tpot_ms 为 0.0
+
+    # 校验产物落盘
+    assert (tmp_path / "infer_stats.txt").exists()
+    assert (tmp_path / "infer_stats.json").exists()
+    assert "VLM inference metrics summary" in report
+
+    # 校验 MNNBackend 静态方法委托
+    summary2, _ = MNNBackend.generate_inference_report(pred_file, out_dir=tmp_path, print_report=False)
+    assert summary2["samples"]["analyzed"] == 2
+
+
+def test_maybe_generate_mnn_report(tmp_path):
+    import json
+    from eval_vlm.cli import _maybe_generate_mnn_report
+    from eval_vlm.config import Config
+
+    cfg = Config()
+    cfg.run_dir_path = tmp_path
+    cfg.inference.backend = "mnn"
+    cfg.inference.mnn.config_path = str(tmp_path / "test_model" / "config.json")
+
+    # predictions.jsonl 尚不存在时不执行
+    assert _maybe_generate_mnn_report(cfg) is None
+
+    # 创建 predictions.jsonl
+    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({
+            "id": "s1", "latency": 2.0, "error": None,
+            "raw": {
+                "backend": "mnn", "prompt_len": 50, "gen_seq_len": 10,
+                "vision_us": 500000, "prefill_us": 500000, "decode_us": 1000000,
+            }
+        })
+    ]
+    cfg.predictions_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    res = _maybe_generate_mnn_report(cfg)
+    assert res is not None
+    assert res["samples"]["analyzed"] == 1
+    assert cfg.infer_stats_txt_path.exists()
+    assert cfg.infer_stats_json_path.exists()
+
+    # 非 mnn 后端且 predictions 纯无 mnn 特征时不生成
+    cfg_other = Config()
+    cfg_other.run_dir_path = tmp_path / "other"
+    cfg_other.inference.backend = "openai"
+    cfg_other.inference.openai.model = "gpt4"
+    cfg_other.run_dir.mkdir(parents=True, exist_ok=True)
+    cfg_other.predictions_path.write_text(json.dumps({"id": "1", "prediction": "hi"}) + "\n", encoding="utf-8")
+    assert _maybe_generate_mnn_report(cfg_other) is None
+

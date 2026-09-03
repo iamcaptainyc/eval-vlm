@@ -107,7 +107,13 @@ eval_env_vars:
 # --- Optuna ---
 optuna:
   n_trials: 20
-  study_name: Qwen3_5_0_8B_4dimroad
-  storage: null                # null => 自动用 sqlite:///<work_root>/study.db(断点续跑);也可自填
+  # 实验标识:共享 storage 时**必须**给每个实验一个唯一 study_name(否则默认 'autotune' 会把
+  # 不同实验静默续进同一 study)。建议纯实验标签、不含模型名——模型名由驱动器自动拼进
+  # trial 目录名(study 名里再带模型会导致目录里模型名出现两次)。
+  study_name: 4dimroad_v2
+  # 共享 db:多个 study 把 storage 填成**同一个 sqlite 路径**即共用一个 db,用
+  # optuna-dashboard <该db路径> 统一监控所有实验;驱动器启动时会列出该 db 内全部 study。
+  # 留 null 则落到 <work_root>/study.db(单实验场景,断点续跑照常)。
+  storage: /root/autodl-tmp/autotune_runs/study.db
   sampler: tpe                 # tpe(贝叶斯,推荐)| random
   seed: 42

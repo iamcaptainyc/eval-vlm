@@ -26,9 +26,10 @@ cp config.example.yaml config.yaml   # 按注释填好服务器上的真实路�
 conda run -n <driver_env> python tune.py --config config.yaml
 ```
 
-- **断点续跑**:重跑同一命令即可。`n_trials` 是**总预算**——已终结(完成/剪枝/失败)的 trial 都计入,本次只补齐到总数(不是每次都新跑 `n_trials` 个)。study 持久化在 `<work_root>/study.db`。要多做试验就调大 `n_trials`。
+- **断点续跑**:重跑同一命令即可。`n_trials` 是**总预算**——已终结(完成/剪枝/失败)的 trial 都计入,本次只补齐到总数(不是每次都新跑 `n_trials` 个)。study 持久化在 `optuna.storage` 指定的 sqlite 里(默认 `<work_root>/study.db`)。要多做试验就调大 `n_trials`。
 - **临时改 trial 数**:`--n-trials 5`。
-- **看结果**:`<work_root>/leaderboard.csv`(每 trial 一行:目标值、逐字段准确率、超参、合并权重路径);跑完终端打印最优 trial 的超参与逐字段准确率、最优合并权重目录。
+- **看结果**:`<work_root>/leaderboard.csv`(每 trial 一行:study、模型、启动时间、目标值、逐字段准确率、超参、合并权重路径);跑完终端打印最优 trial 的超参与逐字段准确率、最优合并权重目录。
+- **统一监控(多 study 共用一个 db)**:把多个 config 的 `optuna.storage` 填成**同一个 sqlite 路径**,各配唯一 `study_name` 即可;驱动器启动时会打印该 db 内全部 study,用 `optuna-dashboard <db路径>` 一个页面看所有实验。
 
 ## 每个 trial 的产物
 
@@ -37,7 +38,7 @@ conda run -n <driver_env> python tune.py --config config.yaml
   <基座名>_<study名>_trial_0007/          # 合并后全精度权重(eval-vlm 加载它)
   <基座名>_<study名>_trial_0007.merge.yaml # 本 trial 的合并配置(留存,可复现)
 ```
-命名规则 = **基座模型名(特殊符号全部折 `_`,如 Qwen3.5-0.8B → Qwen3_5_0_8B) + study 名 + trial 序号**,例如 `Qwen3_5_0_8B_Qwen3_5_0_8B_4dimroad_trial_0007`——每个 trial 唯一,且同一 `work_root` 下不同实验(不同 study 名)互不撞名。训练用的 LoRA adapter 是**临时目录**(`.<同上>.adapter/`),合并成功后自动删除——只保留合并权重,省磁盘。
+命名规则 = **基座模型名(特殊符号全部折 `_`,如 Qwen3.5-0.8B → Qwen3_5_0_8B) + study 名 + trial 序号 + 启动时间(本地 `YYYYMMDD_HHMMSS`)**,例如 `Qwen3_5_0_8B_4dimroad_v2_trial_0007_20260901_143025`——每个 trial 唯一(时间戳可追溯"何时跑的"),且同一 `work_root` 下不同实验(不同 study 名)互不撞名。训练用的 LoRA adapter 是**临时目录**(`.<同上>.adapter/`),合并成功后自动删除——只保留合并权重,省磁盘。
 
 评测结果在 eval-vlm 侧:`<eval_vlm_dataset>/<上述目录名>/vllm_offline/field_metrics.json`。合并目录名带完整基座+实验标识且每 trial 唯一 → **run_dir 互不覆盖**;`result_name` 也因此含模型名。ref 字段抽取结果缓存在数据集级(`<eval_vlm_dataset>/fields_ref.jsonl`),**跨 trial 只抽一次**。
 
@@ -52,4 +53,5 @@ conda run -n <driver_env> python tune.py --config config.yaml
 
 - **显存**:训练与离线 vLLM 都吃满卡,但各步是独立子进程、结束即释放,串行天然错开。若 export/eval OOM,调低 `eval.gpu_memory_utilization`。
 - **某 trial 训练/合并/评测报错**:该 trial 被标记为 pruned(错误记进 `trial.user_attrs['error']`),不影响其余 trial;修好后重跑续跑即可。
+- **共享 db 的 study 冲突警告**:续跑时若配置的 `base_model`/`eval_vlm_dataset` 与 study 首次创建时不同,驱动器会打印 ⚠️ 警告——通常意味着你把两个不同实验误续进了同一 study(共享 db 下最易踩)。确认是要续跑本实验再继续;否则换一个 `study_name` 重新起。
 - **多保真度提速**(可选):把 `search_space` 里 `num_train_epochs` 调小、或先用小 `n_trials` 粗筛,再对好区间细搜。

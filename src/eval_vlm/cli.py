@@ -231,6 +231,35 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
     return metrics
 
 
+def _maybe_generate_mnn_report(cfg: Config) -> Optional[dict]:
+    """若存在 predictions.jsonl 且为 mnn 后端(或含 mnn 计时)，自动生成推理性能报告。"""
+    if not cfg.predictions_path.exists():
+        return None
+    is_mnn = (cfg.inference.backend == "mnn")
+    if not is_mnn:
+        try:
+            with open(cfg.predictions_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        obj = json.loads(line)
+                        raw = obj.get("raw") or {}
+                        if raw.get("backend") == "mnn" or "vision_us" in raw:
+                            is_mnn = True
+                        break
+        except Exception:
+            pass
+    if not is_mnn:
+        return None
+    from .inference.mnn_backend import generate_mnn_inference_report
+    try:
+        summary, _ = generate_mnn_inference_report(cfg.predictions_path, out_dir=cfg.run_dir, print_report=True)
+        return summary
+    except Exception as e:
+        print(f"[infer_stats] 性能分析跳过: {e}", file=sys.stderr)
+        return None
+
+
 def _pred_dataset(args: argparse.Namespace) -> int:
     """pred --dataset:对已有数据集的 test.json 执行推理(只预测,不评分)。
 
@@ -244,6 +273,7 @@ def _pred_dataset(args: argparse.Namespace) -> int:
     print(f"[pred] 数据集预测,模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg)
     _maybe_label_extract(cfg, args)
+    _maybe_generate_mnn_report(cfg)
     return 0
 
 
@@ -298,6 +328,7 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
             print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
     print(f"[field-eval] 失配清单(HTML,含图片) -> {cfg.field_mismatches_html_path}")
+    _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "field-eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
             "metrics": metrics, "report": str(cfg.field_summary_path)}
@@ -325,6 +356,7 @@ def run_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     _do_run(cfg, "eval")
     metrics = _do_score(cfg, args.scorer)
+    _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
             "metrics": metrics, "report": str(cfg.summary_path)}
@@ -511,7 +543,7 @@ def _cmd_infer(args: argparse.Namespace) -> int:
         print(f"[infer] 推理失败: {pred.error}", file=sys.stderr)
         return 1
     # print(pred.prediction or "")
-    return 0
+    return pred
 
 
 # ---------------------------------------------------------------------------

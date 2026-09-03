@@ -534,6 +534,14 @@ class Config:
         return self.run_dir / "summary.md"
 
     @property
+    def infer_stats_txt_path(self) -> Path:
+        return self.run_dir / "infer_stats.txt"
+
+    @property
+    def infer_stats_json_path(self) -> Path:
+        return self.run_dir / "infer_stats.json"
+
+    @property
     def run_meta_path(self) -> Path:
         return self.run_dir / "run_meta.json"
 

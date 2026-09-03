@@ -24,6 +24,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -93,6 +94,28 @@ def safe_name(s: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "_", s).strip("_") or "model"
 
 
+def _trial_time(trial: "optuna.Trial") -> str:
+    """trial 启动时间(本地),格式 %Y%m%d_%H%M%S——全 [0-9A-Za-z_],与 safe_name 幂等。
+
+    optuna 的 datetime_start 是 UTC,这里转本地(服务器时区);未启动/时区缺失回退 now。
+    """
+    t = getattr(trial, "datetime_start", None)
+    if t is None or t.tzinfo is None:
+        t = datetime.now().astimezone()
+    else:
+        t = t.astimezone()
+    return t.strftime("%Y%m%d_%H%M%S")
+
+
+def trial_artifact_tag(base_tag: str, study_tag: str, number: int, started_at: str) -> str:
+    """trial 产物目录名 = 基座名_study名_trial_序号_时间(全 [0-9A-Za-z_],eval-vlm 幂等)。
+
+    序号在前、时间在后,目录按 trial 序号排,一眼看出是第几个 + 何时跑的;时间戳保证
+    共享 db/共享 work_root 下每 trial 唯一。
+    """
+    return f"{base_tag}_{study_tag}_trial_{number:04d}_{started_at}"
+
+
 _METRIC_MAP = {
     "field_exact_match": "exact_match_rate",
     "field_micro": "micro_accuracy",
@@ -113,8 +136,10 @@ def read_metric(run_dir: Path, objective: dict, field_eval: bool) -> tuple[float
 
 
 # leaderboard 固定列(与 field_eval 开关无关的稳定超集,避免续跑切换模式时列错位)
-_LEADERBOARD_FIELDS = ["trial", "objective", "exact_match_rate", "micro_accuracy",
-                       "macro_accuracy", "per_field", "params", "merged_dir"]
+# 头部 study/model/started_at 标识该行属于哪个实验——多 study 共享 work_root/db 时行才可分辨。
+_LEADERBOARD_FIELDS = ["study", "model", "started_at", "trial", "objective",
+                       "exact_match_rate", "micro_accuracy", "macro_accuracy",
+                       "per_field", "params", "merged_dir"]
 
 
 def append_leaderboard(path: Path, row: dict) -> None:
@@ -170,10 +195,12 @@ def build_objective(cfg: dict):
         alpha_ratio = cfg.get("lora_alpha_ratio")
         if alpha_ratio and "lora_rank" in params:
             params["lora_alpha"] = int(round(alpha_ratio * params["lora_rank"]))
-        # merged 目录名 = 基座名_study名_trial_000N:同一 work_root 下不同实验不撞名;
-        # eval-vlm 的 result_name(取目录名)随之带全基座+实验标识。adapter 为临时产物,
+        # merged 目录名 = 基座名_study名_trial_000N_时间:同一 work_root 下不同实验不撞名;
+        # 时间戳(trial 启动的本地时间)让目录唯一、可追溯"何时跑的";eval-vlm 的
+        # result_name(取目录名)随之带全基座+实验标识。adapter 为临时产物,
         # 合并成功后删除,只留合并权重。
-        trial_tag = f"{base_tag}_{study_tag}_trial_{trial.number:04d}"
+        started_at = _trial_time(trial)
+        trial_tag = trial_artifact_tag(base_tag, study_tag, trial.number, started_at)
         merged_dir = work_root / trial_tag
         adapter_dir = work_root / f".{trial_tag}.adapter"     # 临时:合并后删
         merge_path = work_root / f"{trial_tag}.merge.yaml"    # 小配置,留存供复现
@@ -233,7 +260,10 @@ def build_objective(cfg: dict):
         # 记录 + leaderboard
         trial.set_user_attr("params", params)
         trial.set_user_attr("merged_dir", str(merged_dir))
-        row = {"trial": trial.number, "objective": round(value, 4)}
+        row = {"study": cfg["optuna"].get("study_name", "autotune"),
+               "model": Path(cfg["base_model"]).name,
+               "started_at": started_at,
+               "trial": trial.number, "objective": round(value, 4)}
         if field_eval:
             ov = metrics.get("overall", {})
             per_field = {k: v["accuracy"] for k, v in metrics.get("per_field", {}).items()}
@@ -252,6 +282,44 @@ def build_objective(cfg: dict):
     return objective
 
 
+def create_or_load_study(cfg: dict, storage: str, sampler, direction: str) -> "optuna.Study":
+    """创建/续跑 study(load_if_exists),并做共享 db 的辅助:列出全部 study + 校验签名。
+
+    同一 sqlite 天然可容纳多个 study;共享时用 optuna-dashboard <db> 统一监控。签名
+    (base_model + eval_vlm_dataset) 记在 study.user_attrs:续跑若与首次创建时不同,大声
+    警告——默认 study_name='autotune' 最易把两个不同实验静默续进同一 study。
+    """
+    oc = cfg["optuna"]
+    study = optuna.create_study(
+        study_name=oc.get("study_name", "autotune"),
+        storage=storage,
+        sampler=sampler,
+        direction=direction,
+        load_if_exists=True,   # 断点续跑
+    )
+    # 共享 db 监控:启动时列出该 db 内全部 study。
+    try:
+        summaries = optuna.get_all_study_summaries(storage)
+    except Exception:  # noqa: BLE001 - 只读辅助,失败不阻塞主流程
+        summaries = []
+    if len(summaries) > 1:
+        db_path = storage.replace("sqlite:///", "")
+        print(f"[autotune] storage 共享 {len(summaries)} 个 study"
+              f"(统一监控: optuna-dashboard {db_path})")
+        for s in summaries:
+            print(f"    · {s.study_name}: trials={s.n_trials}")
+    # study 签名防护。
+    sig = {"base_model": cfg["base_model"], "eval_vlm_dataset": cfg["eval_vlm_dataset"]}
+    prev_sig = study.user_attrs.get("_study_sig")
+    if prev_sig and prev_sig != sig:
+        print(f"[autotune] ⚠️ 警告:study '{study.study_name}' 已存在,但本次配置的 "
+              f"base_model/eval_vlm_dataset 与首次创建时不同({prev_sig} vs {sig})——"
+              f"继续会把两个不同实验混进同一 study!确认是续跑本实验再继续。", flush=True)
+    if not prev_sig:
+        study.set_user_attr("_study_sig", sig)
+    return study
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="LlamaFactory + eval-vlm 自动超参搜索(Optuna)")
     ap.add_argument("--config", required=True, help="config.yaml 路径")
@@ -268,13 +336,8 @@ def main() -> int:
     sampler = (optuna.samplers.TPESampler(seed=oc.get("seed"))
                if oc.get("sampler", "tpe") == "tpe"
                else optuna.samplers.RandomSampler(seed=oc.get("seed")))
-    study = optuna.create_study(
-        study_name=oc.get("study_name", "autotune"),
-        storage=storage,
-        sampler=sampler,
-        direction=cfg["objective"].get("direction", "maximize"),
-        load_if_exists=True,   # 断点续跑
-    )
+    study = create_or_load_study(cfg, storage, sampler,
+                                 cfg["objective"].get("direction", "maximize"))
     n_trials = args.n_trials if args.n_trials is not None else oc.get("n_trials", 20)
     # 续跑语义:n_trials 是**总预算**。已终结(完成/剪枝/失败)的 trial 都计入,
     # 本次只补齐到总数,而不是每次都新跑 n_trials 个(Optuna 的 optimize 本身没有这个语义)。
