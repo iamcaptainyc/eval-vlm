@@ -261,15 +261,15 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
         '.cm-pill-btn.active { background: #2563eb; color: #ffffff; box-shadow: 0 2px 6px rgba(37,99,235,0.28); }',
         '.cm-colorbar-wrap { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #64748b; margin-left: auto; }',
         '.cm-cb-gradient { width: 95px; height: 12px; border-radius: 3px; background: linear-gradient(to right, #f8fafc 0%, hsl(215, 85%, 85%) 25%, hsl(215, 85%, 55%) 70%, hsl(215, 85%, 35%) 100%); border: 1px solid #cbd5e1; }',
-        '.cm-layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }',
-        '.cm-matrix-container { flex: 1 1 540px; min-width: 320px; }',
-        '.cm-axis-top { text-align: center; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: #475569; margin-bottom: 6px; }',
+        '.cm-layout { display: flex; flex-direction: column; gap: 20px; }',
+        '.cm-matrix-container { width: 100%; }',
+        '.cm-axis-top { text-align: center; font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px; color: #475569; margin-bottom: 8px; }',
         '.cm-table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #d0d7de; }',
         '.cm-table { border-collapse: separate; border-spacing: 2px; width: 100%; font-size: 13px; background: #f1f5f9; }',
-        '.cm-table th, .cm-table td { padding: 8px 10px; text-align: center; border-radius: 4px; }',
-        '.cm-table thead th { background: #ffffff; color: #1e293b; font-weight: 600; border-bottom: 2px solid #cbd5e1; }',
+        '.cm-table th, .cm-table td { padding: 9px 12px; text-align: center; border-radius: 4px; }',
+        '.cm-table thead th { background: #ffffff; color: #1e293b; font-weight: 600; border-bottom: 2px solid #cbd5e1; font-size: 13px; }',
         '.cm-table th.row-label { background: #ffffff; color: #1e293b; font-weight: 600; text-align: right; border-right: 2px solid #cbd5e1; white-space: nowrap; }',
-        '.cm-cell, .cm-diag { position: relative; min-width: 50px; min-height: 48px; cursor: pointer; transition: transform .1s, box-shadow .1s; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }',
+        '.cm-cell, .cm-diag { position: relative; min-width: 54px; min-height: 50px; cursor: pointer; transition: transform .1s, box-shadow .1s; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }',
         '.cm-cell:hover, .cm-diag:hover { transform: scale(1.08); z-index: 5; box-shadow: 0 0 0 2px #0f172a, 0 4px 12px rgba(0,0,0,0.18); }',
         '.cm-v-count { display: block; font-size: 14px; font-weight: 700; line-height: 1.2; }',
         '.cm-v-pct { display: block; font-size: 10.5px; opacity: 0.9; line-height: 1.2; margin-top: 2px; }',
@@ -279,15 +279,17 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
         '.cm-mode-pct-only .cm-v-pct { font-size: 13.5px; font-weight: 700; opacity: 1; margin-top: 0; }',
         '.cm-total { background: #e2e8f0; color: #334155; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }',
         '.cm-total-all { background: #cbd5e1; color: #0f172a; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }',
-        '.cm-report-container { flex: 1 1 380px; min-width: 320px; }',
+        '.cm-report-container { width: 100%; border-top: 1px dashed #cbd5e1; padding-top: 18px; margin-top: 6px; }',
+        '.cm-report-title { font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }',
         '.cm-report-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }',
-        '.cm-report-table th, .cm-report-table td { border-bottom: 1px solid #e2e8f0; padding: 8px 12px; text-align: right; }',
+        '.cm-report-table th, .cm-report-table td { border-bottom: 1px solid #e2e8f0; padding: 10px 14px; text-align: right; }',
         '.cm-report-table th { background: #f8fafc; color: #475569; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }',
         '.cm-report-table td.cat-name, .cm-report-table th.cat-name { text-align: left; font-weight: 600; color: #1e293b; }',
+        '.cm-report-table tbody tr:hover { background: #f8fafc; }',
         '.cm-report-table tfoot td { background: #f8fafc; font-weight: 600; }',
         '.cm-bar-wrap { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }',
-        '.cm-bar { width: 42px; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }',
-        '.cm-bar-fill { height: 100%; background: #2563eb; border-radius: 3px; }',
+        '.cm-bar { width: 64px; height: 7px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }',
+        '.cm-bar-fill { height: 100%; background: #2563eb; border-radius: 4px; }',
         '</style>',
         '<div class="cm-header-row">',
         f'<h3>📊 {html.escape(title)}</h3>',
@@ -377,7 +379,7 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
 
     # 分类详细指标表格
     html_out.append('<div class="cm-report-container">')
-    html_out.append('<div style="font-size:12px; font-weight:700; color:#475569; margin-bottom:6px; letter-spacing:0.5px;">分类性能指标 (Classification Report)</div>')
+    html_out.append('<div class="cm-report-title">📋 各类别分类详细指标 (Classification Report)</div>')
     html_out.append('<table class="cm-report-table">')
     html_out.append('<thead><tr><th class="cat-name">类别</th><th>Precision</th><th>Recall</th><th>F1-score</th><th>Support</th></tr></thead><tbody>')
     for c in ref_classes:
