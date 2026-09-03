@@ -335,6 +335,9 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
         print(f"  - {f}: {pf['accuracy']}  ({pf['correct']}/{pf['total']})")
         for v, d in (metrics.get("per_value", {}).get(f) or {}).items():
             print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
+    for f, cm in (metrics.get("confusion_matrices") or {}).items():
+        from .scoring.confusion_matrix import format_confusion_matrix_text
+        print(format_confusion_matrix_text(cm, title=f"字段混淆矩阵 — {f}"))
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
     print(f"[field-eval] 失配清单(HTML,含图片) -> {cfg.field_mismatches_html_path}")
     _maybe_generate_mnn_report(cfg)

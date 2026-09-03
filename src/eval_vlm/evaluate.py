@@ -13,7 +13,7 @@ from typing import Optional
 
 from .config import Config
 from .data.loader import load_samples
-from .report_assets import image_ref_to_html_src
+from .report_assets import batch_preload_images, image_ref_to_html_src
 from .results import store
 from .scoring import Scorer, get_scorer
 from .scoring.confusion_matrix import (
@@ -486,14 +486,41 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
     if not failed_ids:
         return header + '<p class="empty-notice">✅ 无 exact_match 未命中。</p></body></html>'
 
+    # 1. 批量收集所有未命中样本的图片引用
+    all_imgs: list[str] = []
+    for sid in failed_ids:
+        sample = sample_by_id.get(sid)
+        for r in rows_by_id.get(sid, []):
+            for im in (r.get("images") or []):
+                all_imgs.append(im)
+        if sample:
+            for im in sample.images:
+                all_imgs.append(im)
+
+    # 2. 多线程并行预热解码并缓存图片(避免逐张串行处理卡顿)
+    if all_imgs:
+        batch_preload_images(all_imgs, cfg)
+
+    # 3. 避免超大集合(如上千张)把单个 HTML 撑爆崩溃，设置友好展示上限
+    max_cards = 250
+    display_ids = failed_ids[:max_cards]
+    trunc_notice = ""
+    if len(failed_ids) > max_cards:
+        trunc_notice = (
+            f'<div class="empty-notice" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; margin-bottom:16px;">'
+            f'⚠️ 未命中样本较多 (共 {len(failed_ids)} 个)，为保证网页交互流畅，当前展示前 {max_cards} 个样本卡片；'
+            f'完整错误样本及文本对比请查看同目录下的 <code>failures.md</code> 或 <code>scored.jsonl</code>。'
+            f'</div>'
+        )
+
     filters = """<div id="filters">
 <input type="text" id="flt-search" placeholder="按样本 ID 搜索...">
 <label><input type="checkbox" id="flt-error"> 仅看报错/缺失样本</label>
-</div><div id="cards">"""
+</div>""" + trunc_notice + '<div id="cards">'
 
     cards = "".join(
         _render_failure_card(sid, sample_by_id.get(sid), rows_by_id.get(sid, []), cfg)
-        for sid in failed_ids
+        for sid in display_ids
     )
 
     script = """<script>

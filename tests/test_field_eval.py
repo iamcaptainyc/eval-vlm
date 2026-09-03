@@ -579,3 +579,48 @@ def test_render_mismatch_card_no_desc_when_empty():
            "fields": [{"field": "主辅路", "ref": ["主路"], "pred": [], "correct": False}]}
     card = field_eval._render_mismatch_card(row, cfg)
     assert "模型描述" not in card
+
+
+def test_field_eval_confusion_matrix_in_html_and_summary():
+    """验证 field-eval 生成逐字段混淆矩阵，且在 summary.md 和 field_mismatches.html 中正确呈现。"""
+    from eval_vlm.data.schema import Sample, Turn
+    samples = [
+        Sample(id="1", images=[], turns=[Turn(role="user", content="q"), Turn(role="assistant", content="a")]),
+        Sample(id="2", images=[], turns=[Turn(role="user", content="q"), Turn(role="assistant", content="b")]),
+        Sample(id="3", images=[], turns=[Turn(role="user", content="q"), Turn(role="assistant", content="c")]),
+    ]
+    desc_turn = {"1": 1, "2": 1, "3": 1}
+    ref_fields = {
+        "1": {"主辅路": ["主路"], "道路结构": ["直道"]},
+        "2": {"主辅路": ["辅路"], "道路结构": ["弯道"]},
+        "3": {"主辅路": ["主路"], "道路结构": ["直道"]},
+    }
+    pred_fields = {
+        "1": {"主辅路": ["主路"], "道路结构": ["直道"]},
+        "2": {"主辅路": ["主路"], "道路结构": ["弯道"]},  # 主辅路预测错
+        "3": {"主辅路": ["辅路"], "道路结构": ["直道"]},  # 主辅路预测错
+    }
+    pred_desc_ids = {"1", "2", "3"}
+
+    metrics, rows = field_eval._aggregate(
+        samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, pred_text={"1": "t1", "2": "t2", "3": "t3"}
+    )
+    assert "confusion_matrices" in metrics
+    assert "主辅路" in metrics["confusion_matrices"]
+    assert "道路结构" in metrics["confusion_matrices"]
+    cm_road = metrics["confusion_matrices"]["主辅路"]
+    assert cm_road["ref_classes"] == ["主路", "辅路"]
+
+    cfg = Config()
+    cfg.run_name = "test_field_run"
+    md_summary = field_eval._render_summary(metrics, cfg)
+    assert "## 逐字段混淆矩阵 (Confusion Matrices)" in md_summary
+    assert "### 字段: 主辅路" in md_summary
+
+    html = field_eval._render_mismatches_html(rows, metrics, cfg)
+    assert 'class="field-cm-wrapper"' in html
+    assert 'class="field-tab-bar"' in html
+    assert '主辅路' in html
+    assert 'class="cm-table"' in html
+    assert 'class="cm-diag"' in html
+

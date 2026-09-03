@@ -34,8 +34,13 @@ from .config import Config, LabelExtractConfig
 from .data.loader import load_samples
 from .data.schema import Sample
 from .label_extract import LabelExtractError, _endpoint, _retry_extract
-from .report_assets import image_ref_to_html_src
+from .report_assets import batch_preload_images, image_ref_to_html_src
 from .results import store
+from .scoring.confusion_matrix import (
+    compute_confusion_matrix,
+    format_confusion_matrix_html,
+    format_confusion_matrix_markdown,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +309,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
     fields = _canonical_fields(ref_fields)
     pred_text = pred_text or {}
     per_field = {f: {"correct": 0, "total": 0} for f in fields}
+    field_pairs: dict[str, list[tuple[str, str]]] = {f: [] for f in fields}
     # 逐取值(per-class):{字段: {取值: {correct, support}}}。support=该取值在 ref 出现的样本数,
     # correct=其中 pred 也含该取值的数;accuracy=correct/support(即该取值的召回)。
     per_value: dict[str, dict[str, dict[str, int]]] = {}
@@ -359,6 +365,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                 if v in pset:
                     pv["correct"] += 1
             field_rows.append({"field": f, "ref": r, "pred": p, "correct": correct})
+            field_pairs[f].append((_fmt(r), "(未产出)" if state == "pred_missing" else _fmt(p)))
         if all_correct:
             n_exact += 1
         if not all_correct:                 # 只把有失配(含 pred_missing)的 id 列入清单
@@ -383,6 +390,14 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
     tot_total = sum(per_field[f]["total"] for f in fields)
     macro = (sum(per_field[f]["accuracy"] for f in fields) / len(fields)) if fields else 0.0
 
+    # 逐字段混淆矩阵
+    confusion_matrices: dict[str, dict] = {}
+    for f in fields:
+        pairs = field_pairs.get(f, [])
+        cm = compute_confusion_matrix(pairs)
+        if cm:
+            confusion_matrices[f] = cm
+
     metrics = {
         "fields": fields,
         "num_samples": len(samples),
@@ -392,6 +407,7 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
         "skipped_pred_error": skipped_pred_error,
         "per_field": per_field,
         "per_value": per_value_out,
+        "confusion_matrices": confusion_matrices,
         "overall": {
             "micro_accuracy": round(tot_correct / tot_total, 4) if tot_total else 0.0,
             "macro_accuracy": round(macro, 4),
@@ -428,6 +444,15 @@ def _render_summary(metrics: dict, cfg: Config) -> str:
         pf = metrics["per_field"][f]
         lines.append(f"| {f} | {pf['accuracy']} | {pf['correct']}/{pf['total']} |")
     lines.append("")
+
+    # 逐字段混淆矩阵 (若有)
+    if metrics.get("confusion_matrices"):
+        lines.append("## 逐字段混淆矩阵 (Confusion Matrices)")
+        for f, cm in metrics["confusion_matrices"].items():
+            lines.append("")
+            lines.append(f"### 字段: {f}")
+            lines.append(format_confusion_matrix_markdown(cm))
+        lines.append("")
 
     # 逐取值(per-class)准确率:每字段展开其各取值的召回
     lines.append("## 逐取值准确率")
@@ -575,6 +600,13 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
 .tag-pred-missing {{ color: #d9822b; font-weight: 600; }}
 #filters {{ margin-bottom: 16px; }}
 #filters label {{ margin-right: 16px; font-size: 14px; }}
+.field-cm-wrapper {{ background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
+.field-tab-bar {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; background: #f8fafc; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; }}
+.field-tab-btn {{ border: 1px solid #cbd5e1; background: #ffffff; padding: 6px 14px; font-size: 13px; font-weight: 600; color: #334155; border-radius: 6px; cursor: pointer; transition: all .15s ease; }}
+.field-tab-btn:hover {{ background: #f1f5f9; color: #0f172a; }}
+.field-tab-btn.active {{ background: #2563eb; color: #ffffff; border-color: #1d4ed8; box-shadow: 0 2px 5px rgba(37,99,235,0.25); }}
+.field-cm-pane {{ display: none; }}
+.field-cm-pane.active {{ display: block; }}
 </style></head><body>
 """
     header += f"""<header class="summary">
@@ -586,8 +618,56 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
    &nbsp; 模型无输出(pred_missing): {metrics['num_pred_missing']}</p>
 </header>
 """
+    # 逐字段混淆矩阵展示 (若有)
+    cm_dict = metrics.get("confusion_matrices") or {}
+    if cm_dict:
+        cm_tabs = []
+        cm_panes = []
+        for idx, (f, cm) in enumerate(cm_dict.items()):
+            pf_acc = metrics.get("per_field", {}).get(f, {}).get("accuracy", cm.get("accuracy", 0.0))
+            active_cls = " active" if idx == 0 else ""
+            display_style = "display: block;" if idx == 0 else "display: none;"
+            pane_id = f"field-cm-pane-{idx}"
+            cm_tabs.append(
+                f'<button type="button" class="field-tab-btn{active_cls}" data-target="{pane_id}">'
+                f'{_html_escape(f)} ({pf_acc*100:.1f}%)</button>'
+            )
+            cm_html = format_confusion_matrix_html(cm, title=f"字段混淆矩阵: {f} (准确率: {pf_acc*100:.2f}%)")
+            cm_panes.append(
+                f'<div class="field-cm-pane{active_cls}" id="{pane_id}" style="{display_style}">{cm_html}</div>'
+            )
+        if len(cm_dict) > 1:
+            cm_tabs.append('<button type="button" class="field-tab-btn" data-target="all">📑 查看全部字段</button>')
+        cm_section = (
+            '<div class="field-cm-wrapper">'
+            '<div style="font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">'
+            '📊 逐字段混淆矩阵 (Confusion Matrices by Field)</div>'
+            f'<div class="field-tab-bar">{"".join(cm_tabs)}</div>'
+            f'<div class="field-cm-panes">{"".join(cm_panes)}</div>'
+            '</div>'
+        )
+        header += cm_section
+
     if not rows:
         return header + "<p>✅ 无字段失配。</p></body></html>"
+
+    # 性能保护: 若失配卡片过多，截断卡片并提示，避免浏览器撑爆卡顿
+    max_cards = 250
+    display_rows = rows[:max_cards]
+    trunc_notice = ""
+    if len(rows) > max_cards:
+        trunc_notice = (
+            f'<div style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; '
+            f'padding:12px 16px; border-radius:8px; margin-bottom:16px;">'
+            f'⚠️ 失配样本较多 (共 {len(rows)} 个)，为保证页面交互流畅已展示前 {max_cards} 个样本卡片；'
+            f'完整失配清单及全部对比见同目录下的 <code>field_mismatches.md</code>。'
+            f'</div>'
+        )
+
+    # 并发预热解码与缓存图片(仅对展示的卡片)
+    all_imgs = [img for row in display_rows for img in (row.get("images") or [])]
+    if all_imgs:
+        batch_preload_images(all_imgs, cfg)
 
     field_options = "".join(
         f'<option value="{_html_escape(f)}">{_html_escape(f)}</option>' for f in metrics["fields"])
@@ -596,9 +676,9 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
 <label>按字段过滤:
   <select id="flt-field"><option value="">(全部)</option>{field_options}</select>
 </label>
-</div><div id="cards">"""
+</div>{trunc_notice}<div id="cards">"""
 
-    cards = "".join(_render_mismatch_card(row, cfg) for row in rows)
+    cards = "".join(_render_mismatch_card(row, cfg) for row in display_rows)
 
     script = """<script>
 (function () {
@@ -616,6 +696,24 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
   }
   cb.addEventListener('change', apply);
   sel.addEventListener('change', apply);
+
+  // 字段混淆矩阵 Tab 切换
+  document.querySelectorAll('.field-tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var wrap = btn.closest('.field-cm-wrapper');
+      if (!wrap) return;
+      wrap.querySelectorAll('.field-tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      var target = btn.getAttribute('data-target');
+      if (target === 'all') {
+        wrap.querySelectorAll('.field-cm-pane').forEach(function(p) { p.style.display = 'block'; });
+      } else {
+        wrap.querySelectorAll('.field-cm-pane').forEach(function(p) { p.style.display = 'none'; });
+        var pane = document.getElementById(target);
+        if (pane) pane.style.display = 'block';
+      }
+    });
+  });
 
   // 点击图片放大查看(lightbox),再点关闭
   var lb = document.getElementById('lightbox');
