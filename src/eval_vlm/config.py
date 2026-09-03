@@ -530,6 +530,11 @@ class Config:
         return self.run_dir / "failures.md"
 
     @property
+    def failures_html_path(self) -> Path:
+        """exact_match 未命中样本的 HTML 版(图片 base64 内嵌,单文件自包含)。"""
+        return self.run_dir / "failures.html"
+
+    @property
     def summary_path(self) -> Path:
         return self.run_dir / "summary.md"
 

@@ -227,6 +227,7 @@ def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
         print(f"[score] exact_match 未命中 {n_fail} 个样本"
               f"(共 {metrics.get('num_failed_targets', 0)} 个错误轮),"
               f"人类可读清单 -> {cfg.failures_path}")
+        print(f"[score] 错误样本可视化(HTML,含图片) -> {cfg.failures_html_path}")
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     return metrics
 

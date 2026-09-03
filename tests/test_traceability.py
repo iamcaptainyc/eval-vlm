@@ -50,6 +50,7 @@ def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
     assert metrics["num_failed_samples"] == metrics["num_samples"]
     assert metrics["num_failed_targets"] == metrics["num_targets"]
     assert cfg.failures_path.exists() and cfg.failures_path.name == "failures.md"
+    assert cfg.failures_html_path.exists() and cfg.failures_html_path.name == "failures.html"
 
     md = cfg.failures_path.read_text(encoding="utf-8")
     assert "## 样本" in md                       # 按 id 分组的标题
@@ -59,9 +60,17 @@ def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
     # 同一样本的两个目标轮(描述 + 标签)都在 -> 分组到一起
     assert md.count("scorer: `exact_match`") >= metrics["num_targets"]
 
+    html = cfg.failures_html_path.read_text(encoding="utf-8")
+    assert "未命中清单 (exact_match)" in html
+    assert "✗ exact_match 未命中" in html
+    assert "__definitely_wrong__" in html
+    assert "comparison-grid" in html
+    assert "lightbox" in html
+    assert "flt-search" in html
+
 
 def test_no_failures_when_all_correct(messages_config):
-    """fake 回显标准答案 -> 全部命中 -> failures.md 标注无未命中。"""
+    """fake 回显标准答案 -> 全部命中 -> failures.md / html 标注无未命中。"""
     cfg = messages_config
     split_dataset(cfg)
     run_inference(cfg)
@@ -70,6 +79,7 @@ def test_no_failures_when_all_correct(messages_config):
     assert metrics["num_failed_samples"] == 0
     assert metrics["num_failed_targets"] == 0
     assert "无 exact_match 未命中" in cfg.failures_path.read_text(encoding="utf-8")
+    assert "无 exact_match 未命中" in cfg.failures_html_path.read_text(encoding="utf-8")
 
 
 def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
@@ -88,3 +98,4 @@ def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
     assert metrics["overall_mean_score"] < 1.0      # 确有低分
     assert metrics["num_failed_samples"] == 0       # 但非 exact_match -> 不计入
     assert "无 exact_match 未命中" in cfg.failures_path.read_text(encoding="utf-8")
+    assert "无 exact_match 未命中" in cfg.failures_html_path.read_text(encoding="utf-8")

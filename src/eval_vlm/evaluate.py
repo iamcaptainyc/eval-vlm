@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import html
 from typing import Optional
 
 from .config import Config
 from .data.loader import load_samples
+from .report_assets import image_ref_to_html_src
 from .results import store
 from .scoring import Scorer, get_scorer
 
@@ -121,6 +123,7 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None) -> dict:
         "num_failed_samples": len(failed_ids),     # exact_match 未命中的样本(id)数
         "num_failed_targets": num_failed_targets,  # 其中错误的目标轮数
         "failures_path": str(cfg.failures_path),
+        "failures_html_path": str(cfg.failures_html_path),
         "per_turn": per_turn,
     }
 
@@ -129,6 +132,8 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None) -> dict:
     # 人类可读、按 id 分组的未命中清单(供人工审核);机器可读逐轮数据见 scored.jsonl。
     store.write_text(cfg.failures_path,
                      _render_failures_md(failed_ids, sample_by_id, rows_by_id, metrics))
+    store.write_text(cfg.failures_html_path,
+                     _render_failures_html(failed_ids, sample_by_id, rows_by_id, metrics, cfg))
     store.write_text(cfg.summary_path, _render_summary(metrics))
     return metrics
 
@@ -252,3 +257,253 @@ def _render_turn(idx: int, turn, row) -> list:
     lines.append(_fence(row.get("reference")))
     lines.append("")
     return lines
+
+
+# ---------------------------------------------------------------------------
+# 未命中清单 HTML 可视化渲染(含图片 base64 内嵌、灯箱放大、搜索过滤)
+# ---------------------------------------------------------------------------
+def _html_escape(s: object) -> str:
+    """统一转字符串再转义。"""
+    return html.escape(str(s) if s is not None else "", quote=True)
+
+
+def _render_failure_card(sid: str, sample, rows: list, cfg: Config) -> str:
+    """渲染单个未命中样本卡片:图片、元数据、多轮对话、目标轮预测对比。"""
+    row_by_turn = {r["turn"]: r for r in rows}
+    n_miss = sum(1 for r in rows if _is_exact_match_miss(r))
+    n_em = sum(1 for r in rows if "exact_match" in r["detail"])
+    has_error = any(
+        r.get("detail", {}).get("inference_error") or r.get("detail", {}).get("missing_prediction")
+        for r in rows
+    )
+
+    imgs: list = []
+    for r in rows:
+        for im in (r.get("images") or []):
+            if im not in imgs:
+                imgs.append(im)
+    if not imgs and sample:
+        imgs = list(sample.images)
+
+    imgs_html: list[str] = []
+    for img in imgs:
+        src, err = image_ref_to_html_src(img, cfg)
+        if src is None:
+            imgs_html.append(
+                f'<figure class="img-item"><div class="img-placeholder" title="{_html_escape(err)}">'
+                f'图片不可用</div><figcaption class="img-path">{_html_escape(img)}</figcaption></figure>'
+            )
+        else:
+            imgs_html.append(
+                f'<figure class="img-item"><img src="{src}" alt="{_html_escape(img)}" loading="lazy">'
+                f'<figcaption class="img-path">{_html_escape(img)}</figcaption></figure>'
+            )
+    images_block = f'<div class="images">{"".join(imgs_html)}</div>' if imgs_html else ""
+
+    meta_block = ""
+    if sample and sample.meta:
+        meta_items = [
+            f"<span><code>{_html_escape(k)}</code>: {_html_escape(v)}</span>"
+            for k, v in sample.meta.items()
+        ]
+        meta_block = f'<div class="meta-block"><strong>元信息:</strong> {" &nbsp; ".join(meta_items)}</div>'
+
+    turns_html: list[str] = []
+    turns = sample.turns if sample else []
+    if turns:
+        for idx, turn in enumerate(turns):
+            turns_html.append(_render_turn_html(idx, turn, row_by_turn.get(idx)))
+    else:
+        for r in sorted(rows, key=lambda r: r["turn"]):
+            turns_html.append(_render_turn_html(r["turn"], None, r))
+
+    card_cls = "card has-miss" if n_miss > 0 else "card"
+    data_err = "true" if has_error else "false"
+    return (
+        f'<section class="{card_cls}" data-sample-id="{_html_escape(sid)}" data-has-error="{data_err}">'
+        f'<div class="card-header">'
+        f'<h3>样本 <code>{_html_escape(sid)}</code></h3>'
+        f'<span class="tag-miss">✗ exact_match 未命中 {n_miss}/{n_em} 轮</span>'
+        f'</div>'
+        f'{meta_block}'
+        f'{images_block}'
+        f'<div class="turns-flow">{"".join(turns_html)}</div>'
+        f'</section>'
+    )
+
+
+def _render_turn_html(idx: int, turn, row) -> str:
+    """渲染一轮对话的 HTML 结构。"""
+    if row is None:
+        role = getattr(turn, "role", "?")
+        content = getattr(turn, "content", "")
+        role_cls = "role-user" if role == "user" else "role-assistant"
+        return (
+            f'<div class="turn turn-context">'
+            f'<div class="turn-title"><span class="role-badge {role_cls}">轮 {idx} · {role}</span></div>'
+            f'<div class="turn-body">{_html_escape(content)}</div>'
+            f'</div>'
+        )
+
+    detail = row["detail"]
+    is_em = "exact_match" in detail
+    miss = _is_exact_match_miss(row)
+    if is_em:
+        badge = (
+            '<span class="badge badge-miss">✗ exact_match 未命中</span>'
+            if miss
+            else '<span class="badge badge-hit">✓ exact_match 命中</span>'
+        )
+    else:
+        badge = f'<span class="badge badge-score">score: {row.get("score")}</span>'
+
+    alert_html = ""
+    if detail.get("missing_prediction"):
+        alert_html = '<div class="alert alert-warning">⚠️ 缺失预测 (模型未产出该轮)</div>'
+    elif detail.get("inference_error"):
+        alert_html = f'<div class="alert alert-error">⚠️ 推理报错: {_html_escape(detail.get("inference_error"))}</div>'
+
+    comp_cls = "comp-miss" if miss else "comp-hit"
+    return (
+        f'<div class="turn turn-target">'
+        f'<div class="turn-title">'
+        f'<span class="role-badge role-target">轮 {idx} · assistant (目标 · scorer: <code>{_html_escape(row.get("scorer"))}</code>)</span>'
+        f'{badge}'
+        f'</div>'
+        f'{alert_html}'
+        f'<div class="comparison-grid">'
+        f'<div class="comp-col {comp_cls}">'
+        f'<div class="comp-title">模型输出 (Prediction)</div>'
+        f'<pre class="comp-content">{_html_escape(row.get("prediction"))}</pre>'
+        f'</div>'
+        f'<div class="comp-col comp-ref">'
+        f'<div class="comp-title">标准答案 (Reference)</div>'
+        f'<pre class="comp-content">{_html_escape(row.get("reference"))}</pre>'
+        f'</div>'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _render_failures_html(
+    failed_ids: list,
+    sample_by_id: dict,
+    rows_by_id: dict,
+    metrics: dict,
+    cfg: Config,
+) -> str:
+    """渲染未命中清单的 HTML 版（单文件自包含、图片 Base64、支持灯箱放大与搜索过滤）。"""
+    title = f"未命中清单 (exact_match) — {cfg.run_name}"
+    header = f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>{_html_escape(title)}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 24px; background: #f6f8fa; color: #24292f; }}
+header.summary {{ margin-bottom: 20px; padding: 16px 20px; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
+header.summary h1 {{ margin: 0 0 8px 0; font-size: 20px; }}
+header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
+.card {{ background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
+.card.has-miss {{ border-left: 5px solid #cf222e; }}
+.card-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }}
+.card-header h3 {{ margin: 0; font-size: 16px; }}
+.tag-miss {{ font-size: 13px; font-weight: 600; color: #cf222e; background: #ffebe9; padding: 2px 10px; border-radius: 12px; }}
+.meta-block {{ margin-bottom: 12px; font-size: 13px; color: #57606a; background: #f6f8fa; padding: 8px 12px; border-radius: 6px; }}
+.images {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-start; }}
+.img-item {{ margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }}
+.img-item img {{ max-width: 100%; max-height: 560px; width: auto; object-fit: contain; border: 1px solid #d0d7de; border-radius: 6px; cursor: zoom-in; transition: transform .15s; }}
+.img-item img:hover {{ transform: scale(1.01); }}
+.img-path {{ font-size: 12px; color: #6e7781; word-break: break-all; max-width: 560px; text-align: center; }}
+.img-placeholder {{ width: 560px; max-width: 100%; height: 120px; display: flex; align-items: center; justify-content: center; background: #f6f8fa; color: #8c959f; border: 1px dashed #d0d7de; font-size: 12px; text-align: center; padding: 8px; box-sizing: border-box; border-radius: 6px; }}
+.turns-flow {{ display: flex; flex-direction: column; gap: 10px; }}
+.turn {{ border-radius: 6px; padding: 12px; }}
+.turn-context {{ background: #f6f8fa; border: 1px solid #eaeef2; }}
+.turn-target {{ background: #ffffff; border: 1px solid #d0d7de; }}
+.turn-title {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }}
+.turn-body {{ font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }}
+.role-badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }}
+.role-user {{ background: #ddf4ff; color: #0969da; }}
+.role-assistant {{ background: #fbefff; color: #8250df; }}
+.role-target {{ background: #fff8c5; color: #9a6700; }}
+.badge {{ font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 12px; }}
+.badge-miss {{ background: #ffebe9; color: #cf222e; }}
+.badge-hit {{ background: #dafbe1; color: #1a7f37; }}
+.badge-score {{ background: #f6f8fa; color: #57606a; }}
+.alert {{ padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 8px; }}
+.alert-warning {{ background: #fff8c5; color: #9a6700; border: 1px solid #d4a72c; }}
+.alert-error {{ background: #ffebe9; color: #cf222e; border: 1px solid #ff8182; }}
+.comparison-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }}
+@media (max-width: 768px) {{ .comparison-grid {{ grid-template-columns: 1fr; }} }}
+.comp-col {{ border-radius: 6px; padding: 10px 12px; }}
+.comp-title {{ font-size: 12px; font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }}
+.comp-miss {{ background: #fff5f5; border: 1px solid #ffcdd2; }}
+.comp-miss .comp-title {{ color: #c62828; }}
+.comp-hit {{ background: #f6ffed; border: 1px solid #b7eb8f; }}
+.comp-hit .comp-title {{ color: #2e7d32; }}
+.comp-ref {{ background: #f0f5ff; border: 1px solid #adc6ff; }}
+.comp-ref .comp-title {{ color: #1d39c4; }}
+.comp-content {{ margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }}
+#filters {{ margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: #fff; padding: 10px 16px; border: 1px solid #d0d7de; border-radius: 8px; }}
+#filters label {{ font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; }}
+#flt-search {{ padding: 4px 10px; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; width: 220px; }}
+.empty-notice {{ padding: 20px; background: #dafbe1; color: #1a7f37; border-radius: 8px; font-size: 15px; font-weight: 500; }}
+.lightbox {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }}
+.lightbox img {{ max-width: 96vw; max-height: 96vh; object-fit: contain; box-shadow: 0 0 24px rgba(0,0,0,.6); }}
+</style></head><body>
+"""
+    header += f"""<header class="summary">
+<h1>未命中清单 (exact_match) — {_html_escape(cfg.run_name)}</h1>
+<p>模型: <code>{_html_escape(cfg.inference.result_name)}</code> &nbsp; 后端: <code>{_html_escape(cfg.inference.backend)}</code></p>
+<p>未命中样本: <strong>{len(failed_ids)}</strong> / 已评 {metrics.get('num_samples', 0)} (涉及 {metrics.get('num_failed_targets', 0)} 个错误目标轮) &nbsp; 总体均分: {metrics.get('overall_mean_score', 0.0)}</p>
+</header>
+"""
+    if not failed_ids:
+        return header + '<p class="empty-notice">✅ 无 exact_match 未命中。</p></body></html>'
+
+    filters = """<div id="filters">
+<input type="text" id="flt-search" placeholder="按样本 ID 搜索...">
+<label><input type="checkbox" id="flt-error"> 仅看报错/缺失样本</label>
+</div><div id="cards">"""
+
+    cards = "".join(
+        _render_failure_card(sid, sample_by_id.get(sid), rows_by_id.get(sid, []), cfg)
+        for sid in failed_ids
+    )
+
+    script = """<script>
+(function () {
+  var cbErr = document.getElementById('flt-error');
+  var inpSearch = document.getElementById('flt-search');
+  function apply() {
+    var onlyErr = cbErr.checked;
+    var query = (inpSearch.value || '').trim().toLowerCase();
+    document.querySelectorAll('.card').forEach(function (card) {
+      var okErr = !onlyErr || card.getAttribute('data-has-error') === 'true';
+      var sid = (card.getAttribute('data-sample-id') || '').toLowerCase();
+      var okQuery = !query || sid.indexOf(query) !== -1;
+      card.style.display = (okErr && okQuery) ? '' : 'none';
+    });
+  }
+  cbErr.addEventListener('change', apply);
+  inpSearch.addEventListener('input', apply);
+
+  // 点击图片放大 (lightbox)
+  var lb = document.getElementById('lightbox');
+  var lbImg = document.getElementById('lightbox-img');
+  document.querySelectorAll('.images img').forEach(function (img) {
+    img.addEventListener('click', function () {
+      lbImg.src = img.src;
+      lb.style.display = 'flex';
+    });
+  });
+  lb.addEventListener('click', function () { lb.style.display = 'none'; });
+})();
+</script>"""
+
+    return (
+        header
+        + filters
+        + cards
+        + "</div>"
+        + script
+        + '<div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>'
+        + "</body></html>"
+    )
