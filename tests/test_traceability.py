@@ -136,3 +136,32 @@ def test_confusion_matrix_in_summary_and_html(messages_config, monkeypatch):
     assert "cm-diag" in html_text
     assert '<table class="cm-report-table">' in html_text
 
+
+def test_turn_filter_in_failures_html(tworound_config, monkeypatch):
+    """多轮对话场景下，某一轮预测正确、另一轮预测错误时，failures.html 包含精确轮次标签与筛选下拉框。"""
+    cfg = tworound_config
+    split_dataset(cfg)
+
+    # 针对 sample_0 只在第一轮答对，第二轮答错；其他 sample 两轮皆错
+    def partial_wrong(self, context, images, sample_id, expected=None):
+        # context 中若已经包含前轮的 assistant 输出，表示是第二轮
+        is_second_round = len(context) > 2
+        if sample_id.endswith("0") and not is_second_round:
+            # 第一轮答对
+            return Prediction(id=sample_id, prediction=expected or "正确的描述")
+        return Prediction(id=sample_id, prediction="__wrong__")
+
+    monkeypatch.setattr(FakeBackend, "complete", partial_wrong)
+    run_inference(cfg)
+    metrics = score_predictions(cfg)
+
+    assert cfg.failures_html_path.exists()
+    html = cfg.failures_html_path.read_text(encoding="utf-8")
+
+    # 验证筛选控件与标签
+    assert 'id="flt-turn"' in html
+    assert "按出错轮次筛选:" in html
+    assert "data-miss-turns=" in html
+    assert 'class="flt-count-badge"' in html
+
+

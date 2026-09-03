@@ -324,13 +324,16 @@ def _render_failure_card(sid: str, sample, rows: list, cfg: Config) -> str:
         for r in sorted(rows, key=lambda r: r["turn"]):
             turns_html.append(_render_turn_html(r["turn"], None, r))
 
+    card_miss_turns = [str(r["turn"]) for r in rows if _is_exact_match_miss(r)]
+    data_miss_turns = ",".join(card_miss_turns)
     card_cls = "card has-miss" if n_miss > 0 else "card"
     data_err = "true" if has_error else "false"
+    miss_turn_label = f" (第 {', '.join(card_miss_turns)} 轮)" if card_miss_turns else ""
     return (
-        f'<section class="{card_cls}" data-sample-id="{_html_escape(sid)}" data-has-error="{data_err}">'
+        f'<section class="{card_cls}" data-sample-id="{_html_escape(sid)}" data-has-error="{data_err}" data-miss-turns="{data_miss_turns}">'
         f'<div class="card-header">'
         f'<h3>样本 <code>{_html_escape(sid)}</code></h3>'
-        f'<span class="tag-miss">✗ exact_match 未命中 {n_miss}/{n_em} 轮</span>'
+        f'<span class="tag-miss">✗ exact_match 未命中 {n_miss}/{n_em} 轮{miss_turn_label}</span>'
         f'</div>'
         f'{meta_block}'
         f'{images_block}'
@@ -449,8 +452,10 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
 .comp-ref .comp-title {{ color: #1d39c4; }}
 .comp-content {{ margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }}
 #filters {{ margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: #fff; padding: 10px 16px; border: 1px solid #d0d7de; border-radius: 8px; }}
-#filters label {{ font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; }}
-#flt-search {{ padding: 4px 10px; font-size: 13px; border: 1px solid #d0d7de; border-radius: 6px; width: 220px; }}
+#filters label {{ font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; color: #334155; }}
+#flt-search {{ padding: 5px 10px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 6px; width: 200px; }}
+#flt-turn {{ padding: 5px 10px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1e293b; cursor: pointer; }}
+.flt-count-badge {{ font-size: 12.5px; color: #64748b; margin-left: auto; font-weight: 600; }}
 .empty-notice {{ padding: 20px; background: #dafbe1; color: #1a7f37; border-radius: 8px; font-size: 15px; font-weight: 500; }}
 .cm-section {{ background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
 .cm-section h3 {{ margin: 0 0 12px 0; font-size: 16px; color: #24292f; }}
@@ -513,9 +518,47 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
             f'</div>'
         )
 
-    filters = """<div id="filters">
+    # 统计各目标轮次 exact_match 未命中样本数
+    turn_miss_stats: dict[object, dict] = {}
+    for sid in failed_ids:
+        sample_rows = rows_by_id.get(sid, [])
+        for r in sample_rows:
+            if _is_exact_match_miss(r):
+                turn_val = r["turn"]
+                ord_val = r.get("ordinal", turn_val)
+                key = (turn_val, ord_val)
+                if key not in turn_miss_stats:
+                    turn_miss_stats[key] = {
+                        "turn": turn_val,
+                        "ordinal": ord_val,
+                        "count": 0,
+                    }
+                turn_miss_stats[key]["count"] += 1
+
+    sorted_keys = sorted(turn_miss_stats.keys(), key=lambda k: (k[0], k[1]))
+    turn_options = []
+    for turn_val, ord_val in sorted_keys:
+        cnt = turn_miss_stats[(turn_val, ord_val)]["count"]
+        if turn_val != ord_val:
+            lbl = f"第 {turn_val} 轮 (目标 {ord_val}) 未命中 ({cnt} 个样本)"
+        else:
+            lbl = f"第 {turn_val} 轮未命中 ({cnt} 个样本)"
+        turn_options.append(f'<option value="{turn_val}">{_html_escape(lbl)}</option>')
+
+    turn_select_html = ""
+    if turn_options:
+        turn_select_html = f"""<label>按出错轮次筛选:
+  <select id="flt-turn">
+    <option value="">全部错误轮次 ({len(failed_ids)})</option>
+    {"".join(turn_options)}
+  </select>
+</label>"""
+
+    filters = f"""<div id="filters">
 <input type="text" id="flt-search" placeholder="按样本 ID 搜索...">
+{turn_select_html}
 <label><input type="checkbox" id="flt-error"> 仅看报错/缺失样本</label>
+<span id="flt-count" class="flt-count-badge"></span>
 </div>""" + trunc_notice + '<div id="cards">'
 
     cards = "".join(
@@ -527,18 +570,33 @@ header.summary p {{ margin: 4px 0; font-size: 14px; color: #57606a; }}
 (function () {
   var cbErr = document.getElementById('flt-error');
   var inpSearch = document.getElementById('flt-search');
+  var selTurn = document.getElementById('flt-turn');
+  var countBadge = document.getElementById('flt-count');
+  var cards = document.querySelectorAll('.card');
+
   function apply() {
-    var onlyErr = cbErr.checked;
+    var onlyErr = cbErr ? cbErr.checked : false;
     var query = (inpSearch.value || '').trim().toLowerCase();
-    document.querySelectorAll('.card').forEach(function (card) {
+    var selTurnVal = selTurn ? selTurn.value : '';
+    var visible = 0;
+    cards.forEach(function (card) {
       var okErr = !onlyErr || card.getAttribute('data-has-error') === 'true';
       var sid = (card.getAttribute('data-sample-id') || '').toLowerCase();
       var okQuery = !query || sid.indexOf(query) !== -1;
-      card.style.display = (okErr && okQuery) ? '' : 'none';
+      var cardTurns = (card.getAttribute('data-miss-turns') || '').split(',').filter(Boolean);
+      var okTurn = !selTurnVal || cardTurns.indexOf(selTurnVal) !== -1;
+      var show = okErr && okQuery && okTurn;
+      card.style.display = show ? '' : 'none';
+      if (show) visible++;
     });
+    if (countBadge) {
+      countBadge.textContent = '显示 ' + visible + ' / ' + cards.length + ' 个样本';
+    }
   }
-  cbErr.addEventListener('change', apply);
-  inpSearch.addEventListener('input', apply);
+  if (cbErr) cbErr.addEventListener('change', apply);
+  if (inpSearch) inpSearch.addEventListener('input', apply);
+  if (selTurn) selTurn.addEventListener('change', apply);
+  apply();
 
   // 点击图片放大 (lightbox)
   var lb = document.getElementById('lightbox');
