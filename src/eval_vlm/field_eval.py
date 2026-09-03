@@ -651,21 +651,8 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
     if not rows:
         return header + "<p>✅ 无字段失配。</p></body></html>"
 
-    # 性能保护: 若失配卡片过多，截断卡片并提示，避免浏览器撑爆卡顿
-    max_cards = 250
-    display_rows = rows[:max_cards]
-    trunc_notice = ""
-    if len(rows) > max_cards:
-        trunc_notice = (
-            f'<div style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; '
-            f'padding:12px 16px; border-radius:8px; margin-bottom:16px;">'
-            f'⚠️ 失配样本较多 (共 {len(rows)} 个)，为保证页面交互流畅已展示前 {max_cards} 个样本卡片；'
-            f'完整失配清单及全部对比见同目录下的 <code>field_mismatches.md</code>。'
-            f'</div>'
-        )
-
-    # 并发预热解码与缓存图片(仅对展示的卡片)
-    all_imgs = [img for row in display_rows for img in (row.get("images") or [])]
+    # 并发预热解码与缓存全部失配图片
+    all_imgs = [img for row in rows for img in (row.get("images") or [])]
     if all_imgs:
         batch_preload_images(all_imgs, cfg)
 
@@ -676,9 +663,9 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
 <label>按字段过滤:
   <select id="flt-field"><option value="">(全部)</option>{field_options}</select>
 </label>
-</div>{trunc_notice}<div id="cards">"""
+</div><div id="cards">"""
 
-    cards = "".join(_render_mismatch_card(row, cfg) for row in display_rows)
+    cards = "".join(_render_mismatch_card(row, cfg) for row in rows)
 
     script = """<script>
 (function () {
