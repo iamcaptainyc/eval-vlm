@@ -358,6 +358,10 @@ class LabelExtractConfig:
     # field-eval 用的专用路由:返回固定枚举字段(主辅路/道路结构/车道位置/警示标志),
     # 信封同 label-extract(data.labels.cn)。与上面的 path(旧 13 类标签)相互独立。
     value_path: str = "api/v1/vlm/value-extract"
+    # field-eval 字段判定匹配模式:
+    #   - "exact": 严格双向相等 set(ref) == set(pred)
+    #   - "contain": 包含真值即对 set(ref).issubset(set(pred))，即模型提取出的关键词集合包含真值
+    match_mode: str = "exact"
 
 
 @dataclass

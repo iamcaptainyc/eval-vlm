@@ -213,7 +213,8 @@ pred:
 # 解析响应 data.labels.cn 里非「无」的中文标签,扁平合并写到 label.jsonl(每行 {image, labels});
 # 失败记 label_failures.jsonl,不中断整批,可重跑补齐。断点续跑跳过已完成,--overwrite 整份重抽。
 # CLI 覆盖永久写回:--label-extract-url -> base_url;--label-extract-token -> auth_token;
-#   --value-path -> value_path(field-eval 专用,不同数据集的固定枚举字段结构不同时按需覆盖)。
+#   --value-path -> value_path(field-eval 专用,不同数据集的固定枚举字段结构不同时按需覆盖);
+#   --match-mode -> match_mode(field-eval 匹配判定模式:exact/contain)。
 # ---------------------------------------------------------------------------
 label_extract:
   base_url: https://canghai-agent-api-test.aijidou.com/   # 服务根地址(--label-extract-url 永久写回)
@@ -226,6 +227,7 @@ label_extract:
   max_concurrency: 4          # 抽取并发(纯 I/O,与推理后端是否串行无关)
   none_label: 无              # cn 中表示「无该类目」的占位值,过滤掉
   value_path: api/v1/vlm/value-extract   # field-eval 命令专用路由(固定枚举字段);与上面 path 独立,--value-path 永久写回
+  match_mode: exact           # field-eval 匹配判定模式:exact=严格双向相等 set(ref)==set(pred) | contain=包含即对 set(ref)⊆set(pred)(模型抽取词包含真值即算对),--match-mode 永久写回
 
 # ---------------------------------------------------------------------------
 # 精度对比(仅 precision 命令;其它命令忽略本段)

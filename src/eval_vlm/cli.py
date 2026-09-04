@@ -158,6 +158,7 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("label_extract_url", "label_extract.base_url"),
     ("label_extract_token", "label_extract.auth_token"),
     ("value_path", "label_extract.value_path"),
+    ("match_mode", "label_extract.match_mode"),
     ("targets", "eval.targets"),
 )
 
@@ -666,6 +667,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_fe.add_argument("--value-path", dest="value_path", default=None,
                       help="临时覆盖 value-extract 路由路径(永久写回 label_extract.value_path;"
                            "不同数据集的固定枚举字段结构不同时可指定各自的抽取路由)")
+    p_fe.add_argument("--match-mode", dest="match_mode", default=None,
+                      choices=["exact", "contain", "subset"],
+                      help="field-eval 匹配判定模式:exact(严格双向相等)|contain/subset(包含真值即对,模型抽取词包含真值)"
+                           "(永久写回 label_extract.match_mode)")
     # field-eval 自给自足:没预测就用当前 backend 先跑 pred。下面这些 flag 指定/覆盖该 backend
     # 及其模型(与 pred/eval 一致,持久化到 config.yaml),既决定 run_dir 也决定自动 pred 用哪个后端。
     p_fe.add_argument("--backend", default=None,
@@ -728,6 +733,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="转给 field-eval 类型数据集:覆盖 Authorization 头(需含 bearer 前缀)")
     p_sweep.add_argument("--value-path", dest="value_path", default=None,
                          help="转给 field-eval 类型数据集:覆盖 value-extract 路由路径(永久写回 label_extract.value_path)")
+    p_sweep.add_argument("--match-mode", dest="match_mode", default=None,
+                         choices=["exact", "contain", "subset"],
+                         help="转给 field-eval 类型数据集:覆盖匹配判定模式 exact|contain(永久写回 label_extract.match_mode)")
     p_sweep.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
                          help="批量覆盖每个数据集的 eval.targets(all/last/first/数字如 2=第2轮)并永久写回")
     p_sweep.add_argument("--backend", default=None,

@@ -624,3 +624,97 @@ def test_field_eval_confusion_matrix_in_html_and_summary():
     assert 'class="cm-table"' in html
     assert 'class="cm-diag"' in html
 
+
+def test_aggregate_match_mode_contain_vs_exact():
+    """验证 match_mode: exact vs contain 行为。
+    exact: set(r) == set(p)
+    contain: set(r).issubset(set(p)) (真值包含在预测中即判对)
+    """
+    samples = [
+        Sample(id="1"),  # ref=["海滩"], pred=["海滩", "海洋"] -> exact: 错, contain: 对
+        Sample(id="2"),  # ref=["海滩"], pred=["海洋"]         -> exact: 错, contain: 错
+        Sample(id="3"),  # ref=["山脉", "森林"], pred=["山脉", "森林", "雪地"] -> exact: 错, contain: 对
+        Sample(id="4"),  # ref=[], pred=[]                   -> exact: 对, contain: 对
+        Sample(id="5"),  # ref=[], pred=["森林"]              -> exact: 错, contain: 错
+    ]
+    desc_turn = {"1": 1, "2": 1, "3": 1, "4": 1, "5": 1}
+    ref_fields = {
+        "1": {"环境": ["海滩"]},
+        "2": {"环境": ["海滩"]},
+        "3": {"环境": ["山脉", "森林"]},
+        "4": {"环境": []},
+        "5": {"环境": []},
+    }
+    pred_fields = {
+        "1": {"环境": ["海滩", "海洋"]},
+        "2": {"环境": ["海洋"]},
+        "3": {"环境": ["山脉", "森林", "雪地"]},
+        "4": {"环境": []},
+        "5": {"环境": ["森林"]},
+    }
+    pred_desc_ids = {"1", "2", "3", "4", "5"}
+
+    # 1. exact 模式: 只有 sample 4 (两边皆空) 全对
+    m_exact, rows_exact = field_eval._aggregate(
+        samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, match_mode="exact"
+    )
+    assert m_exact["per_field"]["环境"]["correct"] == 1
+    assert m_exact["overall"]["exact_match_samples"] == 1
+    assert len(rows_exact) == 4  # 1, 2, 3, 5 均为失配
+
+    # 2. contain 模式: sample 1 (超集), sample 3 (超集), sample 4 (皆空) 均为对
+    m_contain, rows_contain = field_eval._aggregate(
+        samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, match_mode="contain"
+    )
+    assert m_contain["per_field"]["环境"]["correct"] == 3
+    assert m_contain["overall"]["exact_match_samples"] == 3
+    # 失配的只有 sample 2 (完全没命中海滩) 和 sample 5 (无中生有森林)
+    mismatched_ids = {r["id"] for r in rows_contain}
+    assert mismatched_ids == {"2", "5"}
+
+
+def test_cli_match_mode_flag_and_persistence(tmp_path):
+    """验证 --match-mode 在 CLI 中的解析与向 config.yaml 的持久化写回。"""
+    from eval_vlm.cli import _persist_overrides, build_parser
+    from eval_vlm.config import load_dataset_config
+    import yaml
+
+    # 准备一个包含 label_extract 的 config.yaml
+    ds_dir = tmp_path / "test_ds"
+    ds_dir.mkdir()
+    cfg_data = {
+        "label_extract": {
+            "value_path": "api/v1/vlm/value-extract",
+            "match_mode": "exact",
+        }
+    }
+    (ds_dir / "config.yaml").write_text(yaml.safe_dump(cfg_data), encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["field-eval", "--dataset", str(ds_dir), "--match-mode", "contain"])
+    assert args.match_mode == "contain"
+
+    # 执行持久化写回
+    persisted = _persist_overrides(ds_dir, args)
+    assert "label_extract.match_mode" in persisted
+
+    # 读取验证
+    cfg = load_dataset_config(ds_dir)
+    assert cfg.label_extract.match_mode == "contain"
+
+
+def test_render_summary_shows_match_mode():
+    cfg = Config()
+    cfg.run_name = "env_run"
+    metrics = {
+        "num_samples": 10, "num_scored": 10, "num_pred_missing": 0,
+        "skipped_ref": 0, "skipped_pred_error": 0,
+        "fields": ["环境"],
+        "match_mode": "contain",
+        "per_field": {"环境": {"correct": 9, "total": 10, "accuracy": 0.9}},
+        "overall": {"micro_accuracy": 0.9, "macro_accuracy": 0.9, "exact_match_samples": 9, "exact_match_rate": 0.9}
+    }
+    summary = field_eval._render_summary(metrics, cfg)
+    assert "- 匹配模式: `contain`" in summary
+
+

@@ -297,14 +297,17 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                ref_fields: dict[str, dict[str, list[str]]],
                pred_fields: dict[str, dict[str, list[str]]],
                pred_desc_ids: set[str],
-               pred_text: Optional[dict[str, str]] = None) -> tuple[dict, list[dict]]:
-    """逐字段严格相等比对并聚合。返回 (metrics, rows) —— rows 供渲染失配清单。
+               pred_text: Optional[dict[str, str]] = None,
+               match_mode: str = "exact") -> tuple[dict, list[dict]]:
+    """逐字段比对并聚合。返回 (metrics, rows) —— rows 供渲染失配清单。
 
     判定规则:
       - ref 抽取失败/无描述(id 不在 ref_fields)-> 跳过该 id(skipped_ref)。
       - pred **无描述文本**(模型没产出;id 不在 pred_desc_ids)-> 该 id 全字段判错(pred_missing)。
       - pred 有描述但**抽取失败**(id 不在 pred_fields 却在 pred_desc_ids)-> 跳过(skipped_pred_error)。
-      - 两侧都有 -> 逐字段 set(ref)==set(pred) 即对(两侧皆空=对,某字段缺=空集参与)。
+      - 两侧都有 -> 比对方式由 match_mode 决定:
+          - "exact": 严格双向相等 set(ref)==set(pred) 即对(两侧皆空=对,某字段缺=空集参与)。
+          - "contain" / "subset": 包含真值即对 set(ref) ⊆ set(pred)(ref 为空时需 pred 也为空)。
     """
     fields = _canonical_fields(ref_fields)
     pred_text = pred_text or {}
@@ -351,7 +354,14 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                 correct = False                       # 模型没产出 -> 一律判错
             else:
                 p = sorted(set(pred_f.get(f, [])))
-                correct = set(r) == set(p)
+                mode = (match_mode or "exact").strip().lower()
+                if mode in ("contain", "subset"):
+                    if not r:
+                        correct = (len(p) == 0)
+                    else:
+                        correct = set(r).issubset(set(p))
+                else:
+                    correct = set(r) == set(p)
             per_field[f]["total"] += 1
             if correct:
                 per_field[f]["correct"] += 1
@@ -423,10 +433,12 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
 # ---------------------------------------------------------------------------
 def _render_summary(metrics: dict, cfg: Config) -> str:
     ov = metrics["overall"]
+    match_mode = metrics.get("match_mode", "exact")
     lines = [
         f"# 逐字段准确率 — {cfg.run_name}",
         "",
         f"- 模型: `{cfg.inference.result_name}`  后端: `{cfg.inference.backend}`",
+        f"- 匹配模式: `{match_mode}`",
         f"- 样本数: {metrics['num_samples']}  已评: {metrics['num_scored']}  "
         f"模型无输出(判错): {metrics['num_pred_missing']}",
         f"- 跳过(ref 抽取失败/无描述): {metrics['skipped_ref']}  "
@@ -753,12 +765,15 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
     # ---- C. 比对 + 聚合 ----
     ref_fields = load_fields(cfg.field_ref_path)
     pred_fields = load_fields(cfg.field_pred_path)
-    metrics, rows = _aggregate(samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, pred_text)
+    match_mode = getattr(cfg.label_extract, "match_mode", "exact")
+    metrics, rows = _aggregate(samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, pred_text,
+                               match_mode=match_mode)
 
     metrics = {
         "run_name": cfg.run_name,
         "model": cfg.inference.result_name,
         "backend": cfg.inference.backend,
+        "match_mode": match_mode,
         "scored_at": datetime.now(timezone.utc).isoformat(),
         "endpoint": _endpoint(le),
         "ref_extract": ref_stats,
