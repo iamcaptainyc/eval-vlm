@@ -332,7 +332,14 @@ def main() -> int:
     work_root.mkdir(parents=True, exist_ok=True)
 
     oc = cfg["optuna"]
-    storage = oc.get("storage") or f"sqlite:///{(work_root / 'study.db').as_posix()}"
+    raw_storage = oc.get("storage")
+    if not raw_storage:
+        storage = f"sqlite:///{(work_root / 'study.db').as_posix()}"
+    elif "://" not in str(raw_storage):
+        p = Path(raw_storage).as_posix()
+        storage = f"sqlite:///{p}" if p.startswith("/") else f"sqlite:///{Path(p).resolve().as_posix()}"
+    else:
+        storage = str(raw_storage)
     sampler = (optuna.samplers.TPESampler(seed=oc.get("seed"))
                if oc.get("sampler", "tpe") == "tpe"
                else optuna.samplers.RandomSampler(seed=oc.get("seed")))
