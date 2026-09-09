@@ -55,8 +55,11 @@ scoring:
 
 ```bash
 pip install -r requirements.txt
-# 或可编辑安装(提供 eval-vlm 命令):
+# 或可编辑安装(提供 eval-vlm 核心 CLI 命令):
 pip install -e .
+
+# 包含 Web UI 依赖(提供 eval-vlm-webui 可视化平台):
+pip install -e ".[webui]"
 ```
 
 ## 工作目录模型(自包含数据集文件夹)
@@ -134,6 +137,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `onnx-precision --dataset <名\|路径>` | 已存在数据集 | **逐层数值级**校验 torch(safetensors) vs ONNX(probe 模式,ViT+LLM)→ `<数据集>/<模型>/onnx-precision/onnx_precision.{json,md}`(需 torch+onnx+onnxruntime) |
 | `quant-precision --dataset <名\|路径>` | 已存在数据集 | 模拟 MNN 权重量化(仿射/HQQ),**逐层**比 float 权重 vs 反量化权重的激活 → `<数据集>/<模型>/quant-precision/quant_precision.{json,md}`(定位量化崩点;仅需 torch) |
 | `report --dataset <名\|路径>` | 已存在数据集 | **跨格式合并报告**:扫描该数据集下**全部已跑格式**(HF/各 MNN 变体),出质量并排 + 净质量Δ + 诊断 → `<数据集>/report.{json,md}`(纯读取,不跑模型) |
+| `eval-vlm-webui` | — | **可视化 Web UI 平台**: 启动单页应用，提供测试集图片画廊浏览、坏样本审查/删除/恢复、配置在线编辑、任务排队与 SSE 实时日志推流 |
 
 > `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
 
@@ -609,6 +613,59 @@ data:
 
 核心代码无需改动(典型可扩展:`bleu`、`rouge`、`llm_judge` 等)。
 
+## Web UI 可视化审查与任务平台
+
+本项目提供基于 **FastAPI + 免构建轻量单页前端** 的完整 Web UI，为 VLM 评测链路引入直观的可视化交互层：把 `test.json` 与**真实测试图片**一起展示在网页画廊中，支持人工审查与剔除坏样本、回收站无损恢复、配置在线编辑、命令行任务排队执行与 SSE 实时日志监控。
+
+### 启动方式
+
+```bash
+# 方式 1: 直接使用注册脚本
+eval-vlm-webui --host 127.0.0.1 --port 8080
+
+# 方式 2: 通过 Python 模块运行
+python -m eval_vlm.webui --host 127.0.0.1 --port 8080 --workspace ~/eval_vlm_workspace
+```
+
+启动后在浏览器访问 `http://127.0.0.1:8080` 即可进入控制台。
+
+### 核心特性
+
+1. **测试图片画廊与大图灯箱 (Sample Gallery)**
+   - **分页流畅加载**: 支持流式分发 Pillow 动态缩略图（`thumb=1`，最长边等比缩至 768px），避免数百张高分辨率原图并发拉取造成卡顿。
+   - **全屏沉浸式灯箱 (Lightbox)**: 点击图片直接弹窗放大查看原图细节。
+   - **缺图自动高亮**: 当本地图片路径不存在（`exists=false`）时呈现醒目红框报警。
+   - **图文对话上下文**: 卡片内清晰预览 user 提示词、assistant 回答及评测目标标识。
+
+2. **坏样本删除与数据同步 (核心数据一致性保障)**
+   - **双删除模式**:
+     - `整条删除 (record)`: 从 `test.json` 剔除标注异常或坏样本。
+     - `单图删除 (image)`: 多图样本仅剔除损坏/无关单图，后端**精准同步删除对话中对应顺序的 `<image>` 占位符**，严格维护占位符与图片数一致的不变式。
+   - **回收站 (Trash) 与可逆恢复**: 被删样本自动备份到 `<workspace>/_webui/trash/`，随时可在“回收站”抽屉一键恢复至原位置并同步修复索引。
+   - **无损元信息同步**: 原子写盘更新 `test.json`；同步更新 `split_meta.json` 索引并追加 `webui_edits` 审计历史，**不改变**原始 `source_sha256`。
+   - **下游结果过期标记 (Stale Banner)**: 样本位置变动后，系统自动向受影响的历史 Run 写入 `dataset_dirty.json`，前端显式标红提示“评测结果已过期，需重新运行”，防止新旧样本 ID 错位。
+   - **并发与冲突防御**: 细粒度数据集内存锁 + 跨进程文件锁 + 客户端提交附带 `expected_sha256` 乐观锁校验，发生冲突时返回 409 友好弹窗提示刷新。
+
+3. **任务调度面板与 SSE 实时日志**
+   - **全局串行调度队列**: 单 worker 异步排队，避免多任务并发导致 GPU 显存冲突。
+   - **子进程执行**: 自动以 `python -m eval_vlm <subcmd>` 子进程运行任务，天然复用当前 Python/CUDA 运行环境。
+   - **SSE 实时流式控制台**: 实时推流 stdout/stderr、支持自动滚屏/清屏/状态追踪；Windows 支持 `CTRL_BREAK_EVENT` 优雅中断与断点续跑（Resume）。
+   - **任务互斥安全**: 当数据集存在活跃任务时，自动禁止该数据集的样本删除操作，防止污染当前 run。
+
+4. **自动化健康质检 (Health Diagnosis)**
+   - 一键体检数据集健康状况，自动检出缺失图片、`<image>` 占位符失配、重复 ID 等潜在问题。
+
+5. **配置与结果审查**
+   - **配置编辑**: 支持表单快速修改推理后端（openai/mnn/hf/vllm_offline）、模型参数、打分器（exact_match/token_f1/contain 等），写回时保留原 YAML 注释。
+   - **评测结果查看**: 聚合指标卡片、Scored 逐样本明细表（支持一键“最低分优先”快速定位错例）、直接查看渲染好的 `failures.html`。
+   - **Run 对比 (Diff)**: 支持选取两个 Run 比对预测结果的一致率（Agreement Rate）并列出分歧样本。
+
+### 多用户与鉴权配置 (可选)
+
+- **免密模式 (默认)**: 本地单人开发时无需额外配置，自动以 `editor` 角色启动。
+- **Token 保护**: 设置环境变量 `EVAL_VLM_WEBUI_TOKEN=your_secret_token` 即可启用 Bearer / Basic 鉴权保护。
+- **多用户角色文件**: 在 `<workspace>/_webui/users.yaml` 中配置各用户与角色（`viewer` 只读浏览 / `editor` 编辑执行），所有删除与配置更新均会记录审计日志到 `<workspace>/_webui/audit.log.jsonl`。
+
 ## 目录结构
 
 ```
@@ -636,6 +693,16 @@ src/eval_vlm/
 ├── report.py            # 跨格式合并质量报告(HF vs 各 MNN 变体:质量并排 + 净质量Δ + 诊断)
 ├── evaluate.py          # 评分编排
 ├── workspace.py         # 工作目录模型:全局配置 + 数据集初始化/定位 + 模板渲染
+├── webui/               # 可视化 Web UI (FastAPI + 免构建轻量前端)
+│   ├── app.py           # FastAPI app 工厂与路由装配
+│   ├── editing.py       # 样本删除/恢复、trash与下游同步 (核心)
+│   ├── datasets.py      # 数据集只读浏览、样本分页与图片流
+│   ├── jobs.py          # JobManager 串行队列调度与 SSE 实时推流
+│   ├── locks.py         # 细粒度并发锁与乐观 SHA 守卫
+│   ├── configio.py      # 配置在线编辑 (保留注释)
+│   ├── runsio.py        # 运行结果与指标查询
+│   ├── automation.py    # 健康检查与 Run 对比
+│   └── static/          # Alpine.js 单页前端 (画廊/灯箱/控制台/面板)
 ├── templates/
 │   └── config.template.yaml       # 统一配置模板(所有命令共用;split/pred 首次运行渲染)
 └── cli.py               # config / split / pred / score / eval
