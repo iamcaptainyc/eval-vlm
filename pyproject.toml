@@ -16,15 +16,22 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+webui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+]
 
 [project.scripts]
 eval-vlm = "eval_vlm.cli:main"
+eval-vlm-webui = "eval_vlm.webui.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 eval_vlm = ["templates/*.yaml"]
+"eval_vlm.webui" = ["static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
