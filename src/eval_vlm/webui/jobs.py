@@ -49,6 +49,7 @@ class Job:
 
         self.proc: Optional[asyncio.subprocess.Process] = None
         self.subscribers: list[asyncio.Queue[dict[str, Any]]] = []
+        self.command: list[str] = []
 
         self.save_meta()
 
@@ -67,6 +68,8 @@ class Job:
             "pid": self.pid,
             "progress": self.progress,
             "progress_msg": self.progress_msg,
+            "command": self.command,
+            "log_file": str(self.log_file.resolve()),
         }
         self.meta_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -84,6 +87,9 @@ class Job:
             progress=self.progress,
             progress_msg=self.progress_msg,
             queue_position=queue_pos,
+            command=self.command,
+            log_file=str(self.log_file.resolve()),
+            params=self.params,
         )
 
     def broadcast(self, event_type: str, data: Any) -> None:
@@ -130,6 +136,7 @@ class JobManager:
                     job.pid = data.get("pid")
                     job.progress = data.get("progress")
                     job.progress_msg = data.get("progress_msg")
+                    job.command = data.get("command") or self._build_cmd(job)
 
                     # 若原本标为 running 或 queued，服务重启后标为 interrupted
                     if data.get("status") in ("running", "queued"):
@@ -178,6 +185,8 @@ class JobManager:
             user=user,
             settings=self.settings,
         )
+        self._build_cmd(job)
+        job.save_meta()
         self.jobs[job_id] = job
         self.queue.put_nowait(job_id)
         self.start_worker()
@@ -217,13 +226,15 @@ class JobManager:
             cmd.extend(["-d", job.dataset])
         cmd.extend(["--workspace", str(self.settings.workspace)])
 
-        # 附加额外参数
-        for k, v in job.params.items():
+        # 附加额外参数 (自动转换下划线为连字符: match_mode -> --match-mode)
+        for k, v in (job.params or {}).items():
+            arg_name = f"--{k.replace('_', '-')}"
             if v is True:
-                cmd.append(f"--{k}")
-            elif v is not False and v is not None:
-                cmd.extend([f"--{k}", str(v)])
+                cmd.append(arg_name)
+            elif v is not False and v is not None and str(v).strip() != "":
+                cmd.extend([arg_name, str(v).strip()])
 
+        job.command = cmd
         return cmd
 
     async def _execute_job(self, job: Job) -> None:
@@ -243,12 +254,19 @@ class JobManager:
 
         with job.log_file.open("a", encoding="utf-8") as f_log:
             f_log.write(f"=== 命令启动: {' '.join(cmd)} ===\n")
+            f_log.write(f"=== 日志路径: {job.log_file.resolve()} ===\n")
             f_log.flush()
 
         proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
         job.proc = proc
         job.pid = proc.pid
         job.save_meta()
+        job.broadcast("started", {
+            "status": "running",
+            "command": cmd,
+            "log_file": str(job.log_file.resolve()),
+            "pid": proc.pid,
+        })
 
         # 读取输出并推流
         assert proc.stdout is not None

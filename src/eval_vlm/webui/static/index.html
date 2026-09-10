@@ -194,13 +194,14 @@
       <div class="control-bar">
         <div>
           <h2 class="section-title">任务调度队列</h2>
-          <p class="section-subtitle">串行化异步调度，子进程执行 CLI，防 GPU 显存并发打架</p>
+          <p class="section-subtitle">串行化异步调度，子进程执行 CLI，透明化命令与日志落盘</p>
         </div>
         <div class="control-bar-right">
-          <button class="btn btn-primary" onclick="submitJob('eval')">🚀 一键评测 (eval)</button>
-          <button class="btn" onclick="submitJob('pred')">⚡ 仅推理 (pred)</button>
-          <button class="btn" onclick="submitJob('score')">🎯 仅打分 (score)</button>
-          <button class="btn" onclick="submitJob('sweep')">🌐 跨数据集扫描 (sweep)</button>
+          <button class="btn btn-primary" onclick="openJobModal('eval')">🚀 一键评测 (eval)</button>
+          <button class="btn btn-primary" style="background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);" onclick="openJobModal('field-eval')">🏷️ 字段评测 (field-eval)</button>
+          <button class="btn" onclick="openJobModal('pred')">⚡ 仅推理 (pred)</button>
+          <button class="btn" onclick="openJobModal('score')">🎯 仅打分 (score)</button>
+          <button class="btn" onclick="openJobModal('sweep')">🌐 跨数据集扫描 (sweep)</button>
           <button class="btn" onclick="loadJobs()">🔄 刷新列表</button>
         </div>
       </div>
@@ -212,10 +213,10 @@
               <th>任务 ID</th>
               <th>类型</th>
               <th>数据集</th>
+              <th>执行参数 / 完整命令</th>
               <th>提交者</th>
               <th>状态</th>
               <th>创建时间</th>
-              <th>退出码</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -228,12 +229,25 @@
     <section id="view-runs" class="view-panel">
       <div class="control-bar">
         <div class="control-bar-left">
-          <span style="font-size: 0.85rem; color: var(--text-muted);">选择 Run:</span>
-          <select id="runs-select" class="select" style="min-width: 280px;" onchange="onRunSelected(this.value)"></select>
+          <span style="font-size: 0.85rem; color: var(--text-muted);">数据集:</span>
+          <select id="runs-dataset-select" class="select" onchange="selectDatasetAndNavigate(this.value, 'runs')"></select>
+
+          <span style="font-size: 0.85rem; color: var(--text-muted); margin-left: 0.5rem;">选择 Run:</span>
+          <select id="runs-select" class="select" style="min-width: 260px;" onchange="onRunSelected(this.value)"></select>
+
+          <!-- 评测方法分段切换器 (当 Run 同时包含 field-eval 与 eval 时自适应展示) -->
+          <div id="runs-method-switch" class="segmented-control" style="display: none;">
+            <button id="runs-tab-field-eval" class="segmented-btn active" onclick="switchRunMethod('field-eval')">🏷️ 字段评测 (field-eval)</button>
+            <button id="runs-tab-eval" class="segmented-btn" onclick="switchRunMethod('eval')">💬 对话打分 (eval)</button>
+          </div>
         </div>
+
         <div class="control-bar-right">
           <a id="run-failures-link" href="#" target="_blank" class="btn" style="display: none;">
             📄 打开 failures.html 报告
+          </a>
+          <a id="run-field-html-link" href="#" target="_blank" class="btn" style="display: none;">
+            📄 打开 field_mismatches.html 独立报告
           </a>
         </div>
       </div>
@@ -247,55 +261,120 @@
             <span id="run-stale-reason" style="font-size: 0.82rem; color: #fecdd3;"></span>
           </div>
         </div>
-        <button class="btn btn-sm btn-danger" onclick="submitJob('eval')">一键重跑</button>
+        <button class="btn btn-sm btn-danger" onclick="openJobModal('eval')">一键重跑</button>
       </div>
 
-      <!-- 指标卡片 -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; margin-bottom: 1.75rem;">
-        <div class="dataset-card" style="text-align: center;">
-          <div id="metric-score" class="metric-number" style="font-size: 2rem; color: var(--emerald-500);">—</div>
-          <div class="metric-label">综合平均得分 (Overall Mean)</div>
-        </div>
-        <div class="dataset-card" style="text-align: center;">
-          <div id="metric-count" class="metric-number" style="font-size: 2rem; color: var(--cyan-500);">0</div>
-          <div class="metric-label">已评测样本数</div>
-        </div>
-        <div class="dataset-card" style="text-align: center;">
-          <div id="metric-failed" class="metric-number" style="font-size: 2rem; color: var(--rose-500);">0</div>
-          <div class="metric-label">未命中目标轮次</div>
-        </div>
-        <div class="dataset-card" style="text-align: center;">
-          <div id="metric-scorer" class="metric-number" style="font-size: 1.3rem; color: #cbd5e1;">—</div>
-          <div class="metric-label">打分器类型</div>
-        </div>
-      </div>
+      <!-- 空运行引导容器 -->
+      <div id="runs-empty-container" style="display: none;"></div>
 
-      <!-- Scored 明细表格 -->
-      <div class="data-table-container">
-        <div style="padding: 1rem 1.25rem; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
-          <strong style="font-size: 0.95rem;">逐样本打分明细 (Scored Details)</strong>
-          <div style="display: flex; align-items: center; gap: 0.65rem;">
-            <span style="font-size: 0.82rem; color: var(--text-muted);">排序:</span>
-            <select class="select" onchange="state.scoredOrder=this.value; loadScored(0);">
-              <option value="default">默认文件顺序</option>
-              <option value="lowest">最低分优先 (审核坏例)</option>
-              <option value="highest">最高分优先</option>
-            </select>
+      <!-- 模式 A: 字段评测 (field-eval) 专属展示板块 -->
+      <div id="runs-field-eval-section" style="display: none;">
+        <!-- 4 大聚合指标卡片 -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; margin-bottom: 1.75rem;">
+          <div class="dataset-card" style="text-align: center;">
+            <div id="field-metric-micro" class="metric-number" style="font-size: 2.1rem; color: var(--emerald-500);">—</div>
+            <div class="metric-label">Micro 综合准确率 (Overall Micro Acc)</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="field-metric-macro" class="metric-number" style="font-size: 2.1rem; color: var(--cyan-500);">—</div>
+            <div class="metric-label">Macro 宏平均准确率 (Macro Acc)</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="field-metric-exact" class="metric-number" style="font-size: 1.6rem; color: #a78bfa;">—</div>
+            <div class="metric-label">整样本全对率 (Exact Match Rate)</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="field-metric-count" class="metric-number" style="font-size: 1.6rem; color: #cbd5e1;">0</div>
+            <div class="metric-label">已评样本数 (Scored / Missing)</div>
           </div>
         </div>
 
-        <table class="ui-table">
-          <thead>
-            <tr>
-              <th>样本 ID</th>
-              <th>轮次</th>
-              <th>得分</th>
-              <th>模型预测结果 (Prediction)</th>
-              <th>参考标准答案 (Reference)</th>
-            </tr>
-          </thead>
-          <tbody id="scored-tbody"></tbody>
-        </table>
+        <!-- 逐字段准确率细分看板 -->
+        <div class="dataset-card" style="margin-bottom: 1.75rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="font-size: 1.05rem; color: #fff;">逐字段准确率概览 (Per-Field Accuracy)</h3>
+            <span style="font-size: 0.78rem; color: var(--text-dim);">各枚举字段抽取正确率对比</span>
+          </div>
+          <div id="field-metrics-grid" class="field-metrics-grid"></div>
+        </div>
+
+        <!-- 逐字段失配清单明细表 -->
+        <div class="data-table-container">
+          <div style="padding: 1rem 1.25rem; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 0.95rem;">逐字段失配清单明细 (Field Mismatches)</strong>
+            <div style="display: flex; align-items: center; gap: 0.65rem;">
+              <span style="font-size: 0.82rem; color: var(--text-muted);">状态筛选:</span>
+              <select id="field-mismatches-filter" class="select" onchange="state.fieldMismatchesFilter=this.value; loadFieldMismatches(0);">
+                <option value="">全部失配记录</option>
+                <option value="mismatch">部分字段失配 (mismatch)</option>
+                <option value="pred_missing">模型无输出判错 (pred_missing)</option>
+              </select>
+            </div>
+          </div>
+
+          <table class="ui-table">
+            <thead>
+              <tr>
+                <th style="width: 140px;">样本 ID</th>
+                <th style="width: 110px;">判定状态</th>
+                <th>模型输出文本 (Prediction)</th>
+                <th style="width: 380px;">逐字段比对详情 (Field Comparison)</th>
+              </tr>
+            </thead>
+            <tbody id="field-mismatches-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 模式 B: 对话评测 (eval) 专属展示板块 -->
+      <div id="runs-eval-section" style="display: none;">
+        <!-- 4 大指标卡片 -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; margin-bottom: 1.75rem;">
+          <div class="dataset-card" style="text-align: center;">
+            <div id="metric-score" class="metric-number" style="font-size: 2rem; color: var(--emerald-500);">—</div>
+            <div class="metric-label">综合平均得分 (Overall Mean)</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="metric-count" class="metric-number" style="font-size: 2rem; color: var(--cyan-500);">0</div>
+            <div class="metric-label">已评测样本数</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="metric-failed" class="metric-number" style="font-size: 2rem; color: var(--rose-500);">0</div>
+            <div class="metric-label">未命中目标轮次</div>
+          </div>
+          <div class="dataset-card" style="text-align: center;">
+            <div id="metric-scorer" class="metric-number" style="font-size: 1.3rem; color: #cbd5e1;">—</div>
+            <div class="metric-label">打分器类型</div>
+          </div>
+        </div>
+
+        <!-- Scored 明细表格 -->
+        <div class="data-table-container">
+          <div style="padding: 1rem 1.25rem; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 0.95rem;">逐样本打分明细 (Scored Details)</strong>
+            <div style="display: flex; align-items: center; gap: 0.65rem;">
+              <span style="font-size: 0.82rem; color: var(--text-muted);">排序:</span>
+              <select class="select" onchange="state.scoredOrder=this.value; loadScored(0);">
+                <option value="default">默认文件顺序</option>
+                <option value="lowest">最低分优先 (审核坏例)</option>
+                <option value="highest">最高分优先</option>
+              </select>
+            </div>
+          </div>
+
+          <table class="ui-table">
+            <thead>
+              <tr>
+                <th>样本 ID</th>
+                <th>轮次</th>
+                <th>得分</th>
+                <th>模型预测结果 (Prediction)</th>
+                <th>参考标准答案 (Reference)</th>
+              </tr>
+            </thead>
+            <tbody id="scored-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -330,15 +409,15 @@
       </div>
     </section>
 
-    <!-- 7. 健康质检视图 (Health) -->
+    <!-- 7. 健康体检视图 (Health) -->
     <section id="view-health" class="view-panel">
       <div class="control-bar">
         <div>
-          <h2 class="section-title">数据集健康体检</h2>
-          <p class="section-subtitle">深度扫描缺失图片、占位符失配、重复 ID 等潜在坏样本</p>
+          <h2 class="section-title">数据集健康体检诊断</h2>
+          <p class="section-subtitle">自动化 P0 级别质检：坏例检测、失配标记与图片磁盘缺失筛查</p>
         </div>
         <div class="control-bar-right">
-          <button class="btn btn-primary" onclick="loadHealth()">🩺 立即重新体检</button>
+          <button class="btn" onclick="loadHealth()">🩺 重新体检</button>
         </div>
       </div>
 
@@ -347,16 +426,16 @@
 
   </main>
 
-  <!-- 原生 <dialog> 灯箱组件 (Lightbox) -->
-  <dialog id="lightbox-modal" class="lightbox-dialog" onclick="if(event.target===this) closeLightbox();">
-    <button class="lightbox-btn-close" onclick="closeLightbox()">&times;</button>
-    <div class="lightbox-stage">
-      <img id="lightbox-img" src="" alt="Full Preview">
+  <!-- 原生大图灯箱 Lightbox 模态框 -->
+  <dialog id="lightbox-modal" class="lightbox-dialog" onclick="if(event.target===this) closeLightbox()">
+    <div class="lightbox-wrapper">
+      <button class="lightbox-close-btn" onclick="closeLightbox()">&times;</button>
+      <img id="lightbox-img" src="" alt="放大图">
+      <div id="lightbox-cap" class="lightbox-caption"></div>
     </div>
-    <div id="lightbox-cap" class="lightbox-caption"></div>
   </dialog>
 
-  <!-- 原生 <dialog> 删除确认模态框 -->
+  <!-- 样本删除确认模态框 -->
   <dialog id="delete-modal" class="custom-modal">
     <h3 class="modal-title">确认删除样本</h3>
     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
@@ -381,12 +460,142 @@
     </div>
   </dialog>
 
+  <!-- 任务启动参数配置模态框 (彻底消除黑盒) -->
+  <dialog id="job-launch-modal" class="custom-modal" style="max-width: 680px; width: 92vw;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div style="display: flex; align-items: center; gap: 0.65rem;">
+        <span id="job-modal-type-icon" style="font-size: 1.35rem;">🚀</span>
+        <h3 id="job-modal-title" class="modal-title" style="margin: 0;">配置并启动任务</h3>
+      </div>
+      <button class="btn btn-sm" onclick="closeJobModal()">&times;</button>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 1.1rem; font-size: 0.84rem;">
+      <!-- 1. 目标数据集 -->
+      <div id="job-modal-dataset-group">
+        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">目标数据集 (Dataset)</label>
+        <select id="job-modal-dataset" class="select" style="width: 100%;" onchange="updateJobCommandPreview()"></select>
+        <span id="job-modal-dataset-path" style="display: block; font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem; font-family: var(--font-mono);"></span>
+      </div>
+
+      <!-- 2. 通用参数网格 -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+          <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (--backend)</label>
+          <select id="job-modal-backend" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+            <option value="">(保持 config.yaml 默认)</option>
+            <option value="openai">openai (在线 API / vLLM HTTP)</option>
+            <option value="vllm">vllm (OpenAI 兼容协议)</option>
+            <option value="mnn">mnn (本地 MNN 离线推理)</option>
+            <option value="hf">hf (本地 HuggingFace)</option>
+            <option value="vllm_offline">vllm_offline (本地 vLLM 离线推理)</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">临时模型名覆盖 (--model)</label>
+          <input type="text" id="job-modal-model" class="input" style="width: 100%;" placeholder="留空则读取配置文件" oninput="updateJobCommandPreview()">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+          <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">冒烟样本限制 (--limit)</label>
+          <input type="number" id="job-modal-limit" class="input" style="width: 100%;" placeholder="如 5 或 10 (留空跑全量)" min="1" oninput="updateJobCommandPreview()">
+        </div>
+
+        <div style="display: flex; align-items: flex-end; padding-bottom: 0.5rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+            <input type="checkbox" id="job-modal-failfast" onchange="updateJobCommandPreview()">
+            <span>遇错立即终止 (--fail-fast)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 3. field-eval 专属参数 -->
+      <div id="job-modal-field-eval-params" style="display: none; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.85rem; border-radius: var(--radius-md);">
+        <div style="font-weight: 600; color: var(--cyan-500); margin-bottom: 0.75rem; font-size: 0.82rem;">🏷️ 字段抽取评测专用参数</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">匹配判定模式 (--match-mode)</label>
+            <select id="job-modal-matchmode" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+              <option value="exact">exact (严格双向相等 set(ref)==set(pred))</option>
+              <option value="contain">contain (包含即算对 set(ref)⊆set(pred))</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测指定轮次 (--targets)</label>
+            <select id="job-modal-targets" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+              <option value="first">first (仅第一轮描述，默认)</option>
+              <option value="all">all (全部 assistant 轮)</option>
+              <option value="last">last (仅最后一轮)</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
+            <input type="checkbox" id="job-modal-overwrite" onchange="updateJobCommandPreview()">
+            <span>无视已抽取缓存，强制整份重新抽取 (--overwrite)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 4. eval / score 专属参数 -->
+      <div id="job-modal-eval-params" style="display: none; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.85rem; border-radius: var(--radius-md);">
+        <div style="font-weight: 600; color: var(--emerald-500); margin-bottom: 0.75rem; font-size: 0.82rem;">💬 对话打分专用参数</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">打分器类型 (--scorer)</label>
+            <select id="job-modal-scorer" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+              <option value="">(保持配置默认)</option>
+              <option value="exact_match">exact_match</option>
+              <option value="token_f1">token_f1</option>
+              <option value="contain">contain</option>
+              <option value="bleu">bleu</option>
+              <option value="rouge">rouge</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测目标轮次 (--targets)</label>
+            <select id="job-modal-eval-targets" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+              <option value="">(保持配置默认)</option>
+              <option value="all">all (全部 assistant 轮)</option>
+              <option value="last">last (仅最后一轮)</option>
+              <option value="first">first (仅第一轮图像描述)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. 实时命令预览 (消除黑盒) -->
+      <div class="code-preview-box">
+        <div class="code-preview-title">
+          <span>🖥️ 即将执行的完整 CLI 指令预览</span>
+          <span style="font-size: 0.7rem; color: var(--cyan-500);">非黑盒执行</span>
+        </div>
+        <code id="job-modal-cmd-preview">eval-vlm eval ...</code>
+      </div>
+
+      <!-- 6. 日志落盘目标说明 -->
+      <div class="log-path-notice">
+        <span>📁 进程标准输出与错误流将落盘至：</span>
+        <code id="job-modal-log-destination">.../_webui/jobs/&lt;job_id&gt;/log.txt</code>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="margin-top: 1.5rem;">
+      <button class="btn" onclick="closeJobModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmLaunchJob()">🚀 立即启动执行</button>
+    </div>
+  </dialog>
+
   <!-- 实时终端日志抽屉 -->
   <div id="terminal-drawer" class="terminal-drawer hidden">
     <div class="terminal-header">
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <span style="font-weight: 700; color: #fff; font-size: 0.88rem;">🖥️ 任务实时输出</span>
-        <span id="terminal-job-label" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--cyan-500);"></span>
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+        <span style="font-weight: 700; color: #fff; font-size: 0.88rem;">🖥️ 任务终端</span>
+        <span id="terminal-job-label" class="user-tag" style="background: rgba(99,102,241,0.25); color: #a5b4fc; font-family: var(--font-mono); font-size: 0.75rem;"></span>
+        <span id="terminal-dataset-label" class="dataset-active-pill" style="font-size: 0.75rem; padding: 2px 8px;"></span>
       </div>
       <div style="display: flex; align-items: center; gap: 0.75rem;">
         <label style="font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem;">
@@ -396,6 +605,13 @@
         <button class="btn btn-sm btn-outline-danger" onclick="closeTerminal()">&times; 关闭</button>
       </div>
     </div>
+
+    <!-- 终端顶部元数据指示栏 -->
+    <div id="terminal-meta-bar" style="background: #060a12; border-bottom: 1px solid var(--border-subtle); padding: 0.4rem 1.35rem; font-size: 0.75rem; display: flex; gap: 1.5rem; color: var(--text-dim); flex-wrap: wrap;">
+      <div><span>执行命令: </span><code id="terminal-cmd-display" style="color: #cbd5e1; font-family: var(--font-mono);"></code></div>
+      <div><span>日志文件: </span><code id="terminal-log-display" style="color: var(--cyan-500); font-family: var(--font-mono);"></code></div>
+    </div>
+
     <pre id="terminal-pre" class="terminal-stream-log"></pre>
   </div>
 

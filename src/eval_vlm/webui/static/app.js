@@ -1,6 +1,7 @@
 /**
  * eval_vlm Web UI - Modern Vanilla JS Reactive Engine
  * Zero CDN dependencies, 100% offline & local network compatible.
+ * Full support for both standard eval and field-eval, with transparent Job Queue.
  */
 
 // 全局应用状态
@@ -25,10 +26,26 @@ const state = {
   // 删除弹窗
   deleteModal: { open: false, sampleId: "", mode: "record", imageIndex: null, reason: "" },
 
+  // 任务启动模态框配置 (消除黑盒)
+  jobModal: {
+    open: false,
+    type: "eval",
+    dataset: "",
+    backend: "",
+    model: "",
+    limit: "",
+    failfast: false,
+    match_mode: "exact",
+    targets: "first",
+    overwrite: false,
+    scorer: "",
+    eval_targets: "",
+  },
+
   // 配置
   configData: { config: {}, raw: "", settableDoc: "" },
 
-  // 任务
+  // 任务队列
   jobs: [],
   currentJobId: null,
   terminalLogs: "",
@@ -36,15 +53,27 @@ const state = {
   autoScrollLogs: true,
   eventSource: null,
 
-  // 评测结果
+  // 评测结果与指标 (双模态: field-eval / eval)
   runs: [],
+  selectedRunIndex: 0,
   selectedRun: null,
+  activeRunMethod: "field-eval", // "field-eval" | "eval"
+
+  // eval 模式数据
   runMetrics: null,
   scoredRecords: [],
   scoredTotal: 0,
   scoredOffset: 0,
   scoredLimit: 30,
   scoredOrder: "default",
+
+  // field-eval 模式数据
+  fieldMetrics: null,
+  fieldMismatches: [],
+  fieldMismatchesTotal: 0,
+  fieldMismatchesOffset: 0,
+  fieldMismatchesLimit: 20,
+  fieldMismatchesFilter: "",
 
   // 回收站
   trashItems: [],
@@ -192,8 +221,8 @@ function renderDatasets() {
             <span class="dataset-card-name">${escapeHtml(ds.name)}</span>
             ${
               ds.has_dirty_runs
-                ? `<span class="brand-badge" style="background: var(--rose-bg); border-color: var(--rose-border); color: #fb7185;">含过期 Run</span>`
-                : `<span class="brand-badge">正常</span>`
+                ? `<span class="badge-stale">存在过期 Run</span>`
+                : `<span class="role-badge" style="background: var(--emerald-bg); border-color: var(--emerald-border); color: var(--emerald-500);">正常</span>`
             }
           </div>
 
@@ -239,6 +268,7 @@ function renderDatasets() {
 
 function selectDatasetAndNavigate(name, tab) {
   state.currentDataset = name;
+  updateHeaderDatasetPill();
   switchTab(tab, name);
 }
 
@@ -393,7 +423,7 @@ function renderGallery() {
             <span class="sample-id-code">${escapeHtml(s.id)}</span>
           </div>
           <button class="btn btn-sm btn-outline-danger" onclick="promptDelete('${escapeHtml(s.id)}', 'record')">
-            🗑️ 删整条
+            🗑️ 删除样本
           </button>
         </div>
 
@@ -404,7 +434,8 @@ function renderGallery() {
         <div class="sample-dialogue-flow">
           ${turnsHtml}
         </div>
-      </div>`;
+      </div>
+    `;
     })
     .join("");
 }
@@ -494,7 +525,6 @@ async function confirmDelete() {
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
 
-    const result = await res.json();
     closeDeleteModal();
     showToast(`样本 ${sampleId} 已成功删除，已进入回收站`, "success");
     await loadSamples(state.samplesOffset);
@@ -585,7 +615,11 @@ async function restoreTrashItem(trashId) {
 // 配置编辑 (Config)
 // --------------------------------------------------------------------------
 async function loadConfig() {
-  if (!state.currentDataset) return;
+  if (!state.currentDataset) {
+    const rawPre = document.getElementById("config-raw-pre");
+    if (rawPre) rawPre.textContent = "# 未选定数据集，请先进入数据集页面选择";
+    return;
+  }
   try {
     const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/config`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -630,6 +664,163 @@ async function saveSingleConfigKey(key, value) {
 }
 
 // --------------------------------------------------------------------------
+// 任务启动模态框配置 (消除黑盒)
+// --------------------------------------------------------------------------
+function openJobModal(type) {
+  state.jobModal.type = type;
+  const modal = document.getElementById("job-launch-modal");
+  const titleEl = document.getElementById("job-modal-title");
+  const iconEl = document.getElementById("job-modal-type-icon");
+  const dsSelect = document.getElementById("job-modal-dataset");
+  const feParams = document.getElementById("job-modal-field-eval-params");
+  const evalParams = document.getElementById("job-modal-eval-params");
+
+  // 标题与图标定制
+  const typeMap = {
+    "eval": { title: "配置并启动 对话评测任务 (eval)", icon: "🚀" },
+    "field-eval": { title: "配置并启动 逐字段抽取评测任务 (field-eval)", icon: "🏷️" },
+    "pred": { title: "配置并启动 模型批量推理 (pred)", icon: "⚡" },
+    "score": { title: "配置并启动 离线指标打分 (score)", icon: "🎯" },
+    "sweep": { title: "配置并启动 跨数据集扫描 (sweep)", icon: "🌐" },
+  };
+  const info = typeMap[type] || { title: `配置并启动 ${type} 任务`, icon: "⚙️" };
+  if (titleEl) titleEl.textContent = info.title;
+  if (iconEl) iconEl.textContent = info.icon;
+
+  // 填充数据集选择下拉框
+  if (dsSelect) {
+    if (type === "sweep") {
+      dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
+    } else {
+      dsSelect.innerHTML = state.datasets
+        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+        .join("");
+    }
+  }
+
+  // 专用参数面板显示隐藏
+  if (feParams) feParams.style.display = type === "field-eval" ? "block" : "none";
+  if (evalParams) evalParams.style.display = (type === "eval" || type === "score") ? "block" : "none";
+
+  // 重置通用输入项默认值
+  const backendSelect = document.getElementById("job-modal-backend");
+  const modelInput = document.getElementById("job-modal-model");
+  const limitInput = document.getElementById("job-modal-limit");
+  const failfastCb = document.getElementById("job-modal-failfast");
+  if (backendSelect) backendSelect.value = "";
+  if (modelInput) modelInput.value = "";
+  if (limitInput) limitInput.value = "";
+  if (failfastCb) failfastCb.checked = false;
+
+  updateJobCommandPreview();
+  if (modal) modal.showModal();
+}
+
+function closeJobModal() {
+  const modal = document.getElementById("job-launch-modal");
+  if (modal) modal.close();
+}
+
+function updateJobCommandPreview() {
+  const type = state.jobModal.type;
+  const dsSelect = document.getElementById("job-modal-dataset");
+  const dsName = dsSelect ? dsSelect.value : state.currentDataset;
+  const pathSpan = document.getElementById("job-modal-dataset-path");
+
+  // 更新数据集物理路径提示
+  if (pathSpan) {
+    const dsObj = state.datasets.find((d) => d.name === dsName);
+    pathSpan.textContent = dsObj ? `路径: ${dsObj.path}` : "";
+  }
+
+  const backend = document.getElementById("job-modal-backend")?.value;
+  const model = document.getElementById("job-modal-model")?.value.trim();
+  const limit = document.getElementById("job-modal-limit")?.value.trim();
+  const failfast = document.getElementById("job-modal-failfast")?.checked;
+
+  const parts = ["python", "-m", "eval_vlm", type];
+  if (dsName) parts.push("-d", dsName);
+  if (backend) parts.push("--backend", backend);
+  if (model) parts.push("--model", model);
+  if (limit) parts.push("--limit", limit);
+  if (failfast) parts.push("--fail-fast");
+
+  if (type === "field-eval") {
+    const matchMode = document.getElementById("job-modal-matchmode")?.value;
+    const targets = document.getElementById("job-modal-targets")?.value;
+    const overwrite = document.getElementById("job-modal-overwrite")?.checked;
+    if (matchMode && matchMode !== "exact") parts.push("--match-mode", matchMode);
+    if (targets && targets !== "first") parts.push("--targets", targets);
+    if (overwrite) parts.push("--overwrite");
+  } else if (type === "eval" || type === "score") {
+    const scorer = document.getElementById("job-modal-scorer")?.value;
+    const targets = document.getElementById("job-modal-eval-targets")?.value;
+    if (scorer) parts.push("--scorer", scorer);
+    if (targets) parts.push("--targets", targets);
+  }
+
+  const cmdStr = parts.join(" ");
+  const previewEl = document.getElementById("job-modal-cmd-preview");
+  if (previewEl) previewEl.textContent = cmdStr;
+
+  const logDest = document.getElementById("job-modal-log-destination");
+  if (logDest) {
+    logDest.textContent = `.../_webui/jobs/<job_id>/log.txt (工作区状态目录)`;
+  }
+}
+
+async function confirmLaunchJob() {
+  const type = state.jobModal.type;
+  const dsSelect = document.getElementById("job-modal-dataset");
+  const dataset = dsSelect ? dsSelect.value : state.currentDataset;
+
+  const backend = document.getElementById("job-modal-backend")?.value;
+  const model = document.getElementById("job-modal-model")?.value.trim();
+  const limit = document.getElementById("job-modal-limit")?.value.trim();
+  const failfast = document.getElementById("job-modal-failfast")?.checked;
+
+  const params = {};
+  if (backend) params.backend = backend;
+  if (model) params.model = model;
+  if (limit) params.limit = parseInt(limit, 10);
+  if (failfast) params.fail_fast = true;
+
+  if (type === "field-eval") {
+    const matchMode = document.getElementById("job-modal-matchmode")?.value;
+    const targets = document.getElementById("job-modal-targets")?.value;
+    const overwrite = document.getElementById("job-modal-overwrite")?.checked;
+    if (matchMode) params.match_mode = matchMode;
+    if (targets) params.targets = targets;
+    if (overwrite) params.overwrite = true;
+  } else if (type === "eval" || type === "score") {
+    const scorer = document.getElementById("job-modal-scorer")?.value;
+    const targets = document.getElementById("job-modal-eval-targets")?.value;
+    if (scorer) params.scorer = scorer;
+    if (targets) params.targets = targets;
+  }
+
+  try {
+    const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, dataset, params }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const job = await res.json();
+    closeJobModal();
+    showToast(`任务已提交入队: ${job.id}`, "success");
+    await loadJobs();
+    openTerminal(job.id);
+  } catch (err) {
+    showToast(`启动任务失败: ${err.message}`, "error");
+  }
+}
+
+// --------------------------------------------------------------------------
 // 任务管理与 SSE (Jobs)
 // --------------------------------------------------------------------------
 async function loadJobs() {
@@ -663,18 +854,22 @@ function renderJobs() {
         statusBadge = `<span class="role-badge" style="background:rgba(99,102,241,0.2); border-color:rgba(99,102,241,0.4); color:#a5b4fc;">运行中</span>`;
       }
 
+      const cmdText = (j.command && j.command.length) ? j.command.join(" ") : (j.params ? JSON.stringify(j.params) : "—");
+
       return `
       <tr>
         <td style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;">${escapeHtml(j.id)}</td>
-        <td>${escapeHtml(j.type)}</td>
-        <td>${escapeHtml(j.dataset || "—")}</td>
+        <td><span class="role-badge" style="background:rgba(6,182,212,0.15); color:var(--cyan-500);">${escapeHtml(j.type)}</span></td>
+        <td><strong style="color: #fff;">${escapeHtml(j.dataset || "—")}</strong></td>
+        <td style="max-width: 320px; font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-dim); word-break: break-all;" title="${escapeHtml(cmdText)}">
+          ${escapeHtml(cmdText)}
+        </td>
         <td>${escapeHtml(j.user)}</td>
         <td>${statusBadge}</td>
-        <td style="font-size: 0.8rem; color: var(--text-dim);">${new Date(j.created_at).toLocaleString()}</td>
-        <td>${j.exit_code !== null ? j.exit_code : "—"}</td>
+        <td style="font-size: 0.78rem; color: var(--text-dim);">${new Date(j.created_at).toLocaleString()}</td>
         <td>
           <div style="display: flex; gap: 0.35rem;">
-            <button class="btn btn-sm" onclick="openTerminal('${escapeHtml(j.id)}')">📜 实时日志</button>
+            <button class="btn btn-sm btn-primary" onclick="openTerminal('${escapeHtml(j.id)}')">🖥️ 实时日志</button>
             ${
               j.status === "running" || j.status === "queued"
                 ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${escapeHtml(j.id)}')">停止</button>`
@@ -682,7 +877,7 @@ function renderJobs() {
             }
             ${
               j.status === "failed" || j.status === "interrupted" || j.status === "canceled"
-                ? `<button class="btn btn-sm btn-primary" onclick="resumeJob('${escapeHtml(j.id)}')">续跑</button>`
+                ? `<button class="btn btn-sm" onclick="resumeJob('${escapeHtml(j.id)}')">续跑</button>`
                 : ""
             }
           </div>
@@ -693,49 +888,42 @@ function renderJobs() {
     .join("");
 }
 
-async function submitJob(type) {
-  if (!state.currentDataset && type !== "sweep") {
-    showToast("请先选择一个数据集", "warning");
-    return;
-  }
-  try {
-    const url = type === "sweep" ? "/api/sweep/jobs" : `/api/datasets/${encodeURIComponent(state.currentDataset)}/jobs`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, params: {} }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    const job = await res.json();
-    showToast(`任务已成功提交入队: ${job.id}`, "success");
-    await loadJobs();
-    openTerminal(job.id);
-  } catch (err) {
-    showToast(`提交任务失败: ${err.message}`, "error");
-  }
-}
-
 function openTerminal(jobId) {
   state.currentJobId = jobId;
   state.terminalLogs = "";
   state.logDrawerOpen = true;
 
   const drawer = document.getElementById("terminal-drawer");
-  const label = document.getElementById("terminal-job-label");
+  const jobLabel = document.getElementById("terminal-job-label");
+  const dsLabel = document.getElementById("terminal-dataset-label");
+  const cmdDisplay = document.getElementById("terminal-cmd-display");
+  const logDisplay = document.getElementById("terminal-log-display");
   const pre = document.getElementById("terminal-pre");
 
   if (drawer) drawer.classList.remove("hidden");
-  if (label) label.textContent = jobId;
-  if (pre) pre.textContent = "正在连接进程输出流...\n";
+  if (pre) pre.textContent = "正在连接进程日志输出流...\\n";
+
+  // 读取已缓存的 job 元信息
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (job) {
+    if (dsLabel) dsLabel.textContent = `数据集: ${job.dataset || "全量"}`;
+    if (cmdDisplay) cmdDisplay.textContent = job.command?.length ? job.command.join(" ") : "—";
+    if (logDisplay) logDisplay.textContent = job.log_file || "—";
+  }
 
   if (state.eventSource) {
     state.eventSource.close();
   }
 
   state.eventSource = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
+
+  state.eventSource.addEventListener("started", (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (cmdDisplay && data.command) cmdDisplay.textContent = data.command.join(" ");
+      if (logDisplay && data.log_file) logDisplay.textContent = data.log_file;
+    } catch (_) {}
+  });
 
   state.eventSource.addEventListener("log", (e) => {
     try {
@@ -798,68 +986,351 @@ async function resumeJob(jobId) {
 }
 
 // --------------------------------------------------------------------------
-// 评测结果 (Runs)
+// 评测结果与指标 (Runs) - 双模态全面支持 (field-eval / eval)
 // --------------------------------------------------------------------------
 async function loadRuns() {
-  if (!state.currentDataset) return;
+  if (!state.currentDataset) {
+    showRunsEmptyState("请先选择一个数据集");
+    return;
+  }
+
+  // 更新 Runs 页面数据集下拉框
+  const dsSelect = document.getElementById("runs-dataset-select");
+  if (dsSelect && state.datasets.length) {
+    dsSelect.innerHTML = state.datasets
+      .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+      .join("");
+  }
+
   try {
     const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/runs`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.runs = await res.json();
-    if (state.runs.length > 0 && !state.selectedRun) {
-      state.selectedRun = state.runs[0];
+
+    if (!state.runs.length) {
+      showRunsEmptyState("当前数据集暂无已完成的评测结果");
+      return;
     }
-    renderRuns();
-    if (state.selectedRun) {
-      await loadRunMetrics();
-      await loadScored(0);
+
+    // 默认选中第一个 Run (或保留当前选中的下标)
+    if (state.selectedRunIndex >= state.runs.length) {
+      state.selectedRunIndex = 0;
     }
+    state.selectedRun = state.runs[state.selectedRunIndex];
+
+    renderRunsSelector();
+    updateRunMethodState();
+    await renderActiveRunView();
   } catch (err) {
     showToast("获取评测结果失败", "error");
   }
 }
 
-function renderRuns() {
+function showRunsEmptyState(msg) {
+  const emptyContainer = document.getElementById("runs-empty-container");
+  const fieldSec = document.getElementById("runs-field-eval-section");
+  const evalSec = document.getElementById("runs-eval-section");
+  const methodSwitch = document.getElementById("runs-method-switch");
+  const runsSelect = document.getElementById("runs-select");
+  const banner = document.getElementById("run-stale-banner");
+  const failLink = document.getElementById("run-failures-link");
+  const fieldLink = document.getElementById("run-field-html-link");
+
+  if (fieldSec) fieldSec.style.display = "none";
+  if (evalSec) evalSec.style.display = "none";
+  if (methodSwitch) methodSwitch.style.display = "none";
+  if (banner) banner.style.display = "none";
+  if (failLink) failLink.style.display = "none";
+  if (fieldLink) fieldLink.style.display = "none";
+  if (runsSelect) runsSelect.innerHTML = `<option value="">(无已完成 Run)</option>`;
+
+  if (emptyContainer) {
+    emptyContainer.style.display = "block";
+    emptyContainer.innerHTML = `
+      <div class="empty-state-card">
+        <div class="empty-state-icon">📊</div>
+        <div class="empty-state-title">${escapeHtml(msg)}</div>
+        <div class="empty-state-desc">
+          尚未在该数据集下检测到 <code>field_metrics.json</code> 或 <code>metrics.json</code> 产物。<br>
+          您可以前往【任务队列】或点击下方按钮直接启动评测：
+        </div>
+        <div style="display: flex; gap: 0.85rem; justify-content: center;">
+          <button class="btn btn-primary" style="background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);" onclick="openJobModal('field-eval')">
+            🏷️ 启动字段抽取评测 (field-eval)
+          </button>
+          <button class="btn btn-primary" onclick="openJobModal('eval')">
+            🚀 启动对话打分评测 (eval)
+          </button>
+        </div>
+      </div>`;
+  }
+}
+
+function renderRunsSelector() {
   const select = document.getElementById("runs-select");
   const banner = document.getElementById("run-stale-banner");
-  const failuresLink = document.getElementById("run-failures-link");
+  const emptyContainer = document.getElementById("runs-empty-container");
+  if (emptyContainer) emptyContainer.style.display = "none";
 
   if (select) {
-    if (!state.runs.length) {
-      select.innerHTML = `<option value="">(当前数据集无已完成 Run)</option>`;
-    } else {
-      select.innerHTML = state.runs
-        .map((r) => {
-          const isSel = state.selectedRun && state.selectedRun.model === r.model && state.selectedRun.backend === r.backend;
-          return `<option value="${escapeHtml(r.model)}/${escapeHtml(r.backend)}" ${isSel ? "selected" : ""}>
-            ${escapeHtml(r.model)} / ${escapeHtml(r.backend)}${r.is_stale ? " [已过期需重跑]" : ""}
-          </option>`;
-        })
-        .join("");
-    }
+    select.innerHTML = state.runs
+      .map((r, idx) => {
+        let tag = "";
+        if (r.has_field_eval && r.has_eval) tag = " [field-eval & eval]";
+        else if (r.has_field_eval) tag = " [field-eval]";
+        else if (r.has_eval) tag = " [eval]";
+        if (r.is_stale) tag += " (已过期)";
+
+        return `<option value="${idx}" ${idx === state.selectedRunIndex ? "selected" : ""}>
+          ${escapeHtml(r.model)} / ${escapeHtml(r.backend)}${tag}
+        </option>`;
+      })
+      .join("");
   }
 
   if (banner && state.selectedRun) {
     banner.style.display = state.selectedRun.is_stale ? "flex" : "none";
     const reasonEl = document.getElementById("run-stale-reason");
-    if (reasonEl) reasonEl.textContent = state.selectedRun.stale_reason || "数据集结构发生变动，与该结果存在样本错位风险";
-  }
-
-  if (failuresLink && state.selectedRun) {
-    failuresLink.style.display = state.selectedRun.has_failures_html ? "inline-flex" : "none";
-    failuresLink.href = `/api/datasets/${encodeURIComponent(state.currentDataset)}/runs/${encodeURIComponent(state.selectedRun.model)}/${encodeURIComponent(state.selectedRun.backend)}/failures.html`;
+    if (reasonEl) reasonEl.textContent = state.selectedRun.stale_reason || "数据集已被修改，与该结果存在样本错位风险";
   }
 }
 
-async function onRunSelected(val) {
-  if (!val) return;
-  const [model, backend] = val.split("/");
-  state.selectedRun = state.runs.find((r) => r.model === model && r.backend === backend) || null;
-  renderRuns();
-  await loadRunMetrics();
-  await loadScored(0);
+function updateRunMethodState() {
+  const r = state.selectedRun;
+  const switchBox = document.getElementById("runs-method-switch");
+  if (!r) return;
+
+  // 根据当前 run 的实际产物，自适应显示/隐藏切换器
+  if (r.has_field_eval && r.has_eval) {
+    if (switchBox) switchBox.style.display = "inline-flex";
+  } else {
+    if (switchBox) switchBox.style.display = "none";
+    if (r.has_field_eval) state.activeRunMethod = "field-eval";
+    else if (r.has_eval) state.activeRunMethod = "eval";
+  }
+
+  // 更新分段按钮高亮
+  const tabFE = document.getElementById("runs-tab-field-eval");
+  const tabEval = document.getElementById("runs-tab-eval");
+  if (tabFE) tabFE.classList.toggle("active", state.activeRunMethod === "field-eval");
+  if (tabEval) tabEval.classList.toggle("active", state.activeRunMethod === "eval");
 }
 
+function switchRunMethod(method) {
+  state.activeRunMethod = method;
+  updateRunMethodState();
+  renderActiveRunView();
+}
+
+async function onRunSelected(idxStr) {
+  const idx = parseInt(idxStr, 10);
+  if (isNaN(idx) || idx < 0 || idx >= state.runs.length) return;
+  state.selectedRunIndex = idx;
+  state.selectedRun = state.runs[idx];
+  renderRunsSelector();
+  updateRunMethodState();
+  await renderActiveRunView();
+}
+
+async function renderActiveRunView() {
+  const r = state.selectedRun;
+  if (!r) return;
+
+  const fieldSec = document.getElementById("runs-field-eval-section");
+  const evalSec = document.getElementById("runs-eval-section");
+  const failLink = document.getElementById("run-failures-link");
+  const fieldLink = document.getElementById("run-field-html-link");
+
+  if (state.activeRunMethod === "field-eval") {
+    if (fieldSec) fieldSec.style.display = "block";
+    if (evalSec) evalSec.style.display = "none";
+    if (failLink) failLink.style.display = "none";
+
+    // field-eval HTML 报告链接
+    if (fieldLink) {
+      fieldLink.style.display = r.has_field_mismatches_html ? "inline-flex" : "none";
+      fieldLink.href = `/api/datasets/${encodeURIComponent(state.currentDataset)}/runs/${encodeURIComponent(r.model)}/${encodeURIComponent(r.backend)}/field-mismatches.html`;
+    }
+
+    await loadFieldMetrics();
+    await loadFieldMismatches(0);
+  } else {
+    if (fieldSec) fieldSec.style.display = "none";
+    if (evalSec) evalSec.style.display = "block";
+    if (fieldLink) fieldLink.style.display = "none";
+
+    // eval HTML 报告链接
+    if (failLink) {
+      failLink.style.display = r.has_failures_html ? "inline-flex" : "none";
+      failLink.href = `/api/datasets/${encodeURIComponent(state.currentDataset)}/runs/${encodeURIComponent(r.model)}/${encodeURIComponent(r.backend)}/failures.html`;
+    }
+
+    await loadRunMetrics();
+    await loadScored(0);
+  }
+}
+
+// --------------------------------------------------------------------------
+// field-eval 专属数据加载与看板渲染
+// --------------------------------------------------------------------------
+async function loadFieldMetrics() {
+  if (!state.selectedRun) return;
+  const { model, backend } = state.selectedRun;
+  try {
+    const res = await fetch(
+      `/api/datasets/${encodeURIComponent(state.currentDataset)}/runs/${encodeURIComponent(model)}/${encodeURIComponent(backend)}/field-metrics`
+    );
+    if (res.ok) {
+      state.fieldMetrics = await res.json();
+      renderFieldMetrics();
+    }
+  } catch (_) {}
+}
+
+function renderFieldMetrics() {
+  const m = state.fieldMetrics;
+  if (!m) return;
+
+  const ov = m.overall || {};
+  const microAcc = ov.micro_accuracy ?? m.micro_accuracy;
+  const macroAcc = ov.macro_accuracy ?? m.macro_accuracy;
+  const exactMatchRate = ov.exact_match_rate ?? m.exact_match_rate ?? m.exact_match_ratio;
+  const numScored = m.num_scored ?? m.evaluated_samples ?? m.total_samples ?? 0;
+  const numMissing = m.num_pred_missing ?? 0;
+
+  const microEl = document.getElementById("field-metric-micro");
+  const macroEl = document.getElementById("field-metric-macro");
+  const exactEl = document.getElementById("field-metric-exact");
+  const countEl = document.getElementById("field-metric-count");
+
+  if (microEl) microEl.textContent = microAcc !== undefined && microAcc !== null ? `${(microAcc * 100).toFixed(1)}%` : "—";
+  if (macroEl) macroEl.textContent = macroAcc !== undefined && macroAcc !== null ? `${(macroAcc * 100).toFixed(1)}%` : "—";
+  if (exactEl) exactEl.textContent = exactMatchRate !== undefined && exactMatchRate !== null ? `${(exactMatchRate * 100).toFixed(1)}%` : "—";
+  if (countEl) countEl.textContent = `${numScored} (未输出: ${numMissing})`;
+
+  // 渲染逐字段细分看板 (Per-Field Grid)
+  const grid = document.getElementById("field-metrics-grid");
+  if (!grid) return;
+
+  const perField = m.per_field || (m.fields && !Array.isArray(m.fields) ? m.fields : {});
+  const fieldList = Array.isArray(m.fields) ? m.fields : Object.keys(perField);
+
+  grid.innerHTML = fieldList
+    .map((f) => {
+      const data = perField[f] || { accuracy: 0, correct: 0, total: 0 };
+      const correct = data.correct ?? data.match ?? 0;
+      const total = data.total ?? 0;
+      const acc = data.accuracy !== undefined ? data.accuracy : (total ? correct / total : 0);
+      const accPct = (acc * 100).toFixed(1);
+      let barColor = "var(--emerald-500)";
+      if (acc < 0.7) barColor = "var(--rose-500)";
+      else if (acc < 0.9) barColor = "var(--amber-500)";
+
+      return `
+      <div class="field-metric-card">
+        <div class="field-metric-header">
+          <span class="field-name-title">${escapeHtml(f)}</span>
+          <span class="field-acc-pct" style="color: ${barColor};">${accPct}%</span>
+        </div>
+        <div class="field-progress-track">
+          <div class="field-progress-bar" style="width: ${accPct}%; background: ${barColor};"></div>
+        </div>
+        <div class="field-metric-footer">
+          <span>正确: <strong>${correct}</strong> / ${total}</span>
+          <span>失配: <strong>${total - correct}</strong></span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+}
+
+async function loadFieldMismatches(offset = 0) {
+  if (!state.selectedRun) return;
+  state.fieldMismatchesOffset = offset;
+  const { model, backend } = state.selectedRun;
+
+  const q = new URLSearchParams({
+    offset: state.fieldMismatchesOffset,
+    limit: state.fieldMismatchesLimit,
+  });
+  if (state.fieldMismatchesFilter) {
+    q.append("filter_state", state.fieldMismatchesFilter);
+  }
+
+  const tbody = document.getElementById("field-mismatches-tbody");
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:2.5rem; color:var(--text-dim);">加载逐字段失配记录中...</td></tr>`;
+  }
+
+  try {
+    const res = await fetch(
+      `/api/datasets/${encodeURIComponent(state.currentDataset)}/runs/${encodeURIComponent(model)}/${encodeURIComponent(backend)}/field-mismatches?${q.toString()}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      state.fieldMismatches = data.records;
+      state.fieldMismatchesTotal = data.total;
+      renderFieldMismatches();
+    }
+  } catch (_) {}
+}
+
+function renderFieldMismatches() {
+  const tbody = document.getElementById("field-mismatches-tbody");
+  if (!tbody) return;
+
+  if (!state.fieldMismatches.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:3rem; color:var(--emerald-500);">🎉 该条件下无任何失配记录（全部准确命中）</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = state.fieldMismatches
+    .map((row) => {
+      let stateBadge = `<span class="role-badge" style="background:var(--rose-bg); color:var(--rose-500); border-color:var(--rose-border);">失配</span>`;
+      if (row.state === "pred_missing") {
+        stateBadge = `<span class="role-badge" style="background:rgba(245,158,11,0.15); color:var(--amber-500); border-color:var(--amber-border);">未产出描述</span>`;
+      }
+
+      // 比对字段详情
+      const fieldsHtml = (row.fields || [])
+        .map((f) => {
+          const isMatch = f.correct;
+          const refStr = (f.ref && f.ref.length) ? f.ref.join("、") : "(无)";
+          const predStr = (f.pred && f.pred.length) ? f.pred.join("、") : (row.state === "pred_missing" ? "(未输出)" : "(无)");
+          return `
+          <div class="diff-tag-row ${isMatch ? "match" : "mismatch"}">
+            <span class="diff-field-name">${escapeHtml(f.field)}:</span>
+            <span class="diff-ref">标准[${escapeHtml(refStr)}]</span>
+            <span style="color:var(--text-dim); margin: 0 2px;">vs</span>
+            <span class="diff-pred" style="color: ${isMatch ? "var(--emerald-500)" : "#fb7185"};">
+              模型[${escapeHtml(predStr)}] ${isMatch ? "✓" : "✗"}
+            </span>
+          </div>`;
+        })
+        .join("");
+
+      return `
+      <tr>
+        <td style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;">${escapeHtml(row.id)}</td>
+        <td>${stateBadge}</td>
+        <td style="font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary); word-break: break-word; max-width: 350px;">
+          ${escapeHtml(row.pred_desc || "—")}
+        </td>
+        <td>
+          <div class="diff-tag-group">
+            ${fieldsHtml}
+          </div>
+        </td>
+      </tr>
+    `;
+    })
+    .join("");
+}
+
+// --------------------------------------------------------------------------
+// eval 对话打分专属数据加载与看板渲染
+// --------------------------------------------------------------------------
 async function loadRunMetrics() {
   if (!state.selectedRun) return;
   const { model, backend } = state.selectedRun;
@@ -1055,10 +1526,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   handleHash();
 });
 
-
 // 显式挂载到 window 供控制台调试及内联事件统一调用
 window.state = state;
 window.switchTab = switchTab;
+window.handleHash = handleHash;
 window.loadDatasets = loadDatasets;
 window.loadSamples = loadSamples;
 window.loadConfig = loadConfig;
@@ -1073,10 +1544,17 @@ window.promptDelete = promptDelete;
 window.closeDeleteModal = closeDeleteModal;
 window.confirmDelete = confirmDelete;
 window.saveSingleConfigKey = saveSingleConfigKey;
-window.submitJob = submitJob;
+window.openJobModal = openJobModal;
+window.closeJobModal = closeJobModal;
+window.updateJobCommandPreview = updateJobCommandPreview;
+window.confirmLaunchJob = confirmLaunchJob;
 window.cancelJob = cancelJob;
 window.resumeJob = resumeJob;
 window.openTerminal = openTerminal;
 window.closeTerminal = closeTerminal;
 window.restoreTrashItem = restoreTrashItem;
+window.onRunSelected = onRunSelected;
+window.switchRunMethod = switchRunMethod;
+window.loadScored = loadScored;
+window.loadFieldMismatches = loadFieldMismatches;
 window.showToast = showToast;

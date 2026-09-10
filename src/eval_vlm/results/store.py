@@ -145,7 +145,7 @@ def write_text(path: Path, text: str) -> None:
 # 数据集级产物(各模型共享),不是「某模型某后端」的运行结果,枚举时要跳过。
 _DATASET_LEVEL_FILES = {"config.yaml", "report.md", "report.json"}
 # 判定「这是一个真正的运行结果目录」的标志产物(任一存在即算)。
-_RUN_MARKER_FILES = ("metrics.json", "precision.json", "run_meta.json", "pred_meta.json")
+_RUN_MARKER_FILES = ("metrics.json", "field_metrics.json", "precision.json", "run_meta.json", "pred_meta.json")
 
 
 def discover_run_dirs(dataset_dir: Path) -> list[tuple[str, str, Path]]:

@@ -29,7 +29,7 @@ from .models import (
     RestoreResponse,
     SamplesResponse,
 )
-from .runsio import get_metrics_detail, get_scored_records, list_runs, serve_failures_html
+from .runsio import get_field_metrics_detail, get_field_mismatches_records, get_metrics_detail, get_scored_records, list_runs, serve_failures_html, serve_field_mismatches_html
 from .settings import Settings, get_settings, set_settings
 
 
@@ -241,6 +241,43 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> FileResponse:
         return serve_failures_html(cfg, model, backend)
 
+    @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-metrics")
+    def api_get_run_field_metrics(
+        model: str,
+        backend: str,
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> dict[str, Any]:
+        return get_field_metrics_detail(cfg, model, backend)
+
+    @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-mismatches")
+    def api_get_run_field_mismatches(
+        model: str,
+        backend: str,
+        offset: int = 0,
+        limit: int = 50,
+        filter_state: Optional[str] = None,
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> dict[str, Any]:
+        return get_field_mismatches_records(
+            cfg,
+            model,
+            backend,
+            offset=offset,
+            limit=limit,
+            filter_state=filter_state,
+        )
+
+    @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-mismatches.html")
+    def api_get_run_field_mismatches_html(
+        model: str,
+        backend: str,
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> FileResponse:
+        return serve_field_mismatches_html(cfg, model, backend)
+
     # -----------------------------------------------------------------------
     # 自动化与对比
     # -----------------------------------------------------------------------
@@ -284,6 +321,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return job_manager.submit_job(
             job_type="sweep",
             dataset=None,
+            params=body.params or {},
+            user=user.username,
+        )
+
+    @app.post("/api/jobs")
+    def api_create_job(
+        body: JobCreateRequest,
+        user: User = Depends(require_editor),
+    ) -> JobSummary:
+        return job_manager.submit_job(
+            job_type=body.type,
+            dataset=body.dataset,
             params=body.params or {},
             user=user.username,
         )

@@ -109,15 +109,24 @@ class JobSummary(BaseModel):
     progress: Optional[float] = None
     progress_msg: Optional[str] = None
     queue_position: Optional[int] = None
+    command: list[str] = Field(default_factory=list)
+    log_file: Optional[str] = None
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunSummary(BaseModel):
     model: str
     backend: str
     path: str
+    has_eval: bool = False
+    has_field_eval: bool = False
     has_metrics: bool = False
     has_scored: bool = False
     has_failures_html: bool = False
+    has_field_metrics: bool = False
+    has_field_mismatches_html: bool = False
+    has_field_mismatches_json: bool = False
     is_stale: bool = False
     stale_reason: Optional[str] = None
     metrics_summary: Optional[dict[str, Any]] = None
+    field_metrics_summary: Optional[dict[str, Any]] = None
