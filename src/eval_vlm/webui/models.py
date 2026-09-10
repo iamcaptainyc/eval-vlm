@@ -130,3 +130,20 @@ class RunSummary(BaseModel):
     stale_reason: Optional[str] = None
     metrics_summary: Optional[dict[str, Any]] = None
     field_metrics_summary: Optional[dict[str, Any]] = None
+
+
+class SettingsResponse(BaseModel):
+    workspace: str
+    media_root: Optional[str] = None
+    image_strip_prefix: Optional[str] = None
+    hf_models_dir: Optional[str] = None
+    mnn_models_dir: Optional[str] = None
+
+
+class SettingsUpdateRequest(BaseModel):
+    workspace: Optional[str] = None
+    media_root: Optional[str] = None
+    image_strip_prefix: Optional[str] = None
+    hf_models_dir: Optional[str] = None
+    mnn_models_dir: Optional[str] = None
+

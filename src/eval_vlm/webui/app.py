@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Config
+from ..workspace import scan_local_models, set_global_value
 from .auth import User, get_current_user, require_editor, require_viewer
 from .automation import check_dataset_health, compare_runs
 from .configio import read_config_info, update_dataset_config
@@ -28,6 +29,8 @@ from .models import (
     RestoreRequest,
     RestoreResponse,
     SamplesResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
 )
 from .runsio import get_field_metrics_detail, get_field_mismatches_records, get_metrics_detail, get_scored_records, list_runs, serve_failures_html, serve_field_mismatches_html
 from .settings import Settings, get_settings, set_settings
@@ -74,6 +77,66 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/whoami")
     def whoami(user: User = Depends(get_current_user)) -> dict[str, Any]:
         return {"username": user.username, "role": user.role}
+
+    # -----------------------------------------------------------------------
+    # 全局设置与模型管理
+    # -----------------------------------------------------------------------
+    @app.get("/api/settings")
+    def api_get_settings(
+        _user: User = Depends(require_viewer),
+        st: Settings = Depends(get_settings),
+    ) -> SettingsResponse:
+        st.reload_global_config()
+        return SettingsResponse(
+            workspace=str(st.workspace),
+            media_root=st.media_root,
+            image_strip_prefix=st.image_strip_prefix,
+            hf_models_dir=st.hf_models_dir,
+            mnn_models_dir=st.mnn_models_dir,
+        )
+
+    @app.put("/api/settings")
+    def api_update_settings(
+        body: SettingsUpdateRequest,
+        _user: User = Depends(require_editor),
+        st: Settings = Depends(get_settings),
+    ) -> SettingsResponse:
+        fields = {
+            "media_root": body.media_root,
+            "image_strip_prefix": body.image_strip_prefix,
+            "hf_models_dir": body.hf_models_dir,
+            "mnn_models_dir": body.mnn_models_dir,
+        }
+        if body.workspace is not None and body.workspace.strip():
+            fields["workspace"] = body.workspace.strip()
+
+        for k, v in fields.items():
+            if v is not None:
+                val_str = None if (isinstance(v, str) and v.strip().lower() in ("", "null", "none")) else str(v).strip()
+                set_global_value(k, val_str)
+
+        st.reload_global_config()
+        return SettingsResponse(
+            workspace=str(st.workspace),
+            media_root=st.media_root,
+            image_strip_prefix=st.image_strip_prefix,
+            hf_models_dir=st.hf_models_dir,
+            mnn_models_dir=st.mnn_models_dir,
+        )
+
+    @app.get("/api/models")
+    def api_get_models(
+        _user: User = Depends(require_viewer),
+        st: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        st.reload_global_config()
+        result = scan_local_models(hf_dir=st.hf_models_dir, mnn_dir=st.mnn_models_dir)
+        return {
+            "hf_dir": st.hf_models_dir,
+            "mnn_dir": st.mnn_models_dir,
+            "hf_models": result.get("hf_models", []),
+            "mnn_models": result.get("mnn_models", []),
+        }
 
     # -----------------------------------------------------------------------
     # 数据集
@@ -331,7 +394,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> JobSummary:
         return job_manager.submit_job(
             job_type="sweep",
-            dataset=None,
+            dataset=body.dataset,
             params=body.params or {},
             user=user.username,
         )

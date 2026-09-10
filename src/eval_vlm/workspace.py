@@ -19,7 +19,8 @@ import yaml
 
 # 全局配置的机器级顶层键(及默认值)。
 _TOP_KEYS = ("workspace", "media_root", "image_strip_prefix",
-             "train_out_dir", "val_out_dir", "test_out_dir")
+             "train_out_dir", "val_out_dir", "test_out_dir",
+             "hf_models_dir", "mnn_models_dir")
 _GLOBAL_DEFAULTS = {
     "workspace": "~/eval_vlm_workspace",
     "media_root": ".",
@@ -30,11 +31,13 @@ _GLOBAL_DEFAULTS = {
     "train_out_dir": None,
     "val_out_dir": None,
     "test_out_dir": None,
+    "hf_models_dir": None,
+    "mnn_models_dir": None,
 }
 
 # 允许显式设为 null 的顶层键(其余顶层键不能为空)。
 _TOP_NULLABLE = frozenset(
-    {"image_strip_prefix", "train_out_dir", "val_out_dir", "test_out_dir"}
+    {"image_strip_prefix", "train_out_dir", "val_out_dir", "test_out_dir", "hf_models_dir", "mnn_models_dir"}
 )
 
 # split 默认值(嵌套在全局配置 split: 块下;不传 --train/--test 等时使用)。
@@ -62,6 +65,10 @@ _KEY_SPECS: tuple[tuple[str, str, Any, str], ...] = (
      "光杆旗标 --val-out 的落地目录;设了后该旗标 = <目录>/<数据集名>_val.json"),
     ("test_out_dir", "路径|null", _GLOBAL_DEFAULTS["test_out_dir"],
      "光杆旗标 --test-out 的落地目录;设了后该旗标 = <目录>/<数据集名>_test.json"),
+    ("hf_models_dir", "路径|null", _GLOBAL_DEFAULTS["hf_models_dir"],
+     "HuggingFace/vLLM/OpenAI 模型权重存储目录(WebUI 模型浏览器)"),
+    ("mnn_models_dir", "路径|null", _GLOBAL_DEFAULTS["mnn_models_dir"],
+     "MNN 模型存储根目录(WebUI 模型浏览器)"),
     ("split.train", "float", _SPLIT_DEFAULTS["train"],
      "默认训练集比例(不传 --train 时用)"),
     ("split.test", "float", _SPLIT_DEFAULTS["test"],
@@ -545,3 +552,113 @@ def set_dataset_value(folder: Path, dotted_key: str, value: Any) -> Path:
     text = _set_dotted_value(text, dotted_key, value)
     config_path.write_text(text, encoding="utf-8")
     return config_path
+
+
+def _check_and_add_hf(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
+    """检查目录 d 是否为 HF 模型。"""
+    markers = ("config.json", "model.safetensors", "pytorch_model.bin", "tokenizer.json")
+    try:
+        if any((d / m).exists() for m in markers):
+            name = d.name if d == root else d.relative_to(root).as_posix()
+            out.append({
+                "name": name,
+                "path": str(d),
+                "type": "hf",
+            })
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _check_and_add_mnn(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
+    """检查目录 d 是否为 MNN 模型目录 (含 config.json 或 *.mnn)。"""
+    try:
+        cfg_file = d / "config.json"
+        has_mnn = any(f.suffix.lower() == ".mnn" for f in d.iterdir() if f.is_file())
+        if cfg_file.exists():
+            name = d.name if d == root else d.relative_to(root).as_posix()
+            out.append({
+                "name": name,
+                "path": str(cfg_file),
+                "type": "mnn",
+            })
+            return True
+        elif has_mnn and d != root:
+            name = d.relative_to(root).as_posix()
+            out.append({
+                "name": name,
+                "path": str(d),
+                "type": "mnn",
+            })
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def scan_local_models(
+    hf_dir: Optional[Path | str] = None,
+    mnn_dir: Optional[Path | str] = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """探测并枚举本地存储的 HF/vLLM 模型与 MNN 模型。
+
+    支持 1~2 层子目录扫描(如 /models/Qwen2-VL-7B 或 /models/Qwen/Qwen2-VL-7B)。
+    返回:
+      {
+        "hf_models": [{"name": "...", "path": "...", "type": "hf"}],
+        "mnn_models": [{"name": "...", "path": "...", "type": "mnn"}]
+      }
+    """
+    hf_models: list[dict[str, Any]] = []
+    mnn_models: list[dict[str, Any]] = []
+
+    # 1. 扫描 HF / vLLM / transformers 模型
+    if hf_dir:
+        try:
+            hp = Path(hf_dir).expanduser().resolve()
+            if hp.is_dir():
+                if not _check_and_add_hf(hp, hp, hf_models):
+                    for p1 in sorted(hp.iterdir()):
+                        if not p1.is_dir():
+                            continue
+                        if _check_and_add_hf(p1, hp, hf_models):
+                            continue
+                        for p2 in sorted(p1.iterdir()):
+                            if p2.is_dir():
+                                _check_and_add_hf(p2, hp, hf_models)
+        except Exception:
+            pass
+
+    # 2. 扫描 MNN 模型
+    if mnn_dir:
+        try:
+            mp = Path(mnn_dir).expanduser().resolve()
+            if mp.is_dir():
+                if not _check_and_add_mnn(mp, mp, mnn_models):
+                    for p1 in sorted(mp.iterdir()):
+                        if p1.is_file() and p1.suffix.lower() == ".mnn":
+                            mnn_models.append({
+                                "name": p1.name,
+                                "path": str(p1),
+                                "type": "mnn",
+                            })
+                        elif p1.is_dir():
+                            if _check_and_add_mnn(p1, mp, mnn_models):
+                                continue
+                            for p2 in sorted(p1.iterdir()):
+                                if p2.is_file() and p2.suffix.lower() == ".mnn":
+                                    mnn_models.append({
+                                        "name": f"{p1.name}/{p2.name}",
+                                        "path": str(p2),
+                                        "type": "mnn",
+                                    })
+                                elif p2.is_dir():
+                                    _check_and_add_mnn(p2, mp, mnn_models)
+        except Exception:
+            pass
+
+    return {
+        "hf_models": hf_models,
+        "mnn_models": mnn_models,
+    }

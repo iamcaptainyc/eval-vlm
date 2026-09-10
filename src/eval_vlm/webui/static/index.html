@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260910b">
-  <script src="app.js?v=20260910b" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910c">
+  <script src="app.js?v=20260910c" defer></script>
 </head>
 <body>
 
@@ -27,44 +27,74 @@
         <span class="brand-badge">Studio</span>
       </a>
 
-      <!-- 活动数据集指示胶囊 -->
-      <div id="header-dataset-pill" class="dataset-active-pill" style="display: none;">
-        <span class="dataset-dot"></span>
-        <span id="header-dataset-name" style="font-weight: 600;"></span>
-        <span id="header-dataset-sha" style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim);"></span>
+      <!-- 全局统一数据集切换器 (随时随地在任何页面切换活动数据集) -->
+      <div class="global-ds-dropdown" id="global-ds-dropdown">
+        <button class="global-ds-btn" id="global-ds-btn" onclick="toggleDatasetDropdown()" title="点击切换当前工作区活动数据集">
+          <span class="ds-indicator-dot"></span>
+          <span class="ds-prefix">数据集:</span>
+          <span class="ds-name" id="header-dataset-name">未选定</span>
+          <svg class="ds-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div class="global-ds-menu" id="global-ds-menu">
+          <div class="global-ds-menu-head">
+            <span>切换当前活动数据集</span>
+            <span class="global-ds-count" id="global-ds-count">0</span>
+          </div>
+          <div class="global-ds-search-box">
+            <input type="text" id="global-ds-search" placeholder="🔍 检索数据集名称..." oninput="filterDatasetDropdown(this.value)">
+          </div>
+          <div class="global-ds-list" id="global-ds-list"></div>
+        </div>
       </div>
     </div>
 
-    <!-- 导航标签 -->
+    <!-- 导航标签 (按全局与数据集专属两层架构清晰分组) -->
     <nav class="nav-tabs">
-      <button class="nav-tab-btn active" data-tab="datasets" onclick="switchTab('datasets')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-        <span>数据集</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="gallery" onclick="switchTab('gallery')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-        <span>样本画廊</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="config" onclick="switchTab('config')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-        <span>配置</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="jobs" onclick="switchTab('jobs')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-        <span>任务队列</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="runs" onclick="switchTab('runs')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-        <span>评测指标</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="trash" onclick="switchTab('trash')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-        <span>回收站</span>
-      </button>
-      <button class="nav-tab-btn" data-tab="health" onclick="switchTab('health')">
-        <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-        <span>健康质检</span>
-      </button>
+      <div class="nav-group">
+        <span class="nav-group-label">全局</span>
+        <button class="nav-tab-btn active" data-tab="datasets" onclick="switchTab('datasets')" title="查看工作区所有已分割数据集">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          <span>数据集</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="sweep" onclick="switchTab('sweep')" title="多数据集批量扫描与横向评测">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span>批量评测</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="jobs" onclick="switchTab('jobs')" title="异步任务调度队列">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <span>任务队列</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="settings" onclick="switchTab('settings')" title="全局设置与模型管理">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>全局设置</span>
+        </button>
+      </div>
+
+      <div class="nav-divider"></div>
+
+      <div class="nav-group">
+        <span class="nav-group-label">当前集</span>
+        <button class="nav-tab-btn" data-tab="gallery" onclick="switchTab('gallery')" title="浏览测试集图片与对话">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+          <span>样本画廊</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="config" onclick="switchTab('config')" title="可视化参数配置工坊">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>可视化配置</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="runs" onclick="switchTab('runs')" title="评测指标与失配审查">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          <span>评测指标</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="health" onclick="switchTab('health')" title="坏例与缺失体检">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          <span>健康体检</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="trash" onclick="switchTab('trash')" title="已删样本回收站">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          <span>回收站</span>
+        </button>
+      </div>
     </nav>
 
     <!-- 用户身份 -->
@@ -95,7 +125,144 @@
       <div id="datasets-grid" class="dataset-card-grid"></div>
     </section>
 
-    <!-- 2. 样本画廊视图 (核心) -->
+    <!-- 2. 批量扫描横向评测视图 (Sweep Studio) -->
+    <section id="view-sweep" class="view-panel">
+      <div class="control-bar">
+        <div>
+          <h2 class="section-title">跨数据集批量扫描 (Sweep Studio)</h2>
+          <p class="section-subtitle">勾选指定的一批数据集，使用统一模型与评测参数执行自动化批量评测与横向比对汇总</p>
+        </div>
+        <div class="control-bar-right">
+          <button class="btn" onclick="loadSweepData()">🔄 刷新数据集与模型</button>
+        </div>
+      </div>
+
+      <div class="sweep-container">
+        <!-- 左栏: 数据集多选勾选面板 -->
+        <div class="dataset-card">
+          <div class="sweep-panel-header">
+            <div>
+              <h3 style="font-size: 1.05rem; color: #fff; margin: 0;">1. 选择待测数据集</h3>
+              <span id="sweep-selected-count" style="font-size: 0.78rem; color: var(--cyan-500);">已选择 0 个数据集</span>
+            </div>
+            <div style="display: flex; gap: 0.4rem;">
+              <button class="btn btn-sm" onclick="toggleAllSweepDatasets(true)">全选</button>
+              <button class="btn btn-sm" onclick="toggleAllSweepDatasets(false)">全不选</button>
+              <button class="btn btn-sm" onclick="invertSweepDatasets()">反选</button>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 0.75rem;">
+            <input type="text" id="sweep-ds-search" class="input" style="width: 100%; font-size: 0.8rem;" placeholder="🔍 快速过滤数据集..." oninput="filterSweepDatasets(this.value)">
+          </div>
+
+          <div id="sweep-datasets-list" class="sweep-ds-checklist">
+            <!-- 动态渲染数据集勾选列表 -->
+          </div>
+        </div>
+
+        <!-- 右栏: 扫描模型与参数配置 -->
+        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+          <div class="dataset-card">
+            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 1.1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              2. 执行模型与后端配置
+            </h3>
+
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (--backend)</label>
+                <select id="sweep-backend" class="select" style="width: 100%;" onchange="onSweepBackendChange()">
+                  <option value="openai">openai (在线 API / vLLM HTTP)</option>
+                  <option value="vllm">vllm (OpenAI 协议)</option>
+                  <option value="mnn">mnn (本地 MNN 离线推理)</option>
+                  <option value="hf">hf (本地 HuggingFace)</option>
+                  <option value="vllm_offline">vllm_offline (本地 vLLM 离线推理)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">目标模型 (--model)</label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <select id="sweep-model-select" class="select" style="width: 48%;" onchange="onSweepModelSelect(this.value)">
+                    <option value="">(选择本地已探测模型)</option>
+                  </select>
+                  <input type="text" id="sweep-model-input" class="input" style="flex: 1;" placeholder="输入模型标识或权重绝对路径" oninput="updateSweepCmdPreview()">
+                </div>
+              </div>
+
+              <div id="sweep-baseurl-row">
+                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">API 服务地址 (--base-url)</label>
+                <input type="text" id="sweep-base-url" class="input" style="width: 100%;" placeholder="如 http://localhost:8000/v1 (留空使用数据集默认)" oninput="updateSweepCmdPreview()">
+              </div>
+            </div>
+          </div>
+
+          <div class="dataset-card">
+            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 1.1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              3. 评测选项与运行控制
+            </h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">评测方法强制覆盖 (--method)</label>
+                <select id="sweep-method" class="select" style="width: 100%;" onchange="updateSweepCmdPreview()">
+                  <option value="">(保持各数据集 config.yaml 默认)</option>
+                  <option value="field-eval">field-eval (全部强制逐字段评测)</option>
+                  <option value="eval">eval (全部强制对话整段打分)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">每集样本限制 (--limit)</label>
+                <input type="number" id="sweep-limit" class="input" style="width: 100%;" placeholder="留空跑全量 (如 10 冒烟测试)" min="1" oninput="updateSweepCmdPreview()">
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+                <input type="checkbox" id="sweep-stop-on-error" onchange="updateSweepCmdPreview()">
+                <span>遇错立即终止整个 sweep (--stop-on-error)</span>
+              </label>
+
+              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+                <input type="checkbox" id="sweep-overwrite" onchange="updateSweepCmdPreview()">
+                <span>强制覆盖已有评测产物 (--overwrite)</span>
+              </label>
+
+              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+                <input type="checkbox" id="sweep-dry-run" onchange="updateSweepCmdPreview()">
+                <span>仅演练规划不实际调用 (--dry-run)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部命令预览与启动栏 -->
+      <div class="dataset-card" style="margin-top: 1.5rem; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 320px;">
+            <div class="code-preview-box" style="margin-bottom: 0.5rem;">
+              <div class="code-preview-title">
+                <span>🖥️ 即将执行的完整 Sweep CLI 指令</span>
+                <span style="font-size: 0.72rem; color: var(--cyan-500);">非黑盒透明执行</span>
+              </div>
+              <code id="sweep-cmd-preview">eval-vlm sweep ...</code>
+            </div>
+            <div class="log-path-notice">
+              <span>📊 批量汇总报告落盘位置：</span>
+              <code id="sweep-summary-path">&lt;workspace&gt;/_sweep/&lt;model&gt;/&lt;backend&gt;/summary.md</code>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="padding: 0.85rem 2rem; font-size: 1.05rem; font-weight: 700; background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);" onclick="submitSweepJob()">
+            🌐 立即启动批量 Sweep 任务
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 样本画廊视图 (核心) -->
     <section id="view-gallery" class="view-panel">
       <div class="control-bar">
         <div class="control-bar-left">
@@ -121,72 +288,363 @@
       </div>
     </section>
 
-    <!-- 3. 配置编辑视图 -->
+    <!-- 4. 可视化配置工坊 (Config Studio) -->
     <section id="view-config" class="view-panel">
-      <div class="control-bar">
+      <div class="config-studio-header">
         <div>
-          <h2 class="section-title">数据集参数配置</h2>
-          <p class="section-subtitle">在线调整推理后端、打分器及对话映射 (持久化写回并保留原注释)</p>
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <h2 class="section-title" style="margin: 0;">数据集参数配置工坊</h2>
+            <span id="cfg-active-dataset-badge" class="role-badge" style="background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #a5b4fc; font-size: 0.8rem;">未选定</span>
+            <span id="cfg-dirty-indicator" style="display: none; font-size: 0.76rem; color: var(--amber-500); background: var(--amber-bg); border: 1px solid var(--amber-border); padding: 2px 8px; border-radius: 9999px;">● 有未保存修改</span>
+          </div>
+          <p class="section-subtitle" style="margin-top: 0.25rem;">
+            全可视化表单编辑，修改后保留原有 YAML 注释与字段结构；字段旁配有详细中文说明
+          </p>
         </div>
-        <div class="control-bar-right">
+
+        <div style="display: flex; gap: 0.65rem; align-items: center;">
           <button class="btn" onclick="loadConfig()">🔄 重新载入</button>
+          <button class="btn btn-primary" style="font-weight: 700; background: var(--primary-gradient); box-shadow: var(--primary-glow);" onclick="saveAllConfigChanges()">
+            💾 保存全部修改
+          </button>
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.75rem;">
-        <!-- 表单快速设置 -->
-        <div class="dataset-card">
-          <h3 style="margin-bottom: 1.25rem; font-size: 1.05rem; color: #fff;">主要参数调整</h3>
+      <!-- 分类标签导航栏 -->
+      <div class="config-subnav">
+        <button class="config-subnav-btn active" onclick="switchConfigSubTab('inference')" data-subtab="inference">⚡ 推理引擎与模型 (Inference)</button>
+        <button class="config-subnav-btn" onclick="switchConfigSubTab('eval')" data-subtab="eval">🎯 评测与打分策略 (Eval & Scoring)</button>
+        <button class="config-subnav-btn" onclick="switchConfigSubTab('label_extract')" data-subtab="label_extract">🏷️ 结构化字段抽取 (Label Extract)</button>
+        <button class="config-subnav-btn" onclick="switchConfigSubTab('data')" data-subtab="data">📁 基础路径与字段映射 (Data & Mapping)</button>
+        <button class="config-subnav-btn" onclick="switchConfigSubTab('split')" data-subtab="split">✂️ 切分比例与参数 (Split)</button>
+      </div>
 
-          <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-            <div>
-              <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (inference.backend)</label>
-              <select id="cfg-backend" class="select" style="width: 100%;" onchange="saveSingleConfigKey('inference.backend', this.value)">
-                <option value="openai">openai (调用在线 API / vLLM HTTP)</option>
-                <option value="mnn">mnn (本地 MNN 引擎离线推理)</option>
-                <option value="hf">hf (本地 HuggingFace Transformers)</option>
-                <option value="vllm_offline">vllm_offline (本地 vLLM 离线推理)</option>
-              </select>
+      <!-- 子面板 1: 推理引擎与模型 (Inference) -->
+      <div id="cfg-sub-inference" class="config-section active">
+        <div class="config-group-card">
+          <div class="config-group-title"><span>🚀</span><span>推理后端选择 (inference.backend)</span></div>
+          <div class="config-group-desc">切换推理后端；系统将激活对应后端的超参数卡片，配置永久写回该数据集</div>
+
+          <div class="config-backend-cards">
+            <div class="config-backend-card active" id="cfg-card-backend-openai" onclick="setConfigBackend('openai')">
+              <div style="font-size: 1.3rem; margin-bottom: 0.25rem;">🌐</div>
+              <div style="font-weight: 700; font-size: 0.9rem;">openai</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">在线 API / vLLM HTTP 服务</div>
             </div>
-
-            <div>
-              <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">OpenAI 兼容模型名 (inference.openai.model)</label>
-              <input type="text" id="cfg-model" class="input" style="width: 100%;" onchange="saveSingleConfigKey('inference.openai.model', this.value)">
+            <div class="config-backend-card" id="cfg-card-backend-mnn" onclick="setConfigBackend('mnn')">
+              <div style="font-size: 1.3rem; margin-bottom: 0.25rem;">⚡</div>
+              <div style="font-weight: 700; font-size: 0.9rem;">mnn</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">本地 MNN 引擎 C++ 极速离线推理</div>
             </div>
-
-            <div>
-              <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">OpenAI 服务地址 (inference.openai.base_url)</label>
-              <input type="text" id="cfg-base-url" class="input" style="width: 100%;" onchange="saveSingleConfigKey('inference.openai.base_url', this.value)">
+            <div class="config-backend-card" id="cfg-card-backend-vllm_offline" onclick="setConfigBackend('vllm_offline')">
+              <div style="font-size: 1.3rem; margin-bottom: 0.25rem;">🔥</div>
+              <div style="font-weight: 700; font-size: 0.9rem;">vllm_offline</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">本地 vLLM 离线加速推理引擎</div>
             </div>
-
-            <div>
-              <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">打分器类型 (scoring.scorer)</label>
-              <select id="cfg-scorer" class="select" style="width: 100%;" onchange="saveSingleConfigKey('scoring.scorer', this.value)">
-                <option value="exact_match">exact_match (完全精准匹配)</option>
-                <option value="token_f1">token_f1 (字符级 Token F1 相似度)</option>
-                <option value="contain">contain (包含匹配)</option>
-                <option value="bleu">bleu</option>
-                <option value="rouge">rouge</option>
-              </select>
-            </div>
-
-            <div>
-              <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">评测目标轮次 (eval.targets)</label>
-              <select id="cfg-targets" class="select" style="width: 100%;" onchange="saveSingleConfigKey('eval.targets', this.value)">
-                <option value="all">all (全部 assistant 轮次)</option>
-                <option value="last">last (仅最后一轮)</option>
-                <option value="first">first (仅第一轮图像描述)</option>
-              </select>
+            <div class="config-backend-card" id="cfg-card-backend-hf" onclick="setConfigBackend('hf')">
+              <div style="font-size: 1.3rem; margin-bottom: 0.25rem;">🤗</div>
+              <div style="font-weight: 700; font-size: 0.9rem;">hf</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">本地 HuggingFace Transformers</div>
             </div>
           </div>
         </div>
 
-        <!-- 原始 YAML 预览 -->
-        <div class="dataset-card">
-          <h3 style="margin-bottom: 1.25rem; font-size: 1.05rem; color: #fff;">完整 config.yaml 内容</h3>
-          <pre id="config-raw-pre" style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); padding: 1.1rem; border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; color: #cbd5e1; overflow: auto; max-height: 520px;"></pre>
+        <!-- OpenAI / vLLM 后端参数卡片 -->
+        <div id="cfg-group-openai" class="config-group-card">
+          <div class="config-group-title"><span>🌐</span><span>OpenAI 兼容协议参数 (inference.openai.*)</span></div>
+          <div class="config-group-desc">支持标准 OpenAI 接口以及 vLLM / Ollama / SGLang 暴露的兼容 HTTP 端口</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>模型标识符</span><span class="config-key-badge">inference.openai.model</span></label>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="cfg-form-openai-model-select" class="select" style="width: 45%;" onchange="if(this.value) { document.getElementById('cfg-form-openai-model').value=this.value; markConfigDirty(); }">
+                  <option value="">(选择本地已探测模型)</option>
+                </select>
+                <input type="text" id="cfg-form-openai-model" class="input" style="flex: 1;" placeholder="如 Qwen2-VL-7B-Instruct 或 gpt-4o" oninput="markConfigDirty()">
+              </div>
+              <span class="config-field-desc">请求体中的 model 字段。可直接从下拉列表选取已探测模型，或手动填入自定义模型标识。</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>服务 API 根地址</span><span class="config-key-badge">inference.openai.base_url</span></label>
+              <input type="text" id="cfg-form-openai-baseurl" class="input" placeholder="如 http://localhost:8000/v1" oninput="markConfigDirty()">
+              <span class="config-field-desc">以 /v1 结尾的 Base URL，支持局域网或远程部署的推理后端</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>最大并发生成数</span><span class="config-key-badge">inference.openai.max_concurrency</span></label>
+              <input type="number" id="cfg-form-openai-concurrency" class="input" min="1" max="128" placeholder="默认 4" oninput="markConfigDirty()">
+              <span class="config-field-desc">客户端异步请求并发度，根据 GPU 显存与推理服务算力调整</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>单次请求最大 Token</span><span class="config-key-badge">inference.openai.max_tokens</span></label>
+              <input type="number" id="cfg-form-openai-maxtokens" class="input" min="1" max="32768" placeholder="默认 1024" oninput="markConfigDirty()">
+              <span class="config-field-desc">控制输出文本截断长度，评测复杂描述任务建议 ≥ 1024</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样温度 (Temperature)</span><span class="config-key-badge">inference.openai.temperature</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-openai-temp-slider" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-openai-temp').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-openai-temp" class="input" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-openai-temp-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">评测基准通常推荐 0.0 ~ 0.2，以保障输出稳定性与可复现性</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>图片清晰度级别</span><span class="config-key-badge">inference.openai.image_detail</span></label>
+              <select id="cfg-form-openai-imagedetail" class="select" onchange="markConfigDirty()">
+                <option value="auto">auto (自动选择)</option>
+                <option value="high">high (高分辨率网格分块，推荐)</option>
+                <option value="low">low (低分辨率快速缩略图)</option>
+              </select>
+              <span class="config-field-desc">OpenAI Vision 接口的图片分块模式，高精度 VLM 建议选用 high</span>
+            </div>
+          </div>
+
+          <div class="config-field" style="margin-top: 1rem;">
+            <label><span>系统提示词设定</span><span class="config-key-badge">inference.openai.system_prompt</span></label>
+            <textarea id="cfg-form-openai-sysprompt" class="textarea" rows="3" placeholder="（可选）设定 System 角色全局提示词" oninput="markConfigDirty()"></textarea>
+            <span class="config-field-desc">在对话开头自动注入的 system 角色消息，留空则不追加</span>
+          </div>
+        </div>
+
+        <!-- MNN 后端参数卡片 -->
+        <div id="cfg-group-mnn" class="config-group-card" style="display: none;">
+          <div class="config-group-title"><span>⚡</span><span>MNN 引擎离线参数 (inference.mnn.*)</span></div>
+          <div class="config-group-desc">阿里 MNN 极速离线推理后端，支持端侧与服务端多硬件加速</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>MNN 配置文件路径</span><span class="config-key-badge">inference.mnn.config_path</span></label>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="cfg-form-mnn-model-select" class="select" style="width: 45%;" onchange="if(this.value) { document.getElementById('cfg-form-mnn-configpath').value=this.value; markConfigDirty(); }">
+                  <option value="">(选择已探测 MNN 模型)</option>
+                </select>
+                <input type="text" id="cfg-form-mnn-configpath" class="input" style="flex: 1;" placeholder="如 D:/models/qwen2-vl/config.json" oninput="markConfigDirty()">
+              </div>
+              <span class="config-field-desc">MNN 模型的 config.json 或 .mnn 绝对路径，可从探测下拉框选取</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>图片最长边限制 (像素)</span><span class="config-key-badge">inference.mnn.image_max_side</span></label>
+              <input type="number" id="cfg-form-mnn-maxside" class="input" min="64" step="32" placeholder="如 448 或 896" oninput="markConfigDirty()">
+              <span class="config-field-desc">图片预处理最长边限制，严格对齐 LlamaFactory 训练时的动态图像分辨率规则</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样温度 (Temperature)</span><span class="config-key-badge">inference.mnn.temperature</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-mnn-temp-slider" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-mnn-temp').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-mnn-temp" class="input" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-mnn-temp-slider').value=this.value; markConfigDirty();">
+              </div>
+            </div>
+
+            <div class="config-field">
+              <label><span>重复惩罚系数 (repetition_penalty)</span><span class="config-key-badge">inference.mnn.repetition_penalty</span></label>
+              <input type="number" id="cfg-form-mnn-reppenalty" class="input" step="0.05" min="1.0" max="2.0" placeholder="默认 1.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">大于 1.0 可有效抑制小参数量模型输出满屏重复换行退化现象</span>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- 子面板 2: 评测与打分策略 (Eval & Scoring) -->
+      <div id="cfg-sub-eval" class="config-section">
+        <div class="config-group-card">
+          <div class="config-group-title"><span>🎯</span><span>评测与打分核心策略</span></div>
+          <div class="config-group-desc">定义评测轮次、打分算法以及跨数据集 sweep 批量扫描时的默认行为</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>批量扫描默认评测方法</span><span class="config-key-badge">eval.method</span></label>
+              <select id="cfg-form-eval-method" class="select" onchange="markConfigDirty()">
+                <option value="field-eval">field-eval (逐字段准确率抽取与失配审查，结构化任务)</option>
+                <option value="eval">eval (对话整段打分，基于 Scorer 打分器评分)</option>
+              </select>
+              <span class="config-field-desc">当运行 eval-vlm sweep 批量扫描时，本数据集默认采用哪种评测路径</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>对话打分器类型</span><span class="config-key-badge">scoring.scorer</span></label>
+              <select id="cfg-form-scoring-scorer" class="select" onchange="markConfigDirty()">
+                <option value="exact_match">exact_match (完全精准字符一致匹配)</option>
+                <option value="token_f1">token_f1 (字符级 Token F1 相似度得分)</option>
+                <option value="contain">contain (预测文本包含参考答案即满分)</option>
+                <option value="bleu">bleu (自然语言生成 BLEU 统计分)</option>
+                <option value="rouge">rouge (ROUGE-L 召回覆盖分)</option>
+              </select>
+              <span class="config-field-desc">应用于 eval/score 模式下的逐轮打分算法</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>评测目标轮次</span><span class="config-key-badge">eval.targets</span></label>
+              <select id="cfg-form-eval-targets" class="select" onchange="markConfigDirty()">
+                <option value="first">first (仅评测第一轮图像描述，结构化主流)</option>
+                <option value="all">all (全部 assistant 轮次)</option>
+                <option value="last">last (仅最后一轮总结)</option>
+              </select>
+              <span class="config-field-desc">指定评测样本中哪一轮模型输出</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>历史上下文模式</span><span class="config-key-badge">eval.context</span></label>
+              <select id="cfg-form-eval-context" class="select" onchange="markConfigDirty()">
+                <option value="rollout">rollout (自回归历史：多轮评测输入模型自己上一轮的回答)</option>
+                <option value="gold">gold (标准黄金历史：无论模型答什么，下一轮都输入真实标注上下文)</option>
+              </select>
+              <span class="config-field-desc">多轮对话评测的上下文喂入策略</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子面板 3: 结构化字段抽取 (Label Extract) -->
+      <div id="cfg-sub-label_extract" class="config-section">
+        <div class="config-group-card">
+          <div class="config-group-title"><span>🏷️</span><span>结构化字段抽取与匹配 (label_extract.*)</span></div>
+          <div class="config-group-desc">当使用 field-eval 模式时，用于从模型输出文本中正则抽取或大模型结构化抽取的配置</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>字段匹配判定模式</span><span class="config-key-badge">label_extract.match_mode</span></label>
+              <select id="cfg-form-le-matchmode" class="select" onchange="markConfigDirty()">
+                <option value="exact">exact (双向严格相等：set(ref) == set(pred))</option>
+                <option value="contain">contain (包含即算对：set(ref) ⊆ set(pred))</option>
+              </select>
+              <span class="config-field-desc">如何判定模型抽取的多值标签/枚举字段与真实参考是否正确</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>字段提取根键路径</span><span class="config-key-badge">label_extract.value_path</span></label>
+              <input type="text" id="cfg-form-le-valuepath" class="input" placeholder="如 attributes 或 result.tags (可选)" oninput="markConfigDirty()">
+              <span class="config-field-desc">若模型输出 JSON 字典，指定从哪个嵌套 key 下提取枚举字典</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>抽取模型服务 URL</span><span class="config-key-badge">label_extract.url</span></label>
+              <input type="text" id="cfg-form-le-url" class="input" placeholder="如 http://localhost:8000/v1 (留空使用正则提取)" oninput="markConfigDirty()">
+              <span class="config-field-desc">若配置，则调用该大模型接口进行语义结构化解析；留空则走内建快速正则提取</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>抽取模型名</span><span class="config-key-badge">label_extract.model</span></label>
+              <input type="text" id="cfg-form-le-model" class="input" placeholder="如 qwen-2.5-7b-instruct" oninput="markConfigDirty()">
+              <span class="config-field-desc">专用抽取模型的模型标识</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子面板 4: 基础路径与字段映射 (Data & Mapping) -->
+      <div id="cfg-sub-data" class="config-section">
+        <div class="config-group-card">
+          <div class="config-group-title"><span>📁</span><span>数据格式与路径基础</span></div>
+          <div class="config-group-desc">定义原始数据集格式与图片路径解析前缀</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>数据集格式类型</span><span class="config-key-badge">data.type</span></label>
+              <select id="cfg-form-data-type" class="select" onchange="markConfigDirty()">
+                <option value="llamafactory">llamafactory (标准 LlamaFactory 对话格式)</option>
+                <option value="sharegpt">sharegpt (ShareGPT 格式)</option>
+                <option value="custom">custom (自定义字段映射)</option>
+              </select>
+              <span class="config-field-desc">底层数据加载解析器类型</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>图片相对路径解析根</span><span class="config-key-badge">data.media_root</span></label>
+              <input type="text" id="cfg-form-data-mediaroot" class="input" placeholder="默认 ." oninput="markConfigDirty()">
+              <span class="config-field-desc">若数据集 JSON 中图片写为相对路径 (如 sample.jpg)，以此目录为基础拼接</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-group-card">
+          <div class="config-group-title"><span>🔀</span><span>对话与图片字段映射 (data.mapping.*)</span></div>
+          <div class="config-group-desc">对齐各类型多模态数据集的 JSON 键名</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>对话消息列表键名</span><span class="config-key-badge">data.mapping.messages</span></label>
+              <input type="text" id="cfg-form-map-messages" class="input" placeholder="默认 messages" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>图片路径列表键名</span><span class="config-key-badge">data.mapping.images</span></label>
+              <input type="text" id="cfg-form-map-images" class="input" placeholder="默认 images" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>角色字段键名</span><span class="config-key-badge">data.mapping.role</span></label>
+              <input type="text" id="cfg-form-map-role" class="input" placeholder="默认 role" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>文本内容键名</span><span class="config-key-badge">data.mapping.content</span></label>
+              <input type="text" id="cfg-form-map-content" class="input" placeholder="默认 content" oninput="markConfigDirty()">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 子面板 5: 切分比例与参数 (Split) -->
+      <div id="cfg-sub-split" class="config-section">
+        <div class="config-group-card">
+          <div class="config-group-title"><span>✂️</span><span>数据切分参数 (split.*)</span></div>
+          <div class="config-group-desc">调整本数据集的划分比例；执行 eval-vlm split 时如未传命令行参数将读取此处设置</div>
+
+          <div class="config-grid-2">
+            <div class="config-field">
+              <label><span>测试集比例 (Test Ratio)</span><span class="config-key-badge">split.test</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-split-test-slider" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-test').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-split-test" class="input" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-test-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">测试集划分比例，生成的 test.json 供 WebUI 画廊与评测使用</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>训练集比例 (Train Ratio)</span><span class="config-key-badge">split.train</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-split-train-slider" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-train').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-split-train" class="input" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-train-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">训练集比例，生成的 train.json 用于微调</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>验证集比例 (Val Ratio)</span><span class="config-key-badge">split.val</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-split-val-slider" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-val').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-split-val" class="input" min="0" max="1" step="0.01" oninput="document.getElementById('cfg-form-split-val-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">&gt; 0 时产出 val.json；为 0 时不生成验证集</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>随机种子 (Seed)</span><span class="config-key-badge">split.seed</span></label>
+              <input type="number" id="cfg-form-split-seed" class="input" placeholder="默认 42" oninput="markConfigDirty()">
+              <span class="config-field-desc">伪随机种子，保障多次切分结果绝对一致</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 折叠的底层原始 YAML 视图 -->
+      <details class="config-raw-details">
+        <summary class="config-raw-summary">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span>📝 查看底层原始 config.yaml 文件</span>
+            <span class="role-badge" style="font-size: 0.7rem;">保留内联注释</span>
+          </div>
+          <span style="font-size: 0.78rem; color: var(--cyan-500);">点击展开 / 折叠</span>
+        </summary>
+        <pre id="config-raw-pre" style="padding: 1.25rem; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; color: #cbd5e1; overflow: auto; max-height: 480px; margin: 0; background: rgba(0,0,0,0.5);"></pre>
+      </details>
     </section>
 
     <!-- 4. 任务调度面板 (Jobs) -->
@@ -555,6 +1013,90 @@
       </div>
 
       <div id="health-content"></div>
+    </section>
+
+    <!-- 8. 全局设置与模型库视图 (Settings) -->
+    <section id="view-settings" class="view-panel">
+      <div class="control-bar">
+        <div>
+          <h2 class="section-title">全局设置与模型库管理</h2>
+          <p class="section-subtitle">配置全局工作区、图片根目录以及本地 HuggingFace 与 MNN 模型库存储路径</p>
+        </div>
+        <div class="control-bar-right">
+          <button class="btn" onclick="loadSettings()">🔄 重新载入设置</button>
+          <button class="btn btn-primary" onclick="saveSettings()">💾 保存全局配置</button>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <!-- 全局配置表单 -->
+        <div class="dataset-card">
+          <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+            ⚙️ 核心路径设置 (写入 ~/.eval_vlm/config.yaml)
+          </h3>
+
+          <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+            <div class="config-field">
+              <label><span>工作区目录 (workspace)</span><span class="config-key-badge">workspace</span></label>
+              <input type="text" id="settings-workspace" class="input" placeholder="~/eval_vlm_workspace">
+              <span class="config-field-desc">所有数据集文件夹的统一父目录</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>默认图片解析根 (media_root)</span><span class="config-key-badge">media_root</span></label>
+              <input type="text" id="settings-mediaroot" class="input" placeholder=".">
+              <span class="config-field-desc">初始化新数据集时写入 config.yaml 的默认图片根路径</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>跨机绝对前缀剥除 (image_strip_prefix)</span><span class="config-key-badge">image_strip_prefix</span></label>
+              <input type="text" id="settings-strip-prefix" class="input" placeholder="如 /root/autodl-tmp/ (本机不需要设为 null)">
+              <span class="config-field-desc">跨机器训练时从图片绝对路径中剥除的前缀</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>HuggingFace/vLLM 模型存储目录 (hf_models_dir)</span><span class="config-key-badge">hf_models_dir</span></label>
+              <input type="text" id="settings-hf-dir" class="input" placeholder="如 D:/models/hf 或 /mnt/models">
+              <span class="config-field-desc">设置后 WebUI 会递归扫描该目录 1~2 层子目录，检测含 config.json / safetensors 的 HF 权重</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
+              <input type="text" id="settings-mnn-dir" class="input" placeholder="如 D:/models/mnn 或 /mnt/mnn_models">
+              <span class="config-field-desc">设置后 WebUI 会递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
+            </div>
+
+            <button class="btn btn-primary" style="margin-top: 0.5rem;" onclick="saveSettings()">
+              💾 保存并生效设置
+            </button>
+          </div>
+        </div>
+
+        <!-- 本地模型库浏览器 -->
+        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+          <div class="dataset-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.2rem;">🤗</span>
+                <h3 style="font-size: 1.05rem; color: #fff; margin: 0;">已探测 HF / vLLM 模型</h3>
+              </div>
+              <span id="settings-hf-count" class="role-badge">0 个</span>
+            </div>
+            <div id="settings-hf-models-list" class="model-grid"></div>
+          </div>
+
+          <div class="dataset-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.2rem;">⚡</span>
+                <h3 style="font-size: 1.05rem; color: #fff; margin: 0;">已探测 MNN 离线模型</h3>
+              </div>
+              <span id="settings-mnn-count" class="role-badge">0 个</span>
+            </div>
+            <div id="settings-mnn-models-list" class="model-grid"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
   </main>

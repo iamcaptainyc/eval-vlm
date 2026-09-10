@@ -42,7 +42,26 @@ const state = {
     eval_targets: "",
   },
 
-  // 配置
+  // 本地模型与全局设置
+  models: { hf_models: [], mnn_models: [], hf_dir: null, mnn_dir: null },
+  settings: { workspace: "", media_root: "", image_strip_prefix: "", hf_models_dir: "", mnn_models_dir: "" },
+
+  // Sweep 跨集批量扫描
+  sweep: {
+    selectedDatasets: new Set(),
+    backend: "openai",
+    model: "",
+    baseUrl: "",
+    method: "",
+    limit: "",
+    stopOnError: false,
+    overwrite: false,
+    dryRun: false,
+  },
+
+  // 可视化配置工坊
+  configSubTab: "inference",
+  configDirty: false,
   configData: { config: {}, raw: "", settableDoc: "" },
 
   // 任务队列
@@ -113,14 +132,21 @@ function showToast(msg, type = "info") {
 }
 
 // --------------------------------------------------------------------------
-// 路由与 Tab 切换
+// 路由与 Tab 切换 (两层架构：全局视图 vs 数据集专属视图)
 // --------------------------------------------------------------------------
+const DATASET_SCOPED_TABS = ["gallery", "config", "runs", "health", "trash"];
+
 function switchTab(tab, dataset = null, updateHash = true) {
   state.activeTab = tab;
   if (dataset) state.currentDataset = dataset;
 
+  // 数据集专属页面若未选定数据集，默认选中第一个可用数据集
+  if (DATASET_SCOPED_TABS.includes(tab) && !state.currentDataset && state.datasets.length > 0) {
+    state.currentDataset = state.datasets[0].name;
+  }
+
   if (updateHash) {
-    if (state.currentDataset) {
+    if (state.currentDataset && DATASET_SCOPED_TABS.includes(tab)) {
       window.location.hash = `#/${tab}/${encodeURIComponent(state.currentDataset)}`;
     } else {
       window.location.hash = `#/${tab}`;
@@ -137,16 +163,18 @@ function switchTab(tab, dataset = null, updateHash = true) {
     panel.classList.toggle("active", panel.id === `view-${tab}`);
   });
 
-  updateHeaderDatasetPill();
+  updateHeaderDatasetDropdown();
 
   // 触发对应 Tab 数据获取
   if (tab === "datasets") loadDatasets();
-  if (tab === "gallery") loadSamples(0);
-  if (tab === "config") loadConfig();
+  if (tab === "sweep") loadSweepData();
   if (tab === "jobs") {
     initInlineJobConsole();
     loadJobs();
   }
+  if (tab === "settings") loadSettings();
+  if (tab === "gallery") loadSamples(0);
+  if (tab === "config") loadConfig();
   if (tab === "runs") loadRuns();
   if (tab === "trash") loadTrash();
   if (tab === "health") loadHealth();
@@ -157,25 +185,112 @@ function handleHash() {
   const parts = hash.replace("#/", "").split("/");
   const tab = parts[0] || "datasets";
   const ds = parts[1] ? decodeURIComponent(parts[1]) : state.currentDataset;
-  if (["datasets", "gallery", "config", "jobs", "runs", "trash", "health"].includes(tab)) {
+  if (["datasets", "sweep", "jobs", "settings", "gallery", "config", "runs", "trash", "health"].includes(tab)) {
     switchTab(tab, ds, false);
   }
 }
 
-function updateHeaderDatasetPill() {
-  const pill = document.getElementById("header-dataset-pill");
-  const nameEl = document.getElementById("header-dataset-name");
-  const shaEl = document.getElementById("header-dataset-sha");
-  if (!pill || !nameEl || !shaEl) return;
-
-  if (state.currentDataset) {
-    pill.style.display = "flex";
-    nameEl.textContent = state.currentDataset;
-    shaEl.textContent = state.testSha ? `#${state.testSha.slice(0, 8)}` : "";
+// --------------------------------------------------------------------------
+// 全局统一数据集切换器 (随时随地在任何页面切换活动数据集)
+// --------------------------------------------------------------------------
+function toggleDatasetDropdown(forceClose = false) {
+  const dd = document.getElementById("global-ds-dropdown");
+  if (!dd) return;
+  if (forceClose) {
+    dd.classList.remove("open");
   } else {
-    pill.style.display = "none";
+    dd.classList.toggle("open");
+    if (dd.classList.contains("open")) {
+      const searchInput = document.getElementById("global-ds-search");
+      if (searchInput) {
+        searchInput.value = "";
+        searchInput.focus();
+      }
+      renderDatasetDropdown();
+    }
   }
 }
+
+function renderDatasetDropdown(filter = "") {
+  const listEl = document.getElementById("global-ds-list");
+  const countEl = document.getElementById("global-ds-count");
+  if (!listEl) return;
+
+  const query = filter.trim().toLowerCase();
+  const filtered = state.datasets.filter((ds) => !query || ds.name.toLowerCase().includes(query));
+
+  if (countEl) countEl.textContent = `${state.datasets.length} 个`;
+
+  if (!filtered.length) {
+    listEl.innerHTML = `<div style="padding: 1.25rem; text-align: center; color: var(--text-dim); font-size: 0.8rem;">无匹配数据集</div>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered
+    .map((ds) => {
+      const isSelected = ds.name === state.currentDataset;
+      return `
+      <div class="global-ds-item ${isSelected ? "selected" : ""}" onclick="selectGlobalDataset('${escapeHtml(ds.name)}')">
+        <div style="display: flex; align-items: center; gap: 0.55rem; overflow: hidden;">
+          <span style="font-size: 0.88rem;">📁</span>
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(ds.name)}</span>
+        </div>
+        <span class="global-ds-item-count">${ds.test_count} 样本</span>
+      </div>`;
+    })
+    .join("");
+}
+
+function filterDatasetDropdown(query) {
+  renderDatasetDropdown(query);
+}
+
+function selectGlobalDataset(name) {
+  if (state.currentDataset === name) {
+    toggleDatasetDropdown(true);
+    return;
+  }
+
+  state.currentDataset = name;
+  toggleDatasetDropdown(true);
+  updateHeaderDatasetDropdown();
+
+  // 若当前处于数据集专属页面，立即重新刷新当前页面数据
+  if (DATASET_SCOPED_TABS.includes(state.activeTab)) {
+    window.location.hash = `#/${state.activeTab}/${encodeURIComponent(name)}`;
+    if (state.activeTab === "gallery") loadSamples(0);
+    if (state.activeTab === "config") loadConfig();
+    if (state.activeTab === "runs") loadRuns();
+    if (state.activeTab === "health") loadHealth();
+    if (state.activeTab === "trash") loadTrash();
+  }
+
+  showToast(`已切换当前活动数据集为: ${name}`, "info");
+}
+
+function updateHeaderDatasetDropdown() {
+  const nameEl = document.getElementById("header-dataset-name");
+  if (nameEl) {
+    nameEl.textContent = state.currentDataset || "未选定";
+  }
+  // 同步更新页面中的各个局部数据集下拉框选择
+  const galleryDs = document.getElementById("gallery-dataset-select");
+  if (galleryDs && galleryDs.value !== state.currentDataset) galleryDs.value = state.currentDataset;
+  const runsDs = document.getElementById("runs-dataset-select");
+  if (runsDs && runsDs.value !== state.currentDataset) runsDs.value = state.currentDataset;
+  const inlineDs = document.getElementById("job-inline-dataset");
+  if (inlineDs && inlineDs.value !== state.currentDataset) inlineDs.value = state.currentDataset;
+  const cfgBadge = document.getElementById("cfg-active-dataset-badge");
+  if (cfgBadge) cfgBadge.textContent = state.currentDataset || "未选定";
+}
+
+// 点击页面外部区域自动收起全局下拉框
+document.addEventListener("click", (e) => {
+  const dd = document.getElementById("global-ds-dropdown");
+  if (dd && !dd.contains(e.target)) {
+    dd.classList.remove("open");
+  }
+});
 
 // --------------------------------------------------------------------------
 // 数据集 (Datasets)
@@ -187,8 +302,9 @@ async function loadDatasets() {
     state.datasets = await res.json();
     if (!state.currentDataset && state.datasets.length > 0) {
       state.currentDataset = state.datasets[0].name;
-      updateHeaderDatasetPill();
     }
+    updateHeaderDatasetDropdown();
+    renderDatasetDropdown();
     renderDatasets();
     initInlineJobConsole();
   } catch (err) {
@@ -616,21 +732,419 @@ async function restoreTrashItem(trashId) {
 }
 
 // --------------------------------------------------------------------------
-// 配置编辑 (Config)
+// 本地模型管理 (Local Models Detection)
 // --------------------------------------------------------------------------
-async function loadConfig() {
-  if (!state.currentDataset) {
-    const rawPre = document.getElementById("config-raw-pre");
-    if (rawPre) rawPre.textContent = "# 未选定数据集，请先进入数据集页面选择";
+async function loadModels() {
+  try {
+    const res = await fetch("/api/models");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.models = {
+      hf_models: data.hf_models || [],
+      mnn_models: data.mnn_models || [],
+      hf_dir: data.hf_dir || null,
+      mnn_dir: data.mnn_dir || null,
+    };
+    renderModelSelects();
+    renderModelCards();
+  } catch (err) {
+    console.warn("加载本地模型失败:", err);
+  }
+}
+
+function renderModelSelects() {
+  // 1. Sweep 页面模型下拉框
+  const sweepSelect = document.getElementById("sweep-model-select");
+  if (sweepSelect) {
+    const backend = document.getElementById("sweep-backend")?.value || "openai";
+    let options = `<option value="">(选择本地已探测模型)</option>`;
+    if (backend === "mnn") {
+      options += state.models.mnn_models
+        .map((m) => `<option value="${escapeHtml(m.path)}">⚡ ${escapeHtml(m.name)}</option>`)
+        .join("");
+    } else {
+      options += state.models.hf_models
+        .map((m) => `<option value="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+        .join("");
+    }
+    sweepSelect.innerHTML = options;
+  }
+
+  // 2. Config 页面 OpenAI / MNN 模型下拉框
+  const cfgOpenAISelect = document.getElementById("cfg-form-openai-model-select");
+  if (cfgOpenAISelect) {
+    cfgOpenAISelect.innerHTML = `<option value="">(选择本地已探测模型)</option>` +
+      state.models.hf_models
+        .map((m) => `<option value="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+        .join("");
+  }
+
+  const cfgMNNSelect = document.getElementById("cfg-form-mnn-model-select");
+  if (cfgMNNSelect) {
+    cfgMNNSelect.innerHTML = `<option value="">(选择本地已探测模型)</option>` +
+      state.models.mnn_models
+        .map((m) => `<option value="${escapeHtml(m.path)}">⚡ ${escapeHtml(m.name)}</option>`)
+        .join("");
+  }
+}
+
+function renderModelCards() {
+  const hfList = document.getElementById("settings-hf-models-list");
+  const hfCount = document.getElementById("settings-hf-count");
+  if (hfCount) hfCount.textContent = `${state.models.hf_models.length} 个`;
+  if (hfList) {
+    if (!state.models.hf_models.length) {
+      hfList.innerHTML = `<div style="grid-column: 1/-1; padding: 1.5rem; text-align: center; color: var(--text-dim); font-size: 0.8rem;">
+        未检测到 HF 模型。请先在左侧设定 hf_models_dir 并保存。
+      </div>`;
+    } else {
+      hfList.innerHTML = state.models.hf_models
+        .map(
+          (m) => `
+        <div class="model-item-card">
+          <div class="model-item-title">
+            <span>${escapeHtml(m.name)}</span>
+            <span class="role-badge" style="font-size: 0.68rem; color: #a5b4fc; background: rgba(99,102,241,0.2);">HF/vLLM</span>
+          </div>
+          <div class="model-item-path">${escapeHtml(m.path)}</div>
+          <div style="margin-top: 0.35rem;">
+            <button class="btn btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="navigator.clipboard.writeText('${escapeHtml(m.path)}'); showToast('路径已复制到剪贴板', 'info');">📋 复制路径</button>
+          </div>
+        </div>`
+        )
+        .join("");
+    }
+  }
+
+  const mnnList = document.getElementById("settings-mnn-models-list");
+  const mnnCount = document.getElementById("settings-mnn-count");
+  if (mnnCount) mnnCount.textContent = `${state.models.mnn_models.length} 个`;
+  if (mnnList) {
+    if (!state.models.mnn_models.length) {
+      mnnList.innerHTML = `<div style="grid-column: 1/-1; padding: 1.5rem; text-align: center; color: var(--text-dim); font-size: 0.8rem;">
+        未检测到 MNN 模型。请先在左侧设定 mnn_models_dir 并保存。
+      </div>`;
+    } else {
+      mnnList.innerHTML = state.models.mnn_models
+        .map(
+          (m) => `
+        <div class="model-item-card">
+          <div class="model-item-title">
+            <span>${escapeHtml(m.name)}</span>
+            <span class="role-badge" style="font-size: 0.68rem; color: var(--cyan-500); background: rgba(6,182,212,0.2);">MNN</span>
+          </div>
+          <div class="model-item-path">${escapeHtml(m.path)}</div>
+          <div style="margin-top: 0.35rem;">
+            <button class="btn btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="navigator.clipboard.writeText('${escapeHtml(m.path)}'); showToast('路径已复制到剪贴板', 'info');">📋 复制路径</button>
+          </div>
+        </div>`
+        )
+        .join("");
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
+// 全局设置 (Global Settings)
+// --------------------------------------------------------------------------
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cfg = await res.json();
+    state.settings = cfg;
+
+    const wsIn = document.getElementById("settings-workspace");
+    const mrIn = document.getElementById("settings-mediaroot");
+    const spIn = document.getElementById("settings-strip-prefix");
+    const hfIn = document.getElementById("settings-hf-dir");
+    const mnnIn = document.getElementById("settings-mnn-dir");
+
+    if (wsIn) wsIn.value = cfg.workspace || "";
+    if (mrIn) mrIn.value = cfg.media_root || "";
+    if (spIn) spIn.value = cfg.image_strip_prefix || "";
+    if (hfIn) hfIn.value = cfg.hf_models_dir || "";
+    if (mnnIn) mnnIn.value = cfg.mnn_models_dir || "";
+
+    await loadModels();
+  } catch (err) {
+    showToast(`获取全局设置失败: ${err.message}`, "error");
+  }
+}
+
+async function saveSettings() {
+  try {
+    const payload = {
+      workspace: document.getElementById("settings-workspace")?.value.trim() || undefined,
+      media_root: document.getElementById("settings-mediaroot")?.value.trim() || undefined,
+      image_strip_prefix: document.getElementById("settings-strip-prefix")?.value.trim() || "",
+      hf_models_dir: document.getElementById("settings-hf-dir")?.value.trim() || "",
+      mnn_models_dir: document.getElementById("settings-mnn-dir")?.value.trim() || "",
+    };
+
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.settings = data;
+    showToast("全局配置保存成功并已生效！", "success");
+    await loadSettings();
+  } catch (err) {
+    showToast(`保存全局设置失败: ${err.message}`, "error");
+  }
+}
+
+// --------------------------------------------------------------------------
+// 批量扫描 (Sweep Studio)
+// --------------------------------------------------------------------------
+async function loadSweepData() {
+  await loadDatasets();
+  await loadModels();
+
+  if (state.sweep.selectedDatasets.size === 0 && state.datasets.length > 0) {
+    // 默认全选工作区内所有数据集
+    state.datasets.forEach((d) => state.sweep.selectedDatasets.add(d.name));
+  }
+
+  renderSweepDatasets();
+  updateSweepCmdPreview();
+}
+
+function renderSweepDatasets(filter = "") {
+  const listEl = document.getElementById("sweep-datasets-list");
+  const countEl = document.getElementById("sweep-selected-count");
+  if (!listEl) return;
+
+  const query = (filter || document.getElementById("sweep-ds-search")?.value || "").trim().toLowerCase();
+  const filtered = state.datasets.filter((d) => !query || d.name.toLowerCase().includes(query));
+
+  if (countEl) {
+    countEl.textContent = `已选择 ${state.sweep.selectedDatasets.size} / 共 ${state.datasets.length} 个数据集`;
+  }
+
+  if (!filtered.length) {
+    listEl.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-dim); font-size: 0.82rem;">无匹配数据集</div>`;
     return;
   }
+
+  listEl.innerHTML = filtered
+    .map((ds) => {
+      const isChecked = state.sweep.selectedDatasets.has(ds.name);
+      return `
+      <div class="sweep-ds-item ${isChecked ? "checked" : ""}" onclick="toggleSweepDataset('${escapeHtml(ds.name)}')">
+        <div class="sweep-ds-info">
+          <input type="checkbox" class="sweep-ds-checkbox" ${isChecked ? "checked" : ""} onclick="event.stopPropagation(); toggleSweepDataset('${escapeHtml(ds.name)}');">
+          <span class="sweep-ds-title">${escapeHtml(ds.name)}</span>
+        </div>
+        <div class="sweep-ds-meta">
+          <span>${ds.test_count} 样本</span>
+          ${ds.has_dirty_runs ? `<span class="badge-stale">有过期Run</span>` : ""}
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+function toggleSweepDataset(name) {
+  if (state.sweep.selectedDatasets.has(name)) {
+    state.sweep.selectedDatasets.delete(name);
+  } else {
+    state.sweep.selectedDatasets.add(name);
+  }
+  renderSweepDatasets();
+  updateSweepCmdPreview();
+}
+
+function toggleAllSweepDatasets(selectAll) {
+  state.sweep.selectedDatasets.clear();
+  if (selectAll) {
+    state.datasets.forEach((d) => state.sweep.selectedDatasets.add(d.name));
+  }
+  renderSweepDatasets();
+  updateSweepCmdPreview();
+}
+
+function invertSweepDatasets() {
+  state.datasets.forEach((d) => {
+    if (state.sweep.selectedDatasets.has(d.name)) {
+      state.sweep.selectedDatasets.delete(d.name);
+    } else {
+      state.sweep.selectedDatasets.add(d.name);
+    }
+  });
+  renderSweepDatasets();
+  updateSweepCmdPreview();
+}
+
+function filterSweepDatasets(q) {
+  renderSweepDatasets(q);
+}
+
+function onSweepBackendChange() {
+  renderModelSelects();
+  const backend = document.getElementById("sweep-backend")?.value || "openai";
+  const urlRow = document.getElementById("sweep-baseurl-row");
+  if (urlRow) {
+    urlRow.style.display = (backend === "openai" || backend === "vllm") ? "block" : "none";
+  }
+  updateSweepCmdPreview();
+}
+
+function onSweepModelSelect(val) {
+  if (val) {
+    const input = document.getElementById("sweep-model-input");
+    if (input) input.value = val;
+  }
+  updateSweepCmdPreview();
+}
+
+function updateSweepCmdPreview() {
+  const backend = document.getElementById("sweep-backend")?.value || "";
+  const model = document.getElementById("sweep-model-input")?.value.trim() || "";
+  const baseUrl = document.getElementById("sweep-base-url")?.value.trim() || "";
+  const method = document.getElementById("sweep-method")?.value || "";
+  const limit = document.getElementById("sweep-limit")?.value.trim() || "";
+  const stopOnError = document.getElementById("sweep-stop-on-error")?.checked;
+  const overwrite = document.getElementById("sweep-overwrite")?.checked;
+  const dryRun = document.getElementById("sweep-dry-run")?.checked;
+
+  const selectedList = Array.from(state.sweep.selectedDatasets);
+  const dsParam = selectedList.length === state.datasets.length ? "" : selectedList.join(",");
+
+  const parts = ["eval-vlm", "sweep"];
+  if (dsParam) {
+    parts.push("-d", dsParam);
+  }
+  if (backend) parts.push("--backend", backend);
+  if (model) parts.push("--model", model.includes(" ") ? `"${model}"` : model);
+  if (baseUrl) parts.push("--base-url", baseUrl);
+  if (method) parts.push("--method", method);
+  if (limit) parts.push("--limit", limit);
+  if (stopOnError) parts.push("--stop-on-error");
+  if (overwrite) parts.push("--overwrite");
+  if (dryRun) parts.push("--dry-run");
+
+  const cmdEl = document.getElementById("sweep-cmd-preview");
+  if (cmdEl) cmdEl.textContent = parts.join(" ");
+
+  const summaryEl = document.getElementById("sweep-summary-path");
+  if (summaryEl) {
+    const safeModel = (model || "<model>").replace(/[\\/:]/g, "_");
+    const safeBackend = backend || "<backend>";
+    summaryEl.textContent = `<workspace>/_sweep/${safeModel}/${safeBackend}/summary.md`;
+  }
+}
+
+async function submitSweepJob() {
+  if (state.sweep.selectedDatasets.size === 0) {
+    showToast("请至少勾选 1 个待测试集", "warning");
+    return;
+  }
+
+  const backend = document.getElementById("sweep-backend")?.value || "";
+  const model = document.getElementById("sweep-model-input")?.value.trim() || "";
+  const baseUrl = document.getElementById("sweep-base-url")?.value.trim() || "";
+  const method = document.getElementById("sweep-method")?.value || "";
+  const limit = document.getElementById("sweep-limit")?.value.trim() || "";
+  const stopOnError = document.getElementById("sweep-stop-on-error")?.checked;
+  const overwrite = document.getElementById("sweep-overwrite")?.checked;
+  const dryRun = document.getElementById("sweep-dry-run")?.checked;
+
+  const params = {};
+  if (backend) params.backend = backend;
+  if (model) params.model = model;
+  if (baseUrl) params.base_url = baseUrl;
+  if (method) params.method = method;
+  if (limit) params.limit = limit;
+  if (stopOnError) params.stop_on_error = true;
+  if (overwrite) params.overwrite = true;
+  if (dryRun) params.dry_run = true;
+
+  const datasetParam = Array.from(state.sweep.selectedDatasets).join(",");
+
+  try {
+    const res = await fetch("/api/sweep/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "sweep",
+        dataset: datasetParam,
+        params,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const job = await res.json();
+    showToast(`Sweep 批量扫描任务已成功提交入队 (ID: ${job.id})`, "success");
+    switchTab("jobs");
+    openTerminal(job.id, "sweep", datasetParam);
+  } catch (err) {
+    showToast(`提交 Sweep 任务失败: ${err.message}`, "error");
+  }
+}
+
+// --------------------------------------------------------------------------
+// 可视化配置工坊 (Config Studio)
+// --------------------------------------------------------------------------
+function switchConfigSubTab(subtab) {
+  state.configSubTab = subtab;
+  document.querySelectorAll(".config-subnav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.subtab === subtab);
+  });
+  document.querySelectorAll(".config-section").forEach((sec) => {
+    sec.classList.toggle("active", sec.id === `cfg-sub-${subtab}`);
+  });
+}
+
+function setConfigBackend(backend) {
+  document.querySelectorAll(".config-backend-card").forEach((card) => {
+    card.classList.toggle("active", card.id === `cfg-card-backend-${backend}`);
+  });
+  const grpOpenAI = document.getElementById("cfg-group-openai");
+  const grpMNN = document.getElementById("cfg-group-mnn");
+  if (grpOpenAI) grpOpenAI.style.display = (backend === "openai" || backend === "vllm_offline" || backend === "hf") ? "block" : "none";
+  if (grpMNN) grpMNN.style.display = backend === "mnn" ? "block" : "none";
+  markConfigDirty();
+}
+
+function markConfigDirty() {
+  state.configDirty = true;
+  const ind = document.getElementById("cfg-dirty-indicator");
+  if (ind) ind.style.display = "inline-block";
+}
+
+async function loadConfig() {
+  if (!state.currentDataset) {
+    if (state.datasets.length > 0) {
+      state.currentDataset = state.datasets[0].name;
+      updateHeaderDatasetDropdown();
+    } else {
+      showToast("请先在工作区创建或选择数据集", "warning");
+      return;
+    }
+  }
+
+  const badge = document.getElementById("cfg-active-dataset-badge");
+  if (badge) badge.textContent = state.currentDataset;
+
   try {
     const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/config`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.configData = await res.json();
+    state.configDirty = false;
+    const ind = document.getElementById("cfg-dirty-indicator");
+    if (ind) ind.style.display = "none";
     renderConfig();
+    await loadModels();
   } catch (err) {
-    showToast("读取配置文件失败", "error");
+    showToast(`读取配置文件失败: ${err.message}`, "error");
   }
 }
 
@@ -639,17 +1153,198 @@ function renderConfig() {
   const rawPre = document.getElementById("config-raw-pre");
   if (rawPre) rawPre.textContent = state.configData.raw || "";
 
-  const backendSelect = document.getElementById("cfg-backend");
-  const modelInput = document.getElementById("cfg-model");
-  const urlInput = document.getElementById("cfg-base-url");
-  const scorerSelect = document.getElementById("cfg-scorer");
-  const targetsSelect = document.getElementById("cfg-targets");
+  // 1. 推理后端
+  const backend = cfg.inference?.backend || "openai";
+  setConfigBackend(backend);
 
-  if (backendSelect && cfg.inference?.backend) backendSelect.value = cfg.inference.backend;
-  if (modelInput && cfg.inference?.openai?.model) modelInput.value = cfg.inference.openai.model;
-  if (urlInput && cfg.inference?.openai?.base_url) urlInput.value = cfg.inference.openai.base_url;
-  if (scorerSelect && cfg.scoring?.scorer) scorerSelect.value = cfg.scoring.scorer;
-  if (targetsSelect && cfg.eval?.targets) targetsSelect.value = cfg.eval.targets;
+  // OpenAI / vLLM 字段
+  const oai = cfg.inference?.openai || {};
+  const oaiModel = document.getElementById("cfg-form-openai-model");
+  const oaiBaseUrl = document.getElementById("cfg-form-openai-baseurl");
+  const oaiConcurrency = document.getElementById("cfg-form-openai-concurrency");
+  const oaiMaxTokens = document.getElementById("cfg-form-openai-maxtokens");
+  const oaiTemp = document.getElementById("cfg-form-openai-temp");
+  const oaiTempSlider = document.getElementById("cfg-form-openai-temp-slider");
+  const oaiImageDetail = document.getElementById("cfg-form-openai-imagedetail");
+  const oaiSysPrompt = document.getElementById("cfg-form-openai-sysprompt");
+
+  if (oaiModel) oaiModel.value = oai.model || "";
+  if (oaiBaseUrl) oaiBaseUrl.value = oai.base_url || "";
+  if (oaiConcurrency) oaiConcurrency.value = oai.max_concurrency ?? 4;
+  if (oaiMaxTokens) oaiMaxTokens.value = oai.max_tokens ?? 1024;
+  if (oaiTemp) oaiTemp.value = oai.temperature ?? 0.0;
+  if (oaiTempSlider) oaiTempSlider.value = oai.temperature ?? 0.0;
+  if (oaiImageDetail) oaiImageDetail.value = oai.image_detail || "high";
+  if (oaiSysPrompt) oaiSysPrompt.value = oai.system_prompt || "";
+
+  // MNN 字段
+  const mnn = cfg.inference?.mnn || {};
+  const mnnConfigPath = document.getElementById("cfg-form-mnn-configpath");
+  const mnnMaxSide = document.getElementById("cfg-form-mnn-maxside");
+  const mnnTemp = document.getElementById("cfg-form-mnn-temp");
+  const mnnTempSlider = document.getElementById("cfg-form-mnn-temp-slider");
+  const mnnRepPenalty = document.getElementById("cfg-form-mnn-reppenalty");
+
+  if (mnnConfigPath) mnnConfigPath.value = mnn.config_path || "";
+  if (mnnMaxSide) mnnMaxSide.value = mnn.image_max_side || "";
+  if (mnnTemp) mnnTemp.value = mnn.temperature ?? 0.0;
+  if (mnnTempSlider) mnnTempSlider.value = mnn.temperature ?? 0.0;
+  if (mnnRepPenalty) mnnRepPenalty.value = mnn.repetition_penalty ?? 1.0;
+
+  // 2. 评测策略
+  const evMethod = document.getElementById("cfg-form-eval-method");
+  const evScorer = document.getElementById("cfg-form-scoring-scorer");
+  const evTargets = document.getElementById("cfg-form-eval-targets");
+  const evContext = document.getElementById("cfg-form-eval-context");
+
+  if (evMethod) evMethod.value = cfg.eval?.method || "field-eval";
+  if (evScorer) evScorer.value = cfg.scoring?.scorer || "exact_match";
+  if (evTargets) evTargets.value = String(cfg.eval?.targets ?? "first");
+  if (evContext) evContext.value = cfg.eval?.context || "rollout";
+
+  // 3. 字段抽取
+  const le = cfg.label_extract || {};
+  const leMatchMode = document.getElementById("cfg-form-le-matchmode");
+  const leValuePath = document.getElementById("cfg-form-le-valuepath");
+  const leUrl = document.getElementById("cfg-form-le-url");
+  const leModel = document.getElementById("cfg-form-le-model");
+
+  if (leMatchMode) leMatchMode.value = le.match_mode || "exact";
+  if (leValuePath) leValuePath.value = le.value_path || "";
+  if (leUrl) leUrl.value = le.url || "";
+  if (leModel) leModel.value = le.model || "";
+
+  // 4. 数据与映射
+  const dtType = document.getElementById("cfg-form-data-type");
+  const dtMediaRoot = document.getElementById("cfg-form-data-mediaroot");
+  const mpMessages = document.getElementById("cfg-form-map-messages");
+  const mpImages = document.getElementById("cfg-form-map-images");
+  const mpRole = document.getElementById("cfg-form-map-role");
+  const mpContent = document.getElementById("cfg-form-map-content");
+
+  if (dtType) dtType.value = cfg.data?.type || "llamafactory";
+  if (dtMediaRoot) dtMediaRoot.value = cfg.data?.media_root || ".";
+  if (mpMessages) mpMessages.value = cfg.data?.mapping?.messages || "messages";
+  if (mpImages) mpImages.value = cfg.data?.mapping?.images || "images";
+  if (mpRole) mpRole.value = cfg.data?.mapping?.role || "role";
+  if (mpContent) mpContent.value = cfg.data?.mapping?.content || "content";
+
+  // 5. 切分比例
+  const sp = cfg.split || {};
+  const spTest = document.getElementById("cfg-form-split-test");
+  const spTestSlider = document.getElementById("cfg-form-split-test-slider");
+  const spTrain = document.getElementById("cfg-form-split-train");
+  const spTrainSlider = document.getElementById("cfg-form-split-train-slider");
+  const spVal = document.getElementById("cfg-form-split-val");
+  const spValSlider = document.getElementById("cfg-form-split-val-slider");
+  const spSeed = document.getElementById("cfg-form-split-seed");
+
+  if (spTest) spTest.value = sp.test ?? 0.05;
+  if (spTestSlider) spTestSlider.value = sp.test ?? 0.05;
+  if (spTrain) spTrain.value = sp.train ?? 0.95;
+  if (spTrainSlider) spTrainSlider.value = sp.train ?? 0.95;
+  if (spVal) spVal.value = sp.val ?? 0.0;
+  if (spValSlider) spValSlider.value = sp.val ?? 0.0;
+  if (spSeed) spSeed.value = sp.seed ?? 42;
+
+  state.configDirty = false;
+  const ind = document.getElementById("cfg-dirty-indicator");
+  if (ind) ind.style.display = "none";
+}
+
+async function saveAllConfigChanges() {
+  if (!state.currentDataset) return;
+
+  // 确定激活的后端
+  let activeBackend = "openai";
+  if (document.getElementById("cfg-card-backend-mnn")?.classList.contains("active")) activeBackend = "mnn";
+  if (document.getElementById("cfg-card-backend-vllm_offline")?.classList.contains("active")) activeBackend = "vllm_offline";
+  if (document.getElementById("cfg-card-backend-hf")?.classList.contains("active")) activeBackend = "hf";
+
+  const updates = [
+    { key: "inference.backend", value: activeBackend },
+    { key: "eval.method", value: document.getElementById("cfg-form-eval-method")?.value },
+    { key: "scoring.scorer", value: document.getElementById("cfg-form-scoring-scorer")?.value },
+    { key: "eval.targets", value: document.getElementById("cfg-form-eval-targets")?.value },
+    { key: "eval.context", value: document.getElementById("cfg-form-eval-context")?.value },
+  ];
+
+  if (activeBackend === "mnn") {
+    const cp = document.getElementById("cfg-form-mnn-configpath")?.value.trim();
+    const ms = document.getElementById("cfg-form-mnn-maxside")?.value.trim();
+    const tp = parseFloat(document.getElementById("cfg-form-mnn-temp")?.value || "0");
+    const rp = parseFloat(document.getElementById("cfg-form-mnn-reppenalty")?.value || "1.0");
+    if (cp) updates.push({ key: "inference.mnn.config_path", value: cp });
+    if (ms) updates.push({ key: "inference.mnn.image_max_side", value: parseInt(ms, 10) });
+    updates.push({ key: "inference.mnn.temperature", value: tp });
+    updates.push({ key: "inference.mnn.repetition_penalty", value: rp });
+  } else {
+    const mdl = document.getElementById("cfg-form-openai-model")?.value.trim();
+    const bu = document.getElementById("cfg-form-openai-baseurl")?.value.trim();
+    const cc = parseInt(document.getElementById("cfg-form-openai-concurrency")?.value || "4", 10);
+    const mt = parseInt(document.getElementById("cfg-form-openai-maxtokens")?.value || "1024", 10);
+    const tp = parseFloat(document.getElementById("cfg-form-openai-temp")?.value || "0");
+    const id = document.getElementById("cfg-form-openai-imagedetail")?.value || "high";
+    const sp = document.getElementById("cfg-form-openai-sysprompt")?.value || "";
+
+    if (mdl) updates.push({ key: "inference.openai.model", value: mdl });
+    if (bu) updates.push({ key: "inference.openai.base_url", value: bu });
+    updates.push({ key: "inference.openai.max_concurrency", value: cc });
+    updates.push({ key: "inference.openai.max_tokens", value: mt });
+    updates.push({ key: "inference.openai.temperature", value: tp });
+    updates.push({ key: "inference.openai.image_detail", value: id });
+    updates.push({ key: "inference.openai.system_prompt", value: sp });
+  }
+
+  // 字段抽取
+  const leMm = document.getElementById("cfg-form-le-matchmode")?.value;
+  const leVp = document.getElementById("cfg-form-le-valuepath")?.value.trim();
+  const leUrl = document.getElementById("cfg-form-le-url")?.value.trim();
+  const leMdl = document.getElementById("cfg-form-le-model")?.value.trim();
+  if (leMm) updates.push({ key: "label_extract.match_mode", value: leMm });
+  if (leVp) updates.push({ key: "label_extract.value_path", value: leVp });
+  if (leUrl) updates.push({ key: "label_extract.url", value: leUrl });
+  if (leMdl) updates.push({ key: "label_extract.model", value: leMdl });
+
+  // 基础数据
+  const dtType = document.getElementById("cfg-form-data-type")?.value;
+  const dtMr = document.getElementById("cfg-form-data-mediaroot")?.value.trim();
+  if (dtType) updates.push({ key: "data.type", value: dtType });
+  if (dtMr) updates.push({ key: "data.media_root", value: dtMr });
+
+  // 字段映射
+  const mpMsg = document.getElementById("cfg-form-map-messages")?.value.trim();
+  const mpImg = document.getElementById("cfg-form-map-images")?.value.trim();
+  const mpRole = document.getElementById("cfg-form-map-role")?.value.trim();
+  const mpCnt = document.getElementById("cfg-form-map-content")?.value.trim();
+  if (mpMsg) updates.push({ key: "data.mapping.messages", value: mpMsg });
+  if (mpImg) updates.push({ key: "data.mapping.images", value: mpImg });
+  if (mpRole) updates.push({ key: "data.mapping.role", value: mpRole });
+  if (mpCnt) updates.push({ key: "data.mapping.content", value: mpCnt });
+
+  // 切分
+  const spTst = parseFloat(document.getElementById("cfg-form-split-test")?.value || "0.05");
+  const spTrn = parseFloat(document.getElementById("cfg-form-split-train")?.value || "0.95");
+  const spVal = parseFloat(document.getElementById("cfg-form-split-val")?.value || "0.0");
+  const spSd = parseInt(document.getElementById("cfg-form-split-seed")?.value || "42", 10);
+  updates.push({ key: "split.test", value: spTst });
+  updates.push({ key: "split.train", value: spTrn });
+  updates.push({ key: "split.val", value: spVal });
+  updates.push({ key: "split.seed", value: spSd });
+
+  try {
+    const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast("全部配置项已成功持久化保存并保留原注释！", "success");
+    await loadConfig();
+  } catch (err) {
+    showToast(`保存配置失败: ${err.message}`, "error");
+  }
 }
 
 async function saveSingleConfigKey(key, value) {
@@ -1703,3 +2398,30 @@ window.initInlineJobConsole = initInlineJobConsole;
 window.switchInlineJobType = switchInlineJobType;
 window.updateInlineJobPreview = updateInlineJobPreview;
 window.submitInlineJob = submitInlineJob;
+
+// 全局数据集下拉
+window.toggleDatasetDropdown = toggleDatasetDropdown;
+window.selectGlobalDataset = selectGlobalDataset;
+window.filterDatasetDropdown = filterDatasetDropdown;
+
+// Sweep 批量评测
+window.loadSweepData = loadSweepData;
+window.toggleSweepDataset = toggleSweepDataset;
+window.toggleAllSweepDatasets = toggleAllSweepDatasets;
+window.invertSweepDatasets = invertSweepDatasets;
+window.filterSweepDatasets = filterSweepDatasets;
+window.onSweepBackendChange = onSweepBackendChange;
+window.onSweepModelSelect = onSweepModelSelect;
+window.updateSweepCmdPreview = updateSweepCmdPreview;
+window.submitSweepJob = submitSweepJob;
+
+// 全局设置与模型
+window.loadSettings = loadSettings;
+window.saveSettings = saveSettings;
+window.loadModels = loadModels;
+
+// 可视化配置工坊
+window.switchConfigSubTab = switchConfigSubTab;
+window.setConfigBackend = setConfigBackend;
+window.markConfigDirty = markConfigDirty;
+window.saveAllConfigChanges = saveAllConfigChanges;

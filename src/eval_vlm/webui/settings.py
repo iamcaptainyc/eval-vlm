@@ -20,6 +20,10 @@ class Settings:
         global_cfg = load_global_config()
         cli_override = str(workspace_dir) if workspace_dir else os.environ.get("EVAL_VLM_WORKSPACE")
         self.workspace: Path = resolve_workspace(cli_override, global_cfg)
+        self.media_root: Optional[str] = global_cfg.get("media_root")
+        self.image_strip_prefix: Optional[str] = global_cfg.get("image_strip_prefix")
+        self.hf_models_dir: Optional[str] = global_cfg.get("hf_models_dir")
+        self.mnn_models_dir: Optional[str] = global_cfg.get("mnn_models_dir")
         self.state_dir: Path = self.workspace / "_webui"
         self.locks_dir: Path = self.state_dir / "locks"
         self.jobs_dir: Path = self.state_dir / "jobs"
@@ -29,6 +33,13 @@ class Settings:
         self.token: Optional[str] = os.environ.get("EVAL_VLM_WEBUI_TOKEN")
 
         self.ensure_dirs()
+
+    def reload_global_config(self) -> None:
+        global_cfg = load_global_config()
+        self.media_root = global_cfg.get("media_root")
+        self.image_strip_prefix = global_cfg.get("image_strip_prefix")
+        self.hf_models_dir = global_cfg.get("hf_models_dir")
+        self.mnn_models_dir = global_cfg.get("mnn_models_dir")
 
     def ensure_dirs(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)

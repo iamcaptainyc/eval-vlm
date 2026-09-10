@@ -79,6 +79,8 @@ eval-vlm config init                              # 生成 ~/.eval_vlm/config.ya
 eval-vlm config keys                              # 列出所有可设置的键(类型/默认/说明)+ 哪些只能手改数据集 config.yaml
 eval-vlm config set workspace /root/autodl-tmp/capt/eval_runs   # 所有数据集文件夹的父目录
 eval-vlm config set media_root /root/autodl-tmp/capt/code/LlamaFactory   # 图片根
+eval-vlm config set hf_models_dir /data/models/huggingface        # HuggingFace / OpenAI / vLLM 模型根目录(WebUI 自动扫描)
+eval-vlm config set mnn_models_dir /data/models/mnn               # MNN 离线模型根目录(WebUI 自动扫描)
 eval-vlm config show                              # 查看当前全局配置
 
 # 可选:改 split 默认比例(不传 --train/--test 等时使用;命令行参数优先)
@@ -127,7 +129,7 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 
 | 命令 | `--dataset` / `--datadir` 含义 | 作用 |
 | --- | --- | --- |
-| `config init / show / set <k> <v> / keys` | — | 管理全局配置;`keys` 列出全部可设置键(workspace/media_root/image_strip_prefix + split 默认比例 `split.*`)及不可全局设的数据集级项 |
+| `config init / show / set <k> <v> / keys` | — | 管理全局配置;`keys` 列出全部可设置键(workspace/media_root/image_strip_prefix/hf_models_dir/mnn_models_dir + split 默认比例 `split.*`)及不可全局设的数据集级项 |
 | `split --dataset <源JSON>` | 源数据集 JSON 路径 | **初始化**:建文件夹 + 生成 config.yaml + 分割 |
 | `pred --dataset <名\|路径>` | 已存在数据集 | 读 test.json → `<数据集>/<模型>/<后端>/predictions.jsonl`(只预测,不评分;等价旧 `run`) |
 | `pred --datadir <图片文件夹>` | 无标注图片文件夹 | **无标注图片描述**:逐张调 VLM,产物落 `workspace/<同名>/<模型>/<后端>/`(不评分) |
@@ -554,7 +556,7 @@ pred:
 
 配置分两层:
 
-- **全局配置** `~/.eval_vlm/config.yaml`(机器级,一次性):`workspace` / `media_root` / `image_strip_prefix`,以及 `split:` 块(split 默认比例 train/test/val/seed/stratify_by)。用 `eval-vlm config set <k> <v>` 修改(嵌套用点号,如 `config set split.train 0.9`)。split 取值优先级:命令行参数 > 全局 `split.*` > 内置默认。
+- **全局配置** `~/.eval_vlm/config.yaml`(机器级,一次性):`workspace` / `media_root` / `image_strip_prefix` / `hf_models_dir` / `mnn_models_dir`,以及 `split:` 块(split 默认比例 train/test/val/seed/stratify_by)。用 `eval-vlm config set <k> <v>` 修改(嵌套用点号,如 `config set split.train 0.9`)。split 取值优先级:命令行参数 > 全局 `split.*` > 内置默认。
 - **数据集配置** `<workspace>/<名>/config.yaml`(每个数据集一份,split 时从内置模板生成):下表各段。`configs/example.yaml` 是同结构的**可读参考**。
 
 关键段:
@@ -615,7 +617,7 @@ data:
 
 ## Web UI 可视化审查与任务平台
 
-本项目提供基于 **FastAPI + 免构建轻量单页前端** 的完整 Web UI，为 VLM 评测链路引入直观的可视化交互层：把 `test.json` 与**真实测试图片**一起展示在网页画廊中，支持人工审查与剔除坏样本、回收站无损恢复、配置在线编辑、命令行任务排队执行与 SSE 实时日志监控。
+本项目提供基于 **FastAPI + 免构建现代极简单页前端** 的完整 Web UI，为 VLM 评测链路引入直观的可视化交互层：把 `test.json` 与**真实测试图片**一起展示在网页画廊中，支持人工审查与剔除坏样本、回收站无损恢复、可视化配置编辑、批量评测 (Sweep) 多选调度与 SSE 实时日志监控。
 
 ### 启动方式
 
@@ -631,40 +633,60 @@ python -m eval_vlm.webui --host 127.0.0.1 --port 8080 --workspace ~/eval_vlm_wor
 
 ### 核心特性
 
-1. **测试图片画廊与大图灯箱 (Sample Gallery)**
-   - **分页流畅加载**: 支持流式分发 Pillow 动态缩略图（`thumb=1`，最长边等比缩至 768px），避免数百张高分辨率原图并发拉取造成卡顿。
+1. **顶栏常驻全局数据集选择器 (Global Dataset Switcher)**
+   - **导航层级解耦**: 导航栏清晰分为 **全局通用**（数据集总览、批量评测 Sweep、任务调度队列、全局设置）与 **当前数据集上下文**（测试样本、数据配置、评测运行、健康检查、废弃库）。
+   - **跨页面无缝切换**: 顶栏右侧常驻全局数据集下拉按钮 `[📁 当前数据集: demo_dataset ▾]` 与实时呼吸脉冲指示灯；支持模糊搜索，无论身处配置、样本还是运行页面，切换数据集均会保留当前视图上下文。
+
+2. **批量评测工作室 (Sweep Studio) 与本地模型自动扫描**
+   - **多数据集显式勾选**: 告别盲跑！提供数据集卡片列表，支持单选/多选复选框、快捷 `[全选]`、`[清空]`、`[反选]` 与实时过滤搜索，已选数据集以高亮标签芯片实时汇总。
+   - **本地模型自动发现**: 自动扫描全局配置中的 `hf_models_dir` 与 `mnn_models_dir`，识别合法的 HuggingFace、OpenAI 兼容以及 MNN 离线权重目录，在网页中生成便捷下拉选单。
+   - **CLI 命令透明化**: 页面实时高亮生成 `eval_vlm sweep -d ds1,ds2 ...` 完整命令行与日志存储路径提示，支持一键提交到后台排队执行。
+
+3. **纯视觉配置工作室 (Visual Config Studio)**
+   - **告别原始裸露 YAML**: 进入「数据配置」默认呈现 5 大分类沉浸式表单卡片，无需面对生硬的纯文本：
+     - **🚀 推理设置**: 后端选择卡片（MNN / OpenAI / vLLM / HF）、模型路径/名称、采样温度（滑动条与数字框双向同步绑定）、最大 Token、重试与超时。
+     - **🎯 评测与打分**: 打分器选择（contain / exact / substring）、大小写敏感、标点符号剥离。
+     - **🏷️ 标签抽取**: 抽取模式、Prompt 模板、字段规则定义。
+     - **📊 数据与映射**: 字段重命名与标签映射配置。
+     - **✂️ 数据切分**: 切分比例滑动条、随机种子、分层抽样列名。
+   - **通俗中文说明**: 每个配置项附带通俗的业务含义说明与使用建议。
+   - **增量更新与注释无损保留**: 页面顶部常驻 `💾 保存全部修改` 与未保存修改警示徽章；保存时采用增量更新，**完整保留 YAML 原始结构与开发者注释**。
+   - **兼顾高级用户**: 底部保留轻量折叠抽屉 `[📄 查看 / 导出原始 YAML]`，随时可展开审查或复制底层 YAML 全文。
+
+4. **双模态评测看板 (Runs 双轨自适应)**
+   - **自适应分段控制器**: 针对包含 `eval`、`field-eval` 或两者兼具的数据集，自动渲染切换按钮或锁定可用模式。
+   - **字段评测专属指标**:
+     - **核心大卡片**: 展示 Micro 准确率、Macro 准确率、整样本全对率（Exact Match Rate）、已评样本数与无输出异常数。
+     - **逐字段进度条看板 (Per-Field Progress)**: 针对抽取的各具体字段（品牌、品类、颜色等），按高亮色阶（绿 $\ge 90\%$、橙 $70\%\sim 90\%$、红 $< 70\%$）显示准确率进度条与正确/失配计数。
+     - **字段失配对比清单 (Mismatch Table)**: 逐样本比对 ref 标准答案与 pred 模型抽取结果标签（绿色匹配，红色划线失配），支持关联测试图片弹窗查看与一键直达 HTML 离线报告。
+
+5. **任务调度控制台透明化与 SSE 实时推流**
+   - **内联快速启动控制台**: 任务页面常驻参数配置卡片，支持 `field-eval`、`eval`、`pred`、`score`、`sweep` 灵活配置后端、模型、样本数量上限（`--limit`）、遇错即停（`--fail-fast`）等。
+   - **透明无黑盒**: 提交前清晰预览将执行的完整 CLI 命令与落盘日志绝对路径（`.../_webui/jobs/<job_id>/log.txt`）。
+   - **单 Worker 串行防冲突**: 避免并发争抢 GPU 显存，支持任务排队、取消与 Windows 优雅中断。
+   - **SSE 实时流式控制台**: 实时推流 stdout/stderr，支持自动滚屏与状态跟踪。
+
+6. **测试图片画廊与大图灯箱 (Sample Gallery)**
+   - **分页流畅加载**: 支持流式分发 Pillow 动态缩略图（`thumb=1`，等比缩放至 768px），避免高分辨率原图并发拉取造成卡顿。
    - **全屏沉浸式灯箱 (Lightbox)**: 点击图片直接弹窗放大查看原图细节。
-   - **缺图自动高亮**: 当本地图片路径不存在（`exists=false`）时呈现醒目红框报警。
+   - **缺图自动高亮**: 本地图片路径不存在（`exists=false`）时呈现醒目红框报警。
    - **图文对话上下文**: 卡片内清晰预览 user 提示词、assistant 回答及评测目标标识。
 
-2. **坏样本删除与数据同步 (核心数据一致性保障)**
-   - **双删除模式**:
-     - `整条删除 (record)`: 从 `test.json` 剔除标注异常或坏样本。
-     - `单图删除 (image)`: 多图样本仅剔除损坏/无关单图，后端**精准同步删除对话中对应顺序的 `<image>` 占位符**，严格维护占位符与图片数一致的不变式。
-   - **回收站 (Trash) 与可逆恢复**: 被删样本自动备份到 `<workspace>/_webui/trash/`，随时可在“回收站”抽屉一键恢复至原位置并同步修复索引。
-   - **无损元信息同步**: 原子写盘更新 `test.json`；同步更新 `split_meta.json` 索引并追加 `webui_edits` 审计历史，**不改变**原始 `source_sha256`。
-   - **下游结果过期标记 (Stale Banner)**: 样本位置变动后，系统自动向受影响的历史 Run 写入 `dataset_dirty.json`，前端显式标红提示“评测结果已过期，需重新运行”，防止新旧样本 ID 错位。
-   - **并发与冲突防御**: 细粒度数据集内存锁 + 跨进程文件锁 + 客户端提交附带 `expected_sha256` 乐观锁校验，发生冲突时返回 409 友好弹窗提示刷新。
+7. **坏样本删除与数据同步 (核心数据一致性保障)**
+   - **双删除模式**: 支持整条删除 (`record`) 与单图删除 (`image`)，单图删除时后端**精准同步删除对话中对应顺序的 `<image>` 占位符**。
+   - **回收站与可逆恢复**: 被删样本自动备份到 `<workspace>/_webui/trash/`，随时可一键恢复。
+   - **下游结果过期标记 (Stale Banner)**: 样本变动后自动向受影响历史 Run 写入过期标记，防止新旧样本 ID 错位。
+   - **并发与冲突防御**: 细粒度数据集内存锁 + 跨进程文件锁 + `expected_sha256` 乐观锁校验。
 
-3. **任务调度面板与 SSE 实时日志**
-   - **全局串行调度队列**: 单 worker 异步排队，避免多任务并发导致 GPU 显存冲突。
-   - **子进程执行**: 自动以 `python -m eval_vlm <subcmd>` 子进程运行任务，天然复用当前 Python/CUDA 运行环境。
-   - **SSE 实时流式控制台**: 实时推流 stdout/stderr、支持自动滚屏/清屏/状态追踪；Windows 支持 `CTRL_BREAK_EVENT` 优雅中断与断点续跑（Resume）。
-   - **任务互斥安全**: 当数据集存在活跃任务时，自动禁止该数据集的样本删除操作，防止污染当前 run。
-
-4. **自动化健康质检 (Health Diagnosis)**
-   - 一键体检数据集健康状况，自动检出缺失图片、`<image>` 占位符失配、重复 ID 等潜在问题。
-
-5. **配置与结果审查**
-   - **配置编辑**: 支持表单快速修改推理后端（openai/mnn/hf/vllm_offline）、模型参数、打分器（exact_match/token_f1/contain 等），写回时保留原 YAML 注释。
-   - **评测结果查看**: 聚合指标卡片、Scored 逐样本明细表（支持一键“最低分优先”快速定位错例）、直接查看渲染好的 `failures.html`。
-   - **Run 对比 (Diff)**: 支持选取两个 Run 比对预测结果的一致率（Agreement Rate）并列出分歧样本。
+8. **全局设置 (Global Settings) 与健康质检**
+   - **全局设置页面**: 网页端直观修改 `media_root`、`hf_models_dir`、`mnn_models_dir` 并自动回写 `~/.eval_vlm/config.yaml`，即时罗列识别到的本地模型卡片并支持路径复制。
+   - **一键健康体检**: 检出缺失图片、`<image>` 占位符失配、重复 ID 等潜在隐患。
 
 ### 多用户与鉴权配置 (可选)
 
 - **免密模式 (默认)**: 本地单人开发时无需额外配置，自动以 `editor` 角色启动。
 - **Token 保护**: 设置环境变量 `EVAL_VLM_WEBUI_TOKEN=your_secret_token` 即可启用 Bearer / Basic 鉴权保护。
-- **多用户角色文件**: 在 `<workspace>/_webui/users.yaml` 中配置各用户与角色（`viewer` 只读浏览 / `editor` 编辑执行），所有删除与配置更新均会记录审计日志到 `<workspace>/_webui/audit.log.jsonl`。
+- **多用户角色文件**: 在 `<workspace>/_webui/users.yaml` 中配置各用户与角色（`viewer` 只读浏览 / `editor` 编辑执行），所有操作记录审计日志到 `<workspace>/_webui/audit.log.jsonl`。
 
 ## 目录结构
 
