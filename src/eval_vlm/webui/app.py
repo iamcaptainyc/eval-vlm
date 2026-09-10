@@ -132,8 +132,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         for k, v in fields.items():
             if v is not None:
-                val_str = None if (isinstance(v, str) and v.strip().lower() in ("", "null", "none")) else str(v).strip()
-                set_global_value(k, val_str)
+                if isinstance(v, list):
+                    clean_list = [str(x).strip() for x in v if str(x).strip()]
+                    val_to_set = clean_list if clean_list else None
+                elif isinstance(v, str):
+                    s = v.strip()
+                    if s.lower() in ("", "null", "none"):
+                        val_to_set = None
+                    elif "\n" in s:
+                        lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+                        val_to_set = lines if len(lines) > 1 else (lines[0] if lines else None)
+                    else:
+                        val_to_set = s
+                else:
+                    val_to_set = v
+                set_global_value(k, val_to_set)
 
         if body.split and isinstance(body.split, dict):
             for sk, sv in body.split.items():

@@ -93,3 +93,44 @@ def test_settings_and_models_flow(settings_client):
     assert "-d" in job["command"]
     d_idx = job["command"].index("-d")
     assert job["command"][d_idx + 1] == "datasetA,datasetB"
+
+
+def test_multi_directory_models_scan(settings_client, tmp_path):
+    client, settings, hf_dir1, mnn_dir = settings_client
+
+    # 创建第二个 HF 目录 (例如量化权重目录)
+    hf_dir2 = tmp_path / "gptq_models"
+    hf_dir2.mkdir()
+    m_quant = hf_dir2 / "Qwen2-VL-7B-GPTQ-Int4"
+    m_quant.mkdir()
+    (m_quant / "config.json").write_text("{}", encoding="utf-8")
+
+    # 1. 使用分号配置多个 HF 目录
+    resp = client.put(
+        "/api/settings",
+        json={
+            "hf_models_dir": f"{hf_dir1}; {hf_dir2}",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = client.get("/api/models")
+    assert resp.status_code == 200
+    models_data = resp.json()
+    assert len(models_data["hf_models"]) == 2
+    names = [m["name"] for m in models_data["hf_models"]]
+    assert any("Qwen2-VL-7B" in n for n in names)
+    assert any("Qwen2-VL-7B-GPTQ-Int4" in n for n in names)
+
+    # 2. 使用换行分隔字符串配置
+    resp = client.put(
+        "/api/settings",
+        json={
+            "hf_models_dir": f"{hf_dir1}\n{hf_dir2}",
+        },
+    )
+    assert resp.status_code == 200
+    resp = client.get("/api/models")
+    assert resp.status_code == 200
+    models_data = resp.json()
+    assert len(models_data["hf_models"]) == 2

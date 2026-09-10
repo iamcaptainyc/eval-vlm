@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260910g">
-  <script src="app.js?v=20260910g" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910i">
+  <script src="app.js?v=20260910i" defer></script>
 </head>
 <body>
 
@@ -464,6 +464,193 @@
             </div>
           </div>
         </div>
+
+        <!-- vLLM Offline 本地离线后端参数卡片 -->
+        <div id="cfg-group-vllm_offline" class="config-group-card" style="display: none;">
+          <div class="config-group-title"><span>🔥</span><span>vLLM 离线推理参数 (inference.vllm_offline.*)</span></div>
+          <div class="config-group-desc">进程内 LLM() 引擎直接加载合并后的全精度或量化权重，无需启动独立 HTTP 服务，极速高吞吐</div>
+
+          <div class="config-grid-2">
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>模型权重目录路径</span><span class="config-key-badge">inference.vllm_offline.model_path</span></label>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="cfg-form-vllm-model-select" class="select" style="width: 35%;" onchange="if(this.value) { document.getElementById('cfg-form-vllm-model').value=this.value; markConfigDirty(); }">
+                  <option value="">(从已探测模型中选取)</option>
+                </select>
+                <input type="text" id="cfg-form-vllm-model" class="input" style="flex: 1;" placeholder="如 D:/models/Qwen2-VL-7B-Instruct" oninput="markConfigDirty()">
+              </div>
+              <span class="config-field-desc">合并后的全精度或量化权重目录，传给 vLLM 的 LLM(model=...)；也是评测结果产物目录名</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>GPU 显存占用率</span><span class="config-key-badge">gpu_memory_utilization</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-vllm-gpuutil-slider" min="0.1" max="1.0" step="0.05" oninput="document.getElementById('cfg-form-vllm-gpuutil').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-vllm-gpuutil" class="input" min="0.1" max="1.0" step="0.05" oninput="document.getElementById('cfg-form-vllm-gpuutil-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">分配给 vLLM 权重与 KV 缓存的最大显存比例 (0.1 ~ 1.0)，显存紧张时可降至 0.4 ~ 0.7 防 OOM</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>模型最大序列长度</span><span class="config-key-badge">max_model_len</span></label>
+              <input type="number" id="cfg-form-vllm-maxmodellen" class="input" min="512" max="65536" step="512" placeholder="默认 4096" oninput="markConfigDirty()">
+              <span class="config-field-desc">包含视觉 Token + 文本 Prompt + 输出的最大上下文 Token 数</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>引擎最大并发序列数</span><span class="config-key-badge">max_num_seqs</span></label>
+              <input type="number" id="cfg-form-vllm-maxnumseqs" class="input" min="1" max="512" placeholder="默认 128" oninput="markConfigDirty()">
+              <span class="config-field-desc">vLLM 内部调度并发 Batch 大小</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>单条输出最大 Token</span><span class="config-key-badge">max_tokens</span></label>
+              <input type="number" id="cfg-form-vllm-maxtokens" class="input" min="16" max="16384" placeholder="默认 512" oninput="markConfigDirty()">
+              <span class="config-field-desc">生成文本长度截断上限</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样温度 (Temperature)</span><span class="config-key-badge">temperature</span></label>
+              <div class="config-slider-wrap">
+                <input type="range" id="cfg-form-vllm-temp-slider" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-vllm-temp').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-vllm-temp" class="input" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-vllm-temp-slider').value=this.value; markConfigDirty();">
+              </div>
+              <span class="config-field-desc">0.0 表示贪心确定性采样，生成结果严格可复现</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-P (Nucleus)</span><span class="config-key-badge">top_p</span></label>
+              <input type="number" id="cfg-form-vllm-topp" class="input" min="0" max="1" step="0.05" placeholder="默认 1.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">累积概率阈值，1.0 表示不截断</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-K</span><span class="config-key-badge">top_k</span></label>
+              <input type="number" id="cfg-form-vllm-topk" class="input" placeholder="-1 表示关闭" oninput="markConfigDirty()">
+              <span class="config-field-desc">-1 表示关闭 Top-K 截断</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>重复惩罚系数 (repetition_penalty)</span><span class="config-key-badge">repetition_penalty</span></label>
+              <input type="number" id="cfg-form-vllm-reppenalty" class="input" min="1.0" max="2.0" step="0.05" placeholder="默认 1.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">1.0 表示不加惩罚，大于 1.0 可有效抑制换行或词汇循环复读</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>模型权重数据类型 (dtype)</span><span class="config-key-badge">dtype</span></label>
+              <select id="cfg-form-vllm-dtype" class="select" onchange="markConfigDirty()">
+                <option value="auto">auto (自动选择)</option>
+                <option value="bfloat16">bfloat16 (推荐 Ampere/Ada 架构)</option>
+                <option value="float16">float16 (兼容 Volta/Turing 架构)</option>
+                <option value="float32">float32 (单精度)</option>
+              </select>
+            </div>
+
+            <div class="config-field">
+              <label><span>单 Prompt 最大图片数</span><span class="config-key-badge">max_images_per_prompt</span></label>
+              <input type="number" id="cfg-form-vllm-maximages" class="input" min="1" max="64" placeholder="默认 4" oninput="markConfigDirty()">
+              <span class="config-field-desc">多图/多轮对话数据集需设置 ≥ 实际图片数</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最小像素 (image_min_pixels)</span><span class="config-key-badge">image_min_pixels</span></label>
+              <input type="number" id="cfg-form-vllm-imgminpixels" class="input" placeholder="默认 784 (28*28)" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最大像素 (image_max_pixels)</span><span class="config-key-badge">image_max_pixels</span></label>
+              <input type="number" id="cfg-form-vllm-imgmaxpixels" class="input" placeholder="默认 564480 (720*28*28)" oninput="markConfigDirty()">
+              <span class="config-field-desc">强烈建议与训练 image_max_pixels 严格对齐</span>
+            </div>
+
+            <div class="config-field" style="display: flex; align-items: center; gap: 0.5rem; padding-top: 1.5rem;">
+              <input type="checkbox" id="cfg-form-vllm-remotecode" checked onchange="markConfigDirty()">
+              <label for="cfg-form-vllm-remotecode" style="margin: 0; cursor: pointer;"><span>信任远程代码 (trust_remote_code)</span><span class="config-key-badge">trust_remote_code</span></label>
+            </div>
+          </div>
+
+          <div class="config-field" style="margin-top: 1rem;">
+            <label><span>系统提示词设定</span><span class="config-key-badge">inference.vllm_offline.system_prompt</span></label>
+            <textarea id="cfg-form-vllm-sysprompt" class="textarea" rows="2" placeholder="（可选）设定 System 角色全局提示词，需与训练阶段保持一致" oninput="markConfigDirty()"></textarea>
+          </div>
+        </div>
+
+        <!-- HF (Transformers) 后端参数卡片 -->
+        <div id="cfg-group-hf" class="config-group-card" style="display: none;">
+          <div class="config-group-title"><span>🤗</span><span>HuggingFace Transformers 参数 (inference.hf.*)</span></div>
+          <div class="config-group-desc">使用标准 PyTorch / Transformers 进程内直接加载模型推理，作为训练态的精度黄金标准基准</div>
+
+          <div class="config-grid-2">
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>HF 本地模型权重目录</span><span class="config-key-badge">inference.hf.model_path</span></label>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="cfg-form-hf-model-select" class="select" style="width: 35%;" onchange="if(this.value) { document.getElementById('cfg-form-hf-model').value=this.value; markConfigDirty(); }">
+                  <option value="">(从已探测模型中选取)</option>
+                </select>
+                <input type="text" id="cfg-form-hf-model" class="input" style="flex: 1;" placeholder="如 D:/models/Qwen2-VL-7B" oninput="markConfigDirty()">
+              </div>
+              <span class="config-field-desc">本地 HuggingFace 格式权重文件夹路径，也是评测结果产物子目录名</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>目标计算设备 (device)</span><span class="config-key-badge">inference.hf.device</span></label>
+              <input type="text" id="cfg-form-hf-device" class="input" placeholder="默认 auto, 或 cuda:0, cpu" oninput="markConfigDirty()">
+              <span class="config-field-desc">传给 AutoModel.from_pretrained 的 device_map 参数</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>权重数据精度 (dtype)</span><span class="config-key-badge">inference.hf.dtype</span></label>
+              <select id="cfg-form-hf-dtype" class="select" onchange="markConfigDirty()">
+                <option value="auto">auto (自动选择)</option>
+                <option value="bfloat16">bfloat16 (截断动态范围大，推荐)</option>
+                <option value="float16">float16 (半精度浮点)</option>
+                <option value="float32">float32 (单精度)</option>
+              </select>
+            </div>
+
+            <div class="config-field">
+              <label><span>生成最大 Token 数 (max_tokens)</span><span class="config-key-badge">inference.hf.max_tokens</span></label>
+              <input type="number" id="cfg-form-hf-maxtokens" class="input" min="16" max="8192" placeholder="默认 1024" oninput="markConfigDirty()">
+              <span class="config-field-desc">generate 的 max_new_tokens 上限</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>注意力算子实现 (attn_implementation)</span><span class="config-key-badge">attn_implementation</span></label>
+              <select id="cfg-form-hf-attn" class="select" onchange="markConfigDirty()">
+                <option value="">(模型默认, 通常为 sdpa)</option>
+                <option value="sdpa">sdpa (PyTorch 原生 Scaled Dot Product Attention)</option>
+                <option value="flash_attention_2">flash_attention_2 (极速 FlashAttention-2)</option>
+                <option value="eager">eager (纯 matmul 注意力，ONNX 导出时必须)</option>
+              </select>
+            </div>
+
+            <div class="config-field">
+              <label><span>图片最长边等比缩放 (image_max_side)</span><span class="config-key-badge">image_max_side</span></label>
+              <input type="number" id="cfg-form-hf-maxside" class="input" placeholder="0 表示不限制" oninput="markConfigDirty()">
+              <span class="config-field-desc">输入 processor 之前由后端等比缩放图片最长边，0 为关闭</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最小像素 (image_min_pixels)</span><span class="config-key-badge">image_min_pixels</span></label>
+              <input type="number" id="cfg-form-hf-imgminpixels" class="input" placeholder="默认 1024 (32*32)" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最大像素 (image_max_pixels)</span><span class="config-key-badge">image_max_pixels</span></label>
+              <input type="number" id="cfg-form-hf-imgmaxpixels" class="input" placeholder="默认 1048576" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field" style="display: flex; align-items: center; gap: 0.5rem; padding-top: 1.5rem;">
+              <input type="checkbox" id="cfg-form-hf-greedy" checked onchange="markConfigDirty()">
+              <label for="cfg-form-hf-greedy" style="margin: 0; cursor: pointer;"><span>贪心确定性解码 (greedy)</span><span class="config-key-badge">greedy</span></label>
+            </div>
+          </div>
+
+          <div class="config-field" style="margin-top: 1rem;">
+            <label><span>系统提示词设定</span><span class="config-key-badge">inference.hf.system_prompt</span></label>
+            <textarea id="cfg-form-hf-sysprompt" class="textarea" rows="2" placeholder="（可选）设定 System 角色全局提示词，应与训练一致" oninput="markConfigDirty()"></textarea>
+          </div>
+        </div>
       </div>
 
       <!-- 子面板 2: 评测与打分策略 (Eval & Scoring) -->
@@ -697,14 +884,14 @@
 
         <div style="display: flex; flex-direction: column; gap: 1.1rem;">
           <!-- 数据集与通用参数 -->
-          <div style="display: grid; grid-template-columns: 1.3fr 1.1fr 1.2fr 0.8fr 1fr; gap: 1rem; align-items: flex-end;">
+          <div style="display: grid; grid-template-columns: 1.1fr 1fr 1.8fr 0.7fr auto; gap: 0.85rem; align-items: flex-end;">
             <div>
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">目标数据集 (Dataset)</label>
               <select id="job-inline-dataset" class="select" style="width: 100%;" onchange="updateInlineJobPreview()"></select>
             </div>
             <div>
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (--backend)</label>
-              <select id="job-inline-backend" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+              <select id="job-inline-backend" class="select" style="width: 100%;" onchange="onJobInlineBackendChange()">
                 <option value="">(读取配置文件)</option>
                 <option value="openai">openai (兼容 API)</option>
                 <option value="mnn">mnn (本地 MNN 离线推理)</option>
@@ -713,15 +900,26 @@
               </select>
             </div>
             <div>
-              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">模型名覆盖 (--model)</label>
-              <input type="text" id="job-inline-model" class="input" style="width: 100%;" placeholder="留空读取配置文件" oninput="updateInlineJobPreview()">
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <span id="job-inline-model-label">模型覆盖 (--model)</span>
+                <span id="job-inline-model-badge" class="config-key-badge" style="font-size: 0.68rem;">--model</span>
+              </label>
+              <div style="display: flex; gap: 0.4rem;">
+                <select id="job-inline-model-select" class="select" style="flex: 1; min-width: 140px;" onchange="onJobInlineModelSelectChange()">
+                  <option value="">-- 选择已探测模型 --</option>
+                  <optgroup id="job-optgroup-hf" label="🤗 HF / vLLM 模型"></optgroup>
+                  <optgroup id="job-optgroup-mnn" label="⚡ MNN 离线模型"></optgroup>
+                  <option value="__custom__">✏️ 自定义输入 / 路径</option>
+                </select>
+                <input type="text" id="job-inline-model" class="input" style="flex: 1.2; min-width: 120px;" placeholder="留空读配置，或从左侧下拉选取" oninput="updateInlineJobPreview()">
+              </div>
             </div>
             <div>
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">冒烟条数 (--limit)</label>
               <input type="number" id="job-inline-limit" class="input" style="width: 100%;" placeholder="跑全量" min="1" oninput="updateInlineJobPreview()">
             </div>
             <div style="padding-bottom: 0.45rem;">
-              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
+              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap;">
                 <input type="checkbox" id="job-inline-failfast" onchange="updateInlineJobPreview()">
                 <span>遇错即终止 (--fail-fast)</span>
               </label>
@@ -1047,69 +1245,88 @@
         </div>
       </div>
 
-      <div class="settings-grid">
-        <!-- 左栏: 核心路径与切分参数 -->
-        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-          <!-- 核心路径卡片 -->
-          <div class="dataset-card">
-            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
-              📁 机器级核心路径 (Paths)
-            </h3>
-
-            <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5;">
-              💡 <strong>模型目录说明</strong>：出厂默认未配置模型目录。请在下方填入本机存放模型权重的绝对路径（如 <code>D:/models/hf</code> 或 <code>D:/models/mnn</code>）并点击保存，WebUI 将自动递归扫描并加载所有本地模型！
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: 1.15rem;">
-              <div class="config-field">
-                <label><span>工作区目录 (workspace)</span><span class="config-key-badge">workspace</span></label>
-                <input type="text" id="settings-workspace" class="input" placeholder="~/eval_vlm_workspace">
-                <span class="config-field-desc">所有数据集文件夹的统一父目录 (split 在此创建 &lt;数据集名&gt;/)</span>
+      <!-- 模型探测状态提示条 -->
+      <div id="settings-model-scan-status" class="dataset-card" style="margin-bottom: 1.25rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(6, 182, 212, 0.08) 100%); border: 1px solid rgba(99, 102, 241, 0.25); padding: 1rem 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">🎯</span>
+            <div>
+              <div style="font-weight: 700; color: #fff; font-size: 0.95rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                <span>本地模型探测总览</span>
+                <span id="settings-scan-badge-hf" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">HF/vLLM: 0 个</span>
+                <span id="settings-scan-badge-mnn" class="role-badge" style="background: rgba(6,182,212,0.2); color: var(--cyan-500);">MNN: 0 个</span>
               </div>
-
-              <div class="config-field">
-                <label><span>默认图片解析根 (media_root)</span><span class="config-key-badge">media_root</span></label>
-                <input type="text" id="settings-mediaroot" class="input" placeholder=".">
-                <span class="config-field-desc">初始化新数据集时写入 config.yaml 的默认图片根路径</span>
-              </div>
-
-              <div class="config-field">
-                <label><span>HuggingFace/vLLM 模型存储目录 (hf_models_dir)</span><span class="config-key-badge">hf_models_dir</span></label>
-                <input type="text" id="settings-hf-dir" class="input" placeholder="如 D:/models/hf 或 /mnt/models">
-                <span class="config-field-desc">设置后 WebUI 会递归扫描 1~2 层子目录，检测含 config.json / safetensors 的本地 HF 权重</span>
-              </div>
-
-              <div class="config-field">
-                <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
-                <input type="text" id="settings-mnn-dir" class="input" placeholder="如 D:/models/mnn 或 /mnt/mnn_models">
-                <span class="config-field-desc">设置后 WebUI 会递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
-              </div>
-
-              <div class="config-field">
-                <label><span>跨机绝对前缀剥除 (image_strip_prefix)</span><span class="config-key-badge">image_strip_prefix</span></label>
-                <input type="text" id="settings-strip-prefix" class="input" placeholder="如 /root/autodl-tmp/ (本机不需要设为 null)">
-                <span class="config-field-desc">跨机器训练时从图片绝对路径中剥除的前缀，本机评测留空或 null</span>
-              </div>
-
-              <div class="config-grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
-                <div class="config-field">
-                  <label><span>默认训练集落地</span><span class="config-key-badge">train_out_dir</span></label>
-                  <input type="text" id="settings-train-out" class="input" placeholder="如 D:/LF/data (可选)">
-                </div>
-                <div class="config-field">
-                  <label><span>默认验证集落地</span><span class="config-key-badge">val_out_dir</span></label>
-                  <input type="text" id="settings-val-out" class="input" placeholder="如 D:/LF/data (可选)">
-                </div>
-                <div class="config-field">
-                  <label><span>默认测试集落地</span><span class="config-key-badge">test_out_dir</span></label>
-                  <input type="text" id="settings-test-out" class="input" placeholder="如 D:/LF/data (可选)">
-                </div>
+              <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.25rem; line-height: 1.5;">
+                💡 <strong>执行时快捷选择</strong>：所有已探测的模型均可直接在<strong>【任务队列】</strong>与<strong>【可视化配置】</strong>的模型下拉框中一键选择，无需在此手动复制！
               </div>
             </div>
           </div>
+          <button class="btn btn-sm" onclick="loadModels()" style="font-size: 0.8rem; font-weight: 600;">🔄 重新扫描模型目录</button>
+        </div>
+      </div>
 
-          <!-- 全局切分比例默认值卡片 -->
-          <div class="dataset-card">
+      <div class="settings-grid">
+        <!-- 左栏: 核心路径 -->
+        <div class="dataset-card" style="min-width: 0;">
+          <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+            📁 机器级核心路径 (Paths)
+          </h3>
+
+          <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5;">
+            💡 <strong>多目录支持</strong>：hf 格式的权重目录（例如未量化的全精度权重与 GPTQ / AWQ 量化后的权重不在同个目录）均支持同时配置。每行填一个目录路径，或用英文分号 <code>;</code> 隔开即可！
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 1.15rem;">
+            <div class="config-field">
+              <label><span>工作区目录 (workspace)</span><span class="config-key-badge">workspace</span></label>
+              <input type="text" id="settings-workspace" class="input" placeholder="~/eval_vlm_workspace">
+              <span class="config-field-desc">所有数据集文件夹的统一父目录 (split 在此创建 &lt;数据集名&gt;/)</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>默认图片解析根 (media_root)</span><span class="config-key-badge">media_root</span></label>
+              <input type="text" id="settings-mediaroot" class="input" placeholder=".">
+              <span class="config-field-desc">初始化新数据集时写入 config.yaml 的默认图片根路径</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>HuggingFace/vLLM 模型存储目录 (hf_models_dir)</span><span class="config-key-badge">hf_models_dir</span></label>
+              <textarea id="settings-hf-dir" class="textarea" rows="2" style="font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.4; resize: vertical;" placeholder="如 D:/models/base_weights&#10;D:/models/gptq_weights&#10;（支持多个目录，每行一个或以分号分隔）"></textarea>
+              <span class="config-field-desc">支持配置多个目录。系统将递归扫描 1~2 层子目录，检测含 config.json / safetensors 的权重，并在任务队列与配置中聚合供您选择</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
+              <textarea id="settings-mnn-dir" class="textarea" rows="2" style="font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.4; resize: vertical;" placeholder="如 D:/models/mnn_models&#10;（支持多个目录，每行一个或以分号分隔）"></textarea>
+              <span class="config-field-desc">支持配置多个目录。系统递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>跨机绝对前缀剥除 (image_strip_prefix)</span><span class="config-key-badge">image_strip_prefix</span></label>
+              <input type="text" id="settings-strip-prefix" class="input" placeholder="如 /root/autodl-tmp/ (本机不需要设为 null)">
+              <span class="config-field-desc">跨机器训练时从图片绝对路径中剥除的前缀，本机评测留空或 null</span>
+            </div>
+
+            <div class="config-grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
+              <div class="config-field">
+                <label><span>默认训练落地</span><span class="config-key-badge">train_out_dir</span></label>
+                <input type="text" id="settings-train-out" class="input" placeholder="如 D:/LF/data">
+              </div>
+              <div class="config-field">
+                <label><span>默认验证落地</span><span class="config-key-badge">val_out_dir</span></label>
+                <input type="text" id="settings-val-out" class="input" placeholder="如 D:/LF/data">
+              </div>
+              <div class="config-field">
+                <label><span>默认测试落地</span><span class="config-key-badge">test_out_dir</span></label>
+                <input type="text" id="settings-test-out" class="input" placeholder="如 D:/LF/data">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右栏: 切分参数默认值 -->
+        <div class="dataset-card" style="min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
             <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
               ✂️ 数据切分默认参数 (split.*)
             </h3>
@@ -1143,37 +1360,14 @@
               <input type="text" id="settings-split-stratify" class="input" placeholder="默认留空表示完全随机打乱抽样">
               <span class="config-field-desc">按样本某个元数据键分层保比例采样，无特殊需求留空</span>
             </div>
-
-            <button class="btn btn-primary" style="margin-top: 1.25rem; width: 100%; font-weight: 700;" onclick="saveSettings()">
-              💾 保存全局配置到 ~/.eval_vlm/config.yaml
-            </button>
           </div>
+
+          <button class="btn btn-primary" style="margin-top: 1.5rem; width: 100%; font-weight: 700; padding: 0.75rem;" onclick="saveSettings()">
+            💾 保存全局配置到 ~/.eval_vlm/config.yaml
+          </button>
         </div>
+      </div>
 
-        <!-- 本地模型库浏览器 -->
-        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-          <div class="dataset-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 1.2rem;">🤗</span>
-                <h3 style="font-size: 1.05rem; color: #fff; margin: 0;">已探测 HF / vLLM 模型</h3>
-              </div>
-              <span id="settings-hf-count" class="role-badge">0 个</span>
-            </div>
-            <div id="settings-hf-models-list" class="model-grid"></div>
-          </div>
-
-          <div class="dataset-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span style="font-size: 1.2rem;">⚡</span>
-                <h3 style="font-size: 1.05rem; color: #fff; margin: 0;">已探测 MNN 离线模型</h3>
-              </div>
-              <span id="settings-mnn-count" class="role-badge">0 个</span>
-            </div>
-            <div id="settings-mnn-models-list" class="model-grid"></div>
-          </div>
-        </div>
 
         <!-- 全局配置原始 YAML 查看器 -->
         <div style="grid-column: 1 / -1;">

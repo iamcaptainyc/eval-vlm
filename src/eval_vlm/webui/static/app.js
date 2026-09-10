@@ -760,96 +760,81 @@ async function loadModels() {
 }
 
 function renderModelSelects() {
-  // 1. Sweep 页面模型下拉框
+  // 1. Task Queue (任务队列) 模型下拉框
+  const jobModelSelect = document.getElementById("job-inline-model-select");
+  if (jobModelSelect) {
+    const curVal = jobModelSelect.value;
+    let optHF = (state.models.hf_models || [])
+      .map((m) => `<option value="${escapeHtml(m.path)}" data-type="hf" data-name="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+      .join("");
+    let optMNN = (state.models.mnn_models || [])
+      .map((m) => `<option value="${escapeHtml(m.path)}" data-type="mnn" data-name="${escapeHtml(m.name)}">⚡ ${escapeHtml(m.name)}</option>`)
+      .join("");
+    jobModelSelect.innerHTML = `<option value="">-- 选择已探测模型 --</option>` +
+      (optHF ? `<optgroup label="🤗 HF / vLLM 模型 (本地权重)">${optHF}</optgroup>` : "") +
+      (optMNN ? `<optgroup label="⚡ MNN 离线模型 (本地文件/目录)">${optMNN}</optgroup>` : "") +
+      `<option value="__custom__">✏️ 自定义输入 / 路径</option>`;
+    if (curVal) jobModelSelect.value = curVal;
+  }
+
+  // 2. Sweep 页面模型下拉框
   const sweepSelect = document.getElementById("sweep-model-select");
   if (sweepSelect) {
     const backend = document.getElementById("sweep-backend")?.value || "openai";
     let options = `<option value="">(选择本地已探测模型)</option>`;
     if (backend === "mnn") {
-      options += state.models.mnn_models
+      options += (state.models.mnn_models || [])
         .map((m) => `<option value="${escapeHtml(m.path)}">⚡ ${escapeHtml(m.name)}</option>`)
         .join("");
     } else {
-      options += state.models.hf_models
-        .map((m) => `<option value="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+      options += (state.models.hf_models || [])
+        .map((m) => `<option value="${escapeHtml(m.path)}">🤗 ${escapeHtml(m.name)}</option>`)
         .join("");
     }
     sweepSelect.innerHTML = options;
   }
 
-  // 2. Config 页面 OpenAI / MNN 模型下拉框
+  // 3. Config 页面 各后端模型下拉框
   const cfgOpenAISelect = document.getElementById("cfg-form-openai-model-select");
   if (cfgOpenAISelect) {
     cfgOpenAISelect.innerHTML = `<option value="">(选择本地已探测模型)</option>` +
-      state.models.hf_models
+      (state.models.hf_models || [])
         .map((m) => `<option value="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
         .join("");
   }
 
   const cfgMNNSelect = document.getElementById("cfg-form-mnn-model-select");
   if (cfgMNNSelect) {
-    cfgMNNSelect.innerHTML = `<option value="">(选择本地已探测模型)</option>` +
-      state.models.mnn_models
+    cfgMNNSelect.innerHTML = `<option value="">(选择本地已探测 MNN 模型)</option>` +
+      (state.models.mnn_models || [])
         .map((m) => `<option value="${escapeHtml(m.path)}">⚡ ${escapeHtml(m.name)}</option>`)
+        .join("");
+  }
+
+  const cfgVLLMSelect = document.getElementById("cfg-form-vllm-model-select");
+  if (cfgVLLMSelect) {
+    cfgVLLMSelect.innerHTML = `<option value="">(从已探测模型中选取)</option>` +
+      (state.models.hf_models || [])
+        .map((m) => `<option value="${escapeHtml(m.path)}">🤗 ${escapeHtml(m.name)}</option>`)
+        .join("");
+  }
+
+  const cfgHFSelect = document.getElementById("cfg-form-hf-model-select");
+  if (cfgHFSelect) {
+    cfgHFSelect.innerHTML = `<option value="">(从已探测模型中选取)</option>` +
+      (state.models.hf_models || [])
+        .map((m) => `<option value="${escapeHtml(m.path)}">🤗 ${escapeHtml(m.name)}</option>`)
         .join("");
   }
 }
 
 function renderModelCards() {
-  const hfList = document.getElementById("settings-hf-models-list");
-  const hfCount = document.getElementById("settings-hf-count");
-  if (hfCount) hfCount.textContent = `${state.models.hf_models.length} 个`;
-  if (hfList) {
-    if (!state.models.hf_models.length) {
-      hfList.innerHTML = `<div style="grid-column: 1/-1; padding: 1.5rem; text-align: center; color: var(--text-dim); font-size: 0.8rem;">
-        未检测到 HF 模型。请先在左侧设定 hf_models_dir 并保存。
-      </div>`;
-    } else {
-      hfList.innerHTML = state.models.hf_models
-        .map(
-          (m) => `
-        <div class="model-item-card">
-          <div class="model-item-title">
-            <span>${escapeHtml(m.name)}</span>
-            <span class="role-badge" style="font-size: 0.68rem; color: #a5b4fc; background: rgba(99,102,241,0.2);">HF/vLLM</span>
-          </div>
-          <div class="model-item-path">${escapeHtml(m.path)}</div>
-          <div style="margin-top: 0.35rem;">
-            <button class="btn btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="navigator.clipboard.writeText('${escapeHtml(m.path)}'); showToast('路径已复制到剪贴板', 'info');">📋 复制路径</button>
-          </div>
-        </div>`
-        )
-        .join("");
-    }
-  }
-
-  const mnnList = document.getElementById("settings-mnn-models-list");
-  const mnnCount = document.getElementById("settings-mnn-count");
-  if (mnnCount) mnnCount.textContent = `${state.models.mnn_models.length} 个`;
-  if (mnnList) {
-    if (!state.models.mnn_models.length) {
-      mnnList.innerHTML = `<div style="grid-column: 1/-1; padding: 1.5rem; text-align: center; color: var(--text-dim); font-size: 0.8rem;">
-        未检测到 MNN 模型。请先在左侧设定 mnn_models_dir 并保存。
-      </div>`;
-    } else {
-      mnnList.innerHTML = state.models.mnn_models
-        .map(
-          (m) => `
-        <div class="model-item-card">
-          <div class="model-item-title">
-            <span>${escapeHtml(m.name)}</span>
-            <span class="role-badge" style="font-size: 0.68rem; color: var(--cyan-500); background: rgba(6,182,212,0.2);">MNN</span>
-          </div>
-          <div class="model-item-path">${escapeHtml(m.path)}</div>
-          <div style="margin-top: 0.35rem;">
-            <button class="btn btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="navigator.clipboard.writeText('${escapeHtml(m.path)}'); showToast('路径已复制到剪贴板', 'info');">📋 复制路径</button>
-          </div>
-        </div>`
-        )
-        .join("");
-    }
-  }
+  const hfBadge = document.getElementById("settings-scan-badge-hf");
+  if (hfBadge) hfBadge.textContent = `HF/vLLM: ${(state.models.hf_models || []).length} 个`;
+  const mnnBadge = document.getElementById("settings-scan-badge-mnn");
+  if (mnnBadge) mnnBadge.textContent = `MNN: ${(state.models.mnn_models || []).length} 个`;
 }
+
 
 // --------------------------------------------------------------------------
 // 全局设置 (Global Settings)
@@ -881,8 +866,20 @@ async function loadSettings() {
     if (wsIn) wsIn.value = cfg.workspace || "";
     if (mrIn) mrIn.value = cfg.media_root || "";
     if (spIn) spIn.value = cfg.image_strip_prefix || "";
-    if (hfIn) hfIn.value = cfg.hf_models_dir || "";
-    if (mnnIn) mnnIn.value = cfg.mnn_models_dir || "";
+    if (hfIn) {
+      if (Array.isArray(cfg.hf_models_dir)) {
+        hfIn.value = cfg.hf_models_dir.join("\n");
+      } else {
+        hfIn.value = cfg.hf_models_dir || "";
+      }
+    }
+    if (mnnIn) {
+      if (Array.isArray(cfg.mnn_models_dir)) {
+        mnnIn.value = cfg.mnn_models_dir.join("\n");
+      } else {
+        mnnIn.value = cfg.mnn_models_dir || "";
+      }
+    }
     if (trIn) trIn.value = cfg.train_out_dir || "";
     if (vaIn) vaIn.value = cfg.val_out_dir || "";
     if (teIn) teIn.value = cfg.test_out_dir || "";
@@ -1152,8 +1149,12 @@ function setConfigBackend(backend) {
   });
   const grpOpenAI = document.getElementById("cfg-group-openai");
   const grpMNN = document.getElementById("cfg-group-mnn");
-  if (grpOpenAI) grpOpenAI.style.display = (backend === "openai" || backend === "vllm_offline" || backend === "hf") ? "block" : "none";
+  const grpVLLM = document.getElementById("cfg-group-vllm_offline");
+  const grpHF = document.getElementById("cfg-group-hf");
+  if (grpOpenAI) grpOpenAI.style.display = (backend === "openai" || backend === "vllm" || backend === "fake") ? "block" : "none";
   if (grpMNN) grpMNN.style.display = backend === "mnn" ? "block" : "none";
+  if (grpVLLM) grpVLLM.style.display = backend === "vllm_offline" ? "block" : "none";
+  if (grpHF) grpHF.style.display = backend === "hf" ? "block" : "none";
   markConfigDirty();
 }
 
@@ -1233,6 +1234,68 @@ function renderConfig() {
   if (mnnTemp) mnnTemp.value = mnn.temperature ?? 0.0;
   if (mnnTempSlider) mnnTempSlider.value = mnn.temperature ?? 0.0;
   if (mnnRepPenalty) mnnRepPenalty.value = mnn.repetition_penalty ?? 1.0;
+
+  // vLLM Offline 字段
+  const vllm = cfg.inference?.vllm_offline || {};
+  const vllmModel = document.getElementById("cfg-form-vllm-model");
+  const vllmGpuUtil = document.getElementById("cfg-form-vllm-gpuutil");
+  const vllmGpuUtilSlider = document.getElementById("cfg-form-vllm-gpuutil-slider");
+  const vllmMaxModelLen = document.getElementById("cfg-form-vllm-maxmodellen");
+  const vllmMaxNumSeqs = document.getElementById("cfg-form-vllm-maxnumseqs");
+  const vllmMaxTokens = document.getElementById("cfg-form-vllm-maxtokens");
+  const vllmTemp = document.getElementById("cfg-form-vllm-temp");
+  const vllmTempSlider = document.getElementById("cfg-form-vllm-temp-slider");
+  const vllmTopP = document.getElementById("cfg-form-vllm-topp");
+  const vllmTopK = document.getElementById("cfg-form-vllm-topk");
+  const vllmRepPenalty = document.getElementById("cfg-form-vllm-reppenalty");
+  const vllmDtype = document.getElementById("cfg-form-vllm-dtype");
+  const vllmMaxImages = document.getElementById("cfg-form-vllm-maximages");
+  const vllmImgMinPixels = document.getElementById("cfg-form-vllm-imgminpixels");
+  const vllmImgMaxPixels = document.getElementById("cfg-form-vllm-imgmaxpixels");
+  const vllmRemoteCode = document.getElementById("cfg-form-vllm-remotecode");
+  const vllmSysPrompt = document.getElementById("cfg-form-vllm-sysprompt");
+
+  if (vllmModel) vllmModel.value = vllm.model_path || "";
+  if (vllmGpuUtil) vllmGpuUtil.value = vllm.gpu_memory_utilization ?? 0.9;
+  if (vllmGpuUtilSlider) vllmGpuUtilSlider.value = vllm.gpu_memory_utilization ?? 0.9;
+  if (vllmMaxModelLen) vllmMaxModelLen.value = vllm.max_model_len ?? 4096;
+  if (vllmMaxNumSeqs) vllmMaxNumSeqs.value = vllm.max_num_seqs ?? 128;
+  if (vllmMaxTokens) vllmMaxTokens.value = vllm.max_tokens ?? 512;
+  if (vllmTemp) vllmTemp.value = vllm.temperature ?? 0.0;
+  if (vllmTempSlider) vllmTempSlider.value = vllm.temperature ?? 0.0;
+  if (vllmTopP) vllmTopP.value = vllm.top_p ?? 1.0;
+  if (vllmTopK) vllmTopK.value = vllm.top_k ?? -1;
+  if (vllmRepPenalty) vllmRepPenalty.value = vllm.repetition_penalty ?? 1.0;
+  if (vllmDtype) vllmDtype.value = vllm.dtype || "auto";
+  if (vllmMaxImages) vllmMaxImages.value = vllm.max_images_per_prompt ?? 4;
+  if (vllmImgMinPixels) vllmImgMinPixels.value = vllm.image_min_pixels ?? 784;
+  if (vllmImgMaxPixels) vllmImgMaxPixels.value = vllm.image_max_pixels ?? 564480;
+  if (vllmRemoteCode) vllmRemoteCode.checked = vllm.trust_remote_code !== false;
+  if (vllmSysPrompt) vllmSysPrompt.value = vllm.system_prompt || "";
+
+  // HF 字段
+  const hf = cfg.inference?.hf || {};
+  const hfModel = document.getElementById("cfg-form-hf-model");
+  const hfDevice = document.getElementById("cfg-form-hf-device");
+  const hfDtype = document.getElementById("cfg-form-hf-dtype");
+  const hfMaxTokens = document.getElementById("cfg-form-hf-maxtokens");
+  const hfAttn = document.getElementById("cfg-form-hf-attn");
+  const hfMaxSide = document.getElementById("cfg-form-hf-maxside");
+  const hfImgMinPixels = document.getElementById("cfg-form-hf-imgminpixels");
+  const hfImgMaxPixels = document.getElementById("cfg-form-hf-imgmaxpixels");
+  const hfGreedy = document.getElementById("cfg-form-hf-greedy");
+  const hfSysPrompt = document.getElementById("cfg-form-hf-sysprompt");
+
+  if (hfModel) hfModel.value = hf.model_path || "";
+  if (hfDevice) hfDevice.value = hf.device || "auto";
+  if (hfDtype) hfDtype.value = hf.dtype || "auto";
+  if (hfMaxTokens) hfMaxTokens.value = hf.max_tokens ?? 1024;
+  if (hfAttn) hfAttn.value = hf.attn_implementation || "";
+  if (hfMaxSide) hfMaxSide.value = hf.image_max_side ?? 0;
+  if (hfImgMinPixels) hfImgMinPixels.value = hf.image_min_pixels ?? 1024;
+  if (hfImgMaxPixels) hfImgMaxPixels.value = hf.image_max_pixels ?? 1048576;
+  if (hfGreedy) hfGreedy.checked = hf.greedy !== false;
+  if (hfSysPrompt) hfSysPrompt.value = hf.system_prompt || "";
 
   // 2. 评测策略
   const evMethod = document.getElementById("cfg-form-eval-method");
@@ -1321,6 +1384,60 @@ async function saveAllConfigChanges() {
     if (ms) updates.push({ key: "inference.mnn.image_max_side", value: parseInt(ms, 10) });
     updates.push({ key: "inference.mnn.temperature", value: tp });
     updates.push({ key: "inference.mnn.repetition_penalty", value: rp });
+  } else if (activeBackend === "vllm_offline") {
+    const mp = document.getElementById("cfg-form-vllm-model")?.value.trim();
+    const gu = parseFloat(document.getElementById("cfg-form-vllm-gpuutil")?.value || "0.9");
+    const ml = parseInt(document.getElementById("cfg-form-vllm-maxmodellen")?.value || "4096", 10);
+    const ns = parseInt(document.getElementById("cfg-form-vllm-maxnumseqs")?.value || "128", 10);
+    const mt = parseInt(document.getElementById("cfg-form-vllm-maxtokens")?.value || "512", 10);
+    const tp = parseFloat(document.getElementById("cfg-form-vllm-temp")?.value || "0");
+    const topP = parseFloat(document.getElementById("cfg-form-vllm-topp")?.value || "1.0");
+    const topK = parseInt(document.getElementById("cfg-form-vllm-topk")?.value || "-1", 10);
+    const rp = parseFloat(document.getElementById("cfg-form-vllm-reppenalty")?.value || "1.0");
+    const dt = document.getElementById("cfg-form-vllm-dtype")?.value || "auto";
+    const mi = parseInt(document.getElementById("cfg-form-vllm-maximages")?.value || "4", 10);
+    const minPx = parseInt(document.getElementById("cfg-form-vllm-imgminpixels")?.value || "784", 10);
+    const maxPx = parseInt(document.getElementById("cfg-form-vllm-imgmaxpixels")?.value || "564480", 10);
+    const rc = document.getElementById("cfg-form-vllm-remotecode")?.checked ?? true;
+    const sp = document.getElementById("cfg-form-vllm-sysprompt")?.value || "";
+
+    if (mp) updates.push({ key: "inference.vllm_offline.model_path", value: mp });
+    updates.push({ key: "inference.vllm_offline.gpu_memory_utilization", value: gu });
+    updates.push({ key: "inference.vllm_offline.max_model_len", value: ml });
+    updates.push({ key: "inference.vllm_offline.max_num_seqs", value: ns });
+    updates.push({ key: "inference.vllm_offline.max_tokens", value: mt });
+    updates.push({ key: "inference.vllm_offline.temperature", value: tp });
+    updates.push({ key: "inference.vllm_offline.top_p", value: topP });
+    updates.push({ key: "inference.vllm_offline.top_k", value: topK });
+    updates.push({ key: "inference.vllm_offline.repetition_penalty", value: rp });
+    updates.push({ key: "inference.vllm_offline.dtype", value: dt });
+    updates.push({ key: "inference.vllm_offline.max_images_per_prompt", value: mi });
+    updates.push({ key: "inference.vllm_offline.image_min_pixels", value: minPx });
+    updates.push({ key: "inference.vllm_offline.image_max_pixels", value: maxPx });
+    updates.push({ key: "inference.vllm_offline.trust_remote_code", value: rc });
+    updates.push({ key: "inference.vllm_offline.system_prompt", value: sp });
+  } else if (activeBackend === "hf") {
+    const mp = document.getElementById("cfg-form-hf-model")?.value.trim();
+    const dev = document.getElementById("cfg-form-hf-device")?.value.trim() || "auto";
+    const dt = document.getElementById("cfg-form-hf-dtype")?.value || "auto";
+    const mt = parseInt(document.getElementById("cfg-form-hf-maxtokens")?.value || "1024", 10);
+    const attn = document.getElementById("cfg-form-hf-attn")?.value || null;
+    const ms = parseInt(document.getElementById("cfg-form-hf-maxside")?.value || "0", 10);
+    const minPx = parseInt(document.getElementById("cfg-form-hf-imgminpixels")?.value || "1024", 10);
+    const maxPx = parseInt(document.getElementById("cfg-form-hf-imgmaxpixels")?.value || "1048576", 10);
+    const gr = document.getElementById("cfg-form-hf-greedy")?.checked ?? true;
+    const sp = document.getElementById("cfg-form-hf-sysprompt")?.value || "";
+
+    if (mp) updates.push({ key: "inference.hf.model_path", value: mp });
+    updates.push({ key: "inference.hf.device", value: dev });
+    updates.push({ key: "inference.hf.dtype", value: dt });
+    updates.push({ key: "inference.hf.max_tokens", value: mt });
+    if (attn) updates.push({ key: "inference.hf.attn_implementation", value: attn });
+    updates.push({ key: "inference.hf.image_max_side", value: ms });
+    updates.push({ key: "inference.hf.image_min_pixels", value: minPx });
+    updates.push({ key: "inference.hf.image_max_pixels", value: maxPx });
+    updates.push({ key: "inference.hf.greedy", value: gr });
+    updates.push({ key: "inference.hf.system_prompt", value: sp });
   } else {
     const mdl = document.getElementById("cfg-form-openai-model")?.value.trim();
     const bu = document.getElementById("cfg-form-openai-baseurl")?.value.trim();
@@ -1338,6 +1455,7 @@ async function saveAllConfigChanges() {
     updates.push({ key: "inference.openai.image_detail", value: id });
     updates.push({ key: "inference.openai.system_prompt", value: sp });
   }
+
 
   // 字段抽取
   const leMm = document.getElementById("cfg-form-le-matchmode")?.value;
@@ -1483,7 +1601,12 @@ function updateJobCommandPreview() {
   const parts = ["python", "-m", "eval_vlm", type];
   if (dsName) parts.push("-d", dsName);
   if (backend) parts.push("--backend", backend);
-  if (model) parts.push("--model", model);
+  if (model) {
+    if (backend === "hf") parts.push("--hf-model", model);
+    else if (backend === "vllm_offline") parts.push("--vllm-model", model);
+    else if (backend === "mnn") parts.push("--mnn-config", model);
+    else parts.push("--model", model);
+  }
   if (limit) parts.push("--limit", limit);
   if (failfast) parts.push("--fail-fast");
 
@@ -1523,7 +1646,12 @@ async function confirmLaunchJob() {
 
   const params = {};
   if (backend) params.backend = backend;
-  if (model) params.model = model;
+  if (model) {
+    if (backend === "hf") params.hf_model = model;
+    else if (backend === "vllm_offline") params.vllm_model = model;
+    else if (backend === "mnn") params.mnn_config = model;
+    else params.model = model;
+  }
   if (limit) params.limit = parseInt(limit, 10);
   if (failfast) params.fail_fast = true;
 
@@ -1608,6 +1736,57 @@ function switchInlineJobType(type) {
   updateInlineJobPreview();
 }
 
+function onJobInlineModelSelectChange() {
+  const sel = document.getElementById("job-inline-model-select");
+  const input = document.getElementById("job-inline-model");
+  const backendSel = document.getElementById("job-inline-backend");
+  if (!sel || !input) return;
+  const val = sel.value;
+  if (!val) {
+    updateInlineJobPreview();
+    return;
+  }
+  if (val === "__custom__") {
+    input.value = "";
+    input.focus();
+    updateInlineJobPreview();
+    return;
+  }
+  const opt = sel.options[sel.selectedIndex];
+  const modelType = opt?.getAttribute("data-type");
+  input.value = val;
+  if (modelType === "mnn") {
+    if (backendSel) backendSel.value = "mnn";
+  } else if (modelType === "hf") {
+    if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
+      backendSel.value = "vllm_offline";
+    }
+  }
+  onJobInlineBackendChange();
+  updateInlineJobPreview();
+}
+
+function onJobInlineBackendChange() {
+  const backend = document.getElementById("job-inline-backend")?.value || "";
+  const labelEl = document.getElementById("job-inline-model-label");
+  const badgeEl = document.getElementById("job-inline-model-badge");
+  let flagText = "--model";
+  let descText = "模型覆盖 (--model)";
+  if (backend === "hf") {
+    flagText = "--hf-model";
+    descText = "HF 权重 (--hf-model)";
+  } else if (backend === "vllm_offline") {
+    flagText = "--vllm-model";
+    descText = "vLLM 权重 (--vllm-model)";
+  } else if (backend === "mnn") {
+    flagText = "--mnn-config";
+    descText = "MNN 配置 (--mnn-config)";
+  }
+  if (labelEl) labelEl.textContent = descText;
+  if (badgeEl) badgeEl.textContent = flagText;
+  updateInlineJobPreview();
+}
+
 function updateInlineJobPreview() {
   const type = inlineJobType;
   const dsSelect = document.getElementById("job-inline-dataset");
@@ -1621,7 +1800,12 @@ function updateInlineJobPreview() {
   const parts = ["python", "-m", "eval_vlm", type];
   if (dsName) parts.push("-d", dsName);
   if (backend) parts.push("--backend", backend);
-  if (model) parts.push("--model", model);
+  if (model) {
+    if (backend === "hf") parts.push("--hf-model", model);
+    else if (backend === "vllm_offline") parts.push("--vllm-model", model);
+    else if (backend === "mnn") parts.push("--mnn-config", model);
+    else parts.push("--model", model);
+  }
   if (limit) parts.push("--limit", limit);
   if (failfast) parts.push("--fail-fast");
 
@@ -1661,7 +1845,12 @@ async function submitInlineJob() {
 
   const params = {};
   if (backend) params.backend = backend;
-  if (model) params.model = model;
+  if (model) {
+    if (backend === "hf") params.hf_model = model;
+    else if (backend === "vllm_offline") params.vllm_model = model;
+    else if (backend === "mnn") params.mnn_config = model;
+    else params.model = model;
+  }
   if (limit) params.limit = parseInt(limit, 10);
   if (failfast) params.fail_fast = true;
 
@@ -2471,3 +2660,5 @@ window.switchConfigSubTab = switchConfigSubTab;
 window.setConfigBackend = setConfigBackend;
 window.markConfigDirty = markConfigDirty;
 window.saveAllConfigChanges = saveAllConfigChanges;
+window.onJobInlineModelSelectChange = onJobInlineModelSelectChange;
+window.onJobInlineBackendChange = onJobInlineBackendChange;

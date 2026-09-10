@@ -1,7 +1,7 @@
 """Pydantic 数据模型定义。"""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -144,8 +144,8 @@ class SettingsResponse(BaseModel):
     workspace: str
     media_root: Optional[str] = None
     image_strip_prefix: Optional[str] = None
-    hf_models_dir: Optional[str] = None
-    mnn_models_dir: Optional[str] = None
+    hf_models_dir: Optional[Union[str, list[str]]] = None
+    mnn_models_dir: Optional[Union[str, list[str]]] = None
     train_out_dir: Optional[str] = None
     val_out_dir: Optional[str] = None
     test_out_dir: Optional[str] = None
@@ -158,8 +158,8 @@ class SettingsUpdateRequest(BaseModel):
     workspace: Optional[str] = None
     media_root: Optional[str] = None
     image_strip_prefix: Optional[str] = None
-    hf_models_dir: Optional[str] = None
-    mnn_models_dir: Optional[str] = None
+    hf_models_dir: Optional[Union[str, list[str]]] = None
+    mnn_models_dir: Optional[Union[str, list[str]]] = None
     train_out_dir: Optional[str] = None
     val_out_dir: Optional[str] = None
     test_out_dir: Optional[str] = None

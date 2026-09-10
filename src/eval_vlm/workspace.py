@@ -209,10 +209,14 @@ def describe_settable_keys() -> str:
     return "\n".join(out)
 
 
-def _coerce_top(key: str, value: Optional[str]) -> Any:
-    """顶层键类型转换:可空键(前缀/各 *_out_dir)允许 None,其余转字符串。"""
+def _coerce_top(key: str, value: Optional[Any]) -> Any:
+    """顶层键类型转换:可空键(前缀/各 *_out_dir/模型目录)允许 None 或原样(字符串/列表)，其余转字符串。"""
     if key in _TOP_NULLABLE:
-        return value                           # None 或字符串
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip().lower() in ("", "null", "none"):
+            return None
+        return value                           # None 或字符串或列表
     if value is None:
         raise ValueError(f"{key} 不能设为空")
     return str(value)
@@ -254,19 +258,43 @@ def set_global_value(key: str, value: Optional[str]) -> Path:
 
 
 def _update_yaml_value(text: str, key: str, value: Any) -> str:
-    """整行替换某顶层键的值,保留行尾内联注释;缺该键则追加一行。"""
+    """整行替换某顶层键的值,保留行尾内联注释;支持单行标量和多行/列表;缺该键则追加一行。"""
     literal = _yaml_scalar(value)
-    pattern = re.compile(rf"^({re.escape(key)}:[ \t]*)([^#\n]*?)([ \t]*#.*)?$", re.MULTILINE)
+    lines = text.splitlines(keepends=True)
+    key_re = re.compile(rf"^{re.escape(key)}:[ \t]*(.*?)([ \t]*#.*)?(\r?\n?)$")
 
-    def repl(m: re.Match) -> str:
-        comment = m.group(3) or ""
-        return f"{m.group(1)}{literal}{comment}"
+    found_idx = None
+    comment = ""
+    eol = "\n"
+    for idx, line in enumerate(lines):
+        m = key_re.match(line)
+        if m:
+            found_idx = idx
+            comment = m.group(2) or ""
+            eol = m.group(3) or "\n"
+            break
 
-    new_text, n = pattern.subn(repl, text)
-    if n == 0:
+    if found_idx is None:
         sep = "" if text.endswith("\n") else "\n"
-        new_text = f"{text}{sep}{key}: {literal}\n"
-    return new_text
+        return f"{text}{sep}{key}: {literal}\n"
+
+    # 如果找到，检查后续行是否有缩进内容（例如旧的 YAML 列表项）
+    end_idx = found_idx + 1
+    while end_idx < len(lines):
+        ln = lines[end_idx]
+        if re.match(r"^[ \t]+", ln):
+            end_idx += 1
+        elif ln.strip() == "":
+            if end_idx + 1 < len(lines) and re.match(r"^[ \t]+", lines[end_idx + 1]):
+                end_idx += 1
+            else:
+                break
+        else:
+            break
+
+    new_line = f"{key}: {literal}{comment}{eol}"
+    lines[found_idx:end_idx] = [new_line]
+    return "".join(lines)
 
 
 def _set_nested_value(text: str, parent: str, child: str, value: Any) -> str:
@@ -362,13 +390,15 @@ def resolve_dataset_dir(name_or_path: str, workspace: Path) -> Path:
 # 模板渲染 + 数据集初始化
 # ---------------------------------------------------------------------------
 def _yaml_scalar(value: Any) -> str:
-    """把 Python 值渲染成合法 YAML 标量(字符串用单引号,Windows 反斜杠安全)。"""
+    """把 Python 值渲染成合法 YAML 标量(字符串用单引号,Windows 反斜杠安全;列表格式化为行内数组)。"""
     if value is None:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_yaml_scalar(x) for x in value) + "]"
     s = str(value)
     return "'" + s.replace("'", "''") + "'"
 
@@ -554,14 +584,65 @@ def set_dataset_value(folder: Path, dotted_key: str, value: Any) -> Path:
     return config_path
 
 
-def _check_and_add_hf(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
+def _normalize_dirs(raw_val: Any) -> list[Path]:
+    """把各种可能的多目录输入转换为 Path 列表。
+    支持:
+    - None / ""
+    - Path 对象
+    - 列表/元组: [path1, path2, ...]
+    - 字符串: 支持分号 ';', 换行 '\n', 逗号 ',' 分隔的多个路径
+    """
+    if not raw_val:
+        return []
+    items: list[str] = []
+    if isinstance(raw_val, (list, tuple)):
+        for item in raw_val:
+            if item:
+                items.append(str(item))
+    elif isinstance(raw_val, Path):
+        items.append(str(raw_val))
+    elif isinstance(raw_val, str):
+        parts = re.split(r"[;\n\r,]+", raw_val)
+        items.extend(p.strip() for p in parts if p.strip())
+    else:
+        items.append(str(raw_val))
+
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        clean = item.strip().strip("'\"")
+        if not clean or clean.lower() in ("null", "none"):
+            continue
+        try:
+            p = Path(clean).expanduser().resolve()
+            p_str = str(p).lower() if os.name == "nt" else str(p)
+            if p_str not in seen:
+                seen.add(p_str)
+                paths.append(p)
+        except Exception:
+            pass
+    return paths
+
+
+def _check_and_add_hf(
+    d: Path,
+    root: Path,
+    out: list[dict[str, Any]],
+    seen_paths: set[str],
+    prefix: str = "",
+) -> bool:
     """检查目录 d 是否为 HF 模型。"""
     markers = ("config.json", "model.safetensors", "pytorch_model.bin", "tokenizer.json")
     try:
         if any((d / m).exists() for m in markers):
-            name = d.name if d == root else d.relative_to(root).as_posix()
+            p_key = str(d.resolve()).lower() if os.name == "nt" else str(d.resolve())
+            if p_key in seen_paths:
+                return True
+            seen_paths.add(p_key)
+            base_name = d.name if d == root else d.relative_to(root).as_posix()
+            disp_name = f"{prefix}{base_name}" if prefix else base_name
             out.append({
-                "name": name,
+                "name": disp_name,
                 "path": str(d),
                 "type": "hf",
             })
@@ -571,23 +652,39 @@ def _check_and_add_hf(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _check_and_add_mnn(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
+def _check_and_add_mnn(
+    d: Path,
+    root: Path,
+    out: list[dict[str, Any]],
+    seen_paths: set[str],
+    prefix: str = "",
+) -> bool:
     """检查目录 d 是否为 MNN 模型目录 (含 config.json 或 *.mnn)。"""
     try:
         cfg_file = d / "config.json"
         has_mnn = any(f.suffix.lower() == ".mnn" for f in d.iterdir() if f.is_file())
         if cfg_file.exists():
-            name = d.name if d == root else d.relative_to(root).as_posix()
+            p_key = str(cfg_file.resolve()).lower() if os.name == "nt" else str(cfg_file.resolve())
+            if p_key in seen_paths:
+                return True
+            seen_paths.add(p_key)
+            base_name = d.name if d == root else d.relative_to(root).as_posix()
+            disp_name = f"{prefix}{base_name}" if prefix else base_name
             out.append({
-                "name": name,
+                "name": disp_name,
                 "path": str(cfg_file),
                 "type": "mnn",
             })
             return True
         elif has_mnn and d != root:
-            name = d.relative_to(root).as_posix()
+            p_key = str(d.resolve()).lower() if os.name == "nt" else str(d.resolve())
+            if p_key in seen_paths:
+                return True
+            seen_paths.add(p_key)
+            base_name = d.relative_to(root).as_posix()
+            disp_name = f"{prefix}{base_name}" if prefix else base_name
             out.append({
-                "name": name,
+                "name": disp_name,
                 "path": str(d),
                 "type": "mnn",
             })
@@ -598,12 +695,14 @@ def _check_and_add_mnn(d: Path, root: Path, out: list[dict[str, Any]]) -> bool:
 
 
 def scan_local_models(
-    hf_dir: Optional[Path | str] = None,
-    mnn_dir: Optional[Path | str] = None,
+    hf_dir: Optional[Any] = None,
+    mnn_dir: Optional[Any] = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """探测并枚举本地存储的 HF/vLLM 模型与 MNN 模型。
 
+    支持配置多个目录(列表或换行/分号/逗号分隔的字符串，如同时配置基座权重与 GPTQ 量化权重目录)。
     支持 1~2 层子目录扫描(如 /models/Qwen2-VL-7B 或 /models/Qwen/Qwen2-VL-7B)。
+    多目录时自动加目录前缀区分，并自动对绝对路径做去重。
     返回:
       {
         "hf_models": [{"name": "...", "path": "...", "type": "hf"}],
@@ -612,49 +711,63 @@ def scan_local_models(
     """
     hf_models: list[dict[str, Any]] = []
     mnn_models: list[dict[str, Any]] = []
+    seen_hf_paths: set[str] = set()
+    seen_mnn_paths: set[str] = set()
 
     # 1. 扫描 HF / vLLM / transformers 模型
-    if hf_dir:
+    hf_roots = _normalize_dirs(hf_dir)
+    hf_multi = len(hf_roots) > 1
+    for hp in hf_roots:
         try:
-            hp = Path(hf_dir).expanduser().resolve()
             if hp.is_dir():
-                if not _check_and_add_hf(hp, hp, hf_models):
+                prefix = f"[{hp.name}] " if hf_multi else ""
+                if not _check_and_add_hf(hp, hp, hf_models, seen_hf_paths, prefix):
                     for p1 in sorted(hp.iterdir()):
                         if not p1.is_dir():
                             continue
-                        if _check_and_add_hf(p1, hp, hf_models):
+                        if _check_and_add_hf(p1, hp, hf_models, seen_hf_paths, prefix):
                             continue
                         for p2 in sorted(p1.iterdir()):
                             if p2.is_dir():
-                                _check_and_add_hf(p2, hp, hf_models)
+                                _check_and_add_hf(p2, hp, hf_models, seen_hf_paths, prefix)
         except Exception:
             pass
 
     # 2. 扫描 MNN 模型
-    if mnn_dir:
+    mnn_roots = _normalize_dirs(mnn_dir)
+    mnn_multi = len(mnn_roots) > 1
+    for mp in mnn_roots:
         try:
-            mp = Path(mnn_dir).expanduser().resolve()
             if mp.is_dir():
-                if not _check_and_add_mnn(mp, mp, mnn_models):
+                prefix = f"[{mp.name}] " if mnn_multi else ""
+                if not _check_and_add_mnn(mp, mp, mnn_models, seen_mnn_paths, prefix):
                     for p1 in sorted(mp.iterdir()):
                         if p1.is_file() and p1.suffix.lower() == ".mnn":
-                            mnn_models.append({
-                                "name": p1.name,
-                                "path": str(p1),
-                                "type": "mnn",
-                            })
+                            p_key = str(p1.resolve()).lower() if os.name == "nt" else str(p1.resolve())
+                            if p_key not in seen_mnn_paths:
+                                seen_mnn_paths.add(p_key)
+                                disp_name = f"{prefix}{p1.name}" if prefix else p1.name
+                                mnn_models.append({
+                                    "name": disp_name,
+                                    "path": str(p1),
+                                    "type": "mnn",
+                                })
                         elif p1.is_dir():
-                            if _check_and_add_mnn(p1, mp, mnn_models):
+                            if _check_and_add_mnn(p1, mp, mnn_models, seen_mnn_paths, prefix):
                                 continue
                             for p2 in sorted(p1.iterdir()):
                                 if p2.is_file() and p2.suffix.lower() == ".mnn":
-                                    mnn_models.append({
-                                        "name": f"{p1.name}/{p2.name}",
-                                        "path": str(p2),
-                                        "type": "mnn",
-                                    })
+                                    p_key = str(p2.resolve()).lower() if os.name == "nt" else str(p2.resolve())
+                                    if p_key not in seen_mnn_paths:
+                                        seen_mnn_paths.add(p_key)
+                                        disp_name = f"{prefix}{p1.name}/{p2.name}" if prefix else f"{p1.name}/{p2.name}"
+                                        mnn_models.append({
+                                            "name": disp_name,
+                                            "path": str(p2),
+                                            "type": "mnn",
+                                        })
                                 elif p2.is_dir():
-                                    _check_and_add_mnn(p2, mp, mnn_models)
+                                    _check_and_add_mnn(p2, mp, mnn_models, seen_mnn_paths, prefix)
         except Exception:
             pass
 
@@ -662,3 +775,4 @@ def scan_local_models(
         "hf_models": hf_models,
         "mnn_models": mnn_models,
     }
+

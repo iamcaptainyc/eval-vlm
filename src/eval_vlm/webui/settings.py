@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 from ..workspace import load_global_config, resolve_workspace
 
@@ -22,8 +22,8 @@ class Settings:
         self.workspace: Path = resolve_workspace(cli_override, global_cfg)
         self.media_root: Optional[str] = global_cfg.get("media_root")
         self.image_strip_prefix: Optional[str] = global_cfg.get("image_strip_prefix")
-        self.hf_models_dir: Optional[str] = global_cfg.get("hf_models_dir")
-        self.mnn_models_dir: Optional[str] = global_cfg.get("mnn_models_dir")
+        self.hf_models_dir: Optional[Union[str, list[str]]] = global_cfg.get("hf_models_dir")
+        self.mnn_models_dir: Optional[Union[str, list[str]]] = global_cfg.get("mnn_models_dir")
         self.train_out_dir: Optional[str] = global_cfg.get("train_out_dir")
         self.val_out_dir: Optional[str] = global_cfg.get("val_out_dir")
         self.test_out_dir: Optional[str] = global_cfg.get("test_out_dir")
