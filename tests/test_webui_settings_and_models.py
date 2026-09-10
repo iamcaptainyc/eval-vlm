@@ -43,19 +43,30 @@ def test_settings_and_models_flow(settings_client):
     data = resp.json()
     assert "workspace" in data
     assert data["hf_models_dir"] is None
+    assert "split" in data
+    assert data["split"]["train"] == 0.95
+    assert data["split"]["test"] == 0.05
 
-    # 2. 更新设置
+    # 2. 更新设置 (包含 split 与路径)
     resp = client.put(
         "/api/settings",
         json={
             "hf_models_dir": str(hf_dir),
             "mnn_models_dir": str(mnn_dir),
+            "split": {
+                "train": 0.8,
+                "test": 0.2,
+                "seed": 999,
+            },
         },
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["hf_models_dir"] == str(hf_dir)
     assert data["mnn_models_dir"] == str(mnn_dir)
+    assert data["split"]["train"] == 0.8
+    assert data["split"]["test"] == 0.2
+    assert data["split"]["seed"] == 999
 
     # 3. 获取模型列表并验证扫描成功
     resp = client.get("/api/models")

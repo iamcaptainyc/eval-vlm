@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Config
-from ..workspace import scan_local_models, set_global_value
+from ..workspace import global_config_path, scan_local_models, set_global_value
 from .auth import User, get_current_user, require_editor, require_viewer
 from .automation import check_dataset_health, compare_runs
 from .configio import read_config_info, update_dataset_config
@@ -24,6 +24,7 @@ from .models import (
     ConfigUpdateRequest,
     DeleteSampleRequest,
     DeleteSampleResponse,
+    GlobalSplitConfig,
     JobCreateRequest,
     JobSummary,
     RestoreRequest,
@@ -87,12 +88,28 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         st: Settings = Depends(get_settings),
     ) -> SettingsResponse:
         st.reload_global_config()
+        cfg_path = global_config_path()
+        raw_text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        split_dict = st.split if isinstance(st.split, dict) else {}
+        split_obj = GlobalSplitConfig(
+            train=float(split_dict.get("train", 0.95)),
+            test=float(split_dict.get("test", 0.05)),
+            val=float(split_dict.get("val", 0.0)),
+            seed=int(split_dict.get("seed", 42)),
+            stratify_by=split_dict.get("stratify_by") or None,
+        )
         return SettingsResponse(
             workspace=str(st.workspace),
             media_root=st.media_root,
             image_strip_prefix=st.image_strip_prefix,
             hf_models_dir=st.hf_models_dir,
             mnn_models_dir=st.mnn_models_dir,
+            train_out_dir=st.train_out_dir,
+            val_out_dir=st.val_out_dir,
+            test_out_dir=st.test_out_dir,
+            split=split_obj,
+            config_file=str(cfg_path),
+            raw_yaml=raw_text,
         )
 
     @app.put("/api/settings")
@@ -106,6 +123,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "image_strip_prefix": body.image_strip_prefix,
             "hf_models_dir": body.hf_models_dir,
             "mnn_models_dir": body.mnn_models_dir,
+            "train_out_dir": body.train_out_dir,
+            "val_out_dir": body.val_out_dir,
+            "test_out_dir": body.test_out_dir,
         }
         if body.workspace is not None and body.workspace.strip():
             fields["workspace"] = body.workspace.strip()
@@ -115,13 +135,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 val_str = None if (isinstance(v, str) and v.strip().lower() in ("", "null", "none")) else str(v).strip()
                 set_global_value(k, val_str)
 
+        if body.split and isinstance(body.split, dict):
+            for sk, sv in body.split.items():
+                if sv is not None:
+                    sv_str = None if (isinstance(sv, str) and sv.strip().lower() in ("", "null", "none")) else str(sv).strip()
+                    set_global_value(f"split.{sk}", sv_str)
+
         st.reload_global_config()
+        cfg_path = global_config_path()
+        raw_text = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+        split_dict = st.split if isinstance(st.split, dict) else {}
+        split_obj = GlobalSplitConfig(
+            train=float(split_dict.get("train", 0.95)),
+            test=float(split_dict.get("test", 0.05)),
+            val=float(split_dict.get("val", 0.0)),
+            seed=int(split_dict.get("seed", 42)),
+            stratify_by=split_dict.get("stratify_by") or None,
+        )
         return SettingsResponse(
             workspace=str(st.workspace),
             media_root=st.media_root,
             image_strip_prefix=st.image_strip_prefix,
             hf_models_dir=st.hf_models_dir,
             mnn_models_dir=st.mnn_models_dir,
+            train_out_dir=st.train_out_dir,
+            val_out_dir=st.val_out_dir,
+            test_out_dir=st.test_out_dir,
+            split=split_obj,
+            config_file=str(cfg_path),
+            raw_yaml=raw_text,
         )
 
     @app.get("/api/models")

@@ -24,6 +24,10 @@ class Settings:
         self.image_strip_prefix: Optional[str] = global_cfg.get("image_strip_prefix")
         self.hf_models_dir: Optional[str] = global_cfg.get("hf_models_dir")
         self.mnn_models_dir: Optional[str] = global_cfg.get("mnn_models_dir")
+        self.train_out_dir: Optional[str] = global_cfg.get("train_out_dir")
+        self.val_out_dir: Optional[str] = global_cfg.get("val_out_dir")
+        self.test_out_dir: Optional[str] = global_cfg.get("test_out_dir")
+        self.split: dict[str, Any] = global_cfg.get("split") or {}
         self.state_dir: Path = self.workspace / "_webui"
         self.locks_dir: Path = self.state_dir / "locks"
         self.jobs_dir: Path = self.state_dir / "jobs"
@@ -40,6 +44,10 @@ class Settings:
         self.image_strip_prefix = global_cfg.get("image_strip_prefix")
         self.hf_models_dir = global_cfg.get("hf_models_dir")
         self.mnn_models_dir = global_cfg.get("mnn_models_dir")
+        self.train_out_dir = global_cfg.get("train_out_dir")
+        self.val_out_dir = global_cfg.get("val_out_dir")
+        self.test_out_dir = global_cfg.get("test_out_dir")
+        self.split = global_cfg.get("split") or {}
 
     def ensure_dirs(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)

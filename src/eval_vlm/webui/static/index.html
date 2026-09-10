@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260910c">
-  <script src="app.js?v=20260910c" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910g">
+  <script src="app.js?v=20260910g" defer></script>
 </head>
 <body>
 
@@ -64,9 +64,9 @@
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
           <span>任务队列</span>
         </button>
-        <button class="nav-tab-btn" data-tab="settings" onclick="switchTab('settings')" title="全局设置与模型管理">
+        <button class="nav-tab-btn" data-tab="settings" onclick="switchTab('settings')" title="全局机器级配置 (~/.eval_vlm/config.yaml) 与模型库">
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-          <span>全局设置</span>
+          <span>全局配置</span>
         </button>
       </div>
 
@@ -290,6 +290,21 @@
 
     <!-- 4. 可视化配置工坊 (Config Studio) -->
     <section id="view-config" class="view-panel">
+      <!-- 双层配置模式切换条 -->
+      <div class="config-scope-banner">
+        <div class="config-scope-tabs">
+          <button class="config-scope-btn active" type="button">
+            <span>📁 当前数据集配置 (<span id="cfg-scope-ds-name">demo_dataset</span>)</span>
+          </button>
+          <button class="config-scope-btn" type="button" onclick="switchTab('settings')" title="查看并修改全局 ~/.eval_vlm/config.yaml">
+            <span>🌐 全局机器配置 (~/.eval_vlm/config.yaml) ↗</span>
+          </button>
+        </div>
+        <div class="config-scope-desc">
+          💡 <strong>说明</strong>：当前工坊正在修改所选数据集文件夹内的 <code>config.yaml</code>（推理后端、打分器、样本字段映射等）；如需配置全局机器路径或默认切分参数，请直接点击切换至【全局配置】。
+        </div>
+      </div>
+
       <div class="config-studio-header">
         <div>
           <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -1015,59 +1030,122 @@
       <div id="health-content"></div>
     </section>
 
-    <!-- 8. 全局设置与模型库视图 (Settings) -->
+    <!-- 8. 全局配置与模型库视图 (Settings / Global Config) -->
     <section id="view-settings" class="view-panel">
       <div class="control-bar">
         <div>
-          <h2 class="section-title">全局设置与模型库管理</h2>
-          <p class="section-subtitle">配置全局工作区、图片根目录以及本地 HuggingFace 与 MNN 模型库存储路径</p>
+          <h2 class="section-title">🌐 全局配置与本地模型库 (Global Config)</h2>
+          <p class="section-subtitle">管理本机机器级全局配置（写入 ~/.eval_vlm/config.yaml），所有数据集共享统一工作区、默认图片根、切分参数与模型目录</p>
+          <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.25rem;">
+            配置文件位置: <code id="settings-file-path" style="color: var(--cyan-500); font-family: var(--font-mono); background: rgba(0,0,0,0.3); padding: 1px 6px; border-radius: 4px;">~/.eval_vlm/config.yaml</code>
+          </div>
         </div>
         <div class="control-bar-right">
-          <button class="btn" onclick="loadSettings()">🔄 重新载入设置</button>
+          <button class="btn" onclick="switchTab('config')" title="切换到数据集配置工坊">⚙️ 当前数据集配置</button>
+          <button class="btn" onclick="loadSettings()">🔄 重新载入</button>
           <button class="btn btn-primary" onclick="saveSettings()">💾 保存全局配置</button>
         </div>
       </div>
 
       <div class="settings-grid">
-        <!-- 全局配置表单 -->
-        <div class="dataset-card">
-          <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
-            ⚙️ 核心路径设置 (写入 ~/.eval_vlm/config.yaml)
-          </h3>
+        <!-- 左栏: 核心路径与切分参数 -->
+        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+          <!-- 核心路径卡片 -->
+          <div class="dataset-card">
+            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              📁 机器级核心路径 (Paths)
+            </h3>
 
-          <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-            <div class="config-field">
-              <label><span>工作区目录 (workspace)</span><span class="config-key-badge">workspace</span></label>
-              <input type="text" id="settings-workspace" class="input" placeholder="~/eval_vlm_workspace">
-              <span class="config-field-desc">所有数据集文件夹的统一父目录</span>
+            <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5;">
+              💡 <strong>模型目录说明</strong>：出厂默认未配置模型目录。请在下方填入本机存放模型权重的绝对路径（如 <code>D:/models/hf</code> 或 <code>D:/models/mnn</code>）并点击保存，WebUI 将自动递归扫描并加载所有本地模型！
             </div>
 
-            <div class="config-field">
-              <label><span>默认图片解析根 (media_root)</span><span class="config-key-badge">media_root</span></label>
-              <input type="text" id="settings-mediaroot" class="input" placeholder=".">
-              <span class="config-field-desc">初始化新数据集时写入 config.yaml 的默认图片根路径</span>
+            <div style="display: flex; flex-direction: column; gap: 1.15rem;">
+              <div class="config-field">
+                <label><span>工作区目录 (workspace)</span><span class="config-key-badge">workspace</span></label>
+                <input type="text" id="settings-workspace" class="input" placeholder="~/eval_vlm_workspace">
+                <span class="config-field-desc">所有数据集文件夹的统一父目录 (split 在此创建 &lt;数据集名&gt;/)</span>
+              </div>
+
+              <div class="config-field">
+                <label><span>默认图片解析根 (media_root)</span><span class="config-key-badge">media_root</span></label>
+                <input type="text" id="settings-mediaroot" class="input" placeholder=".">
+                <span class="config-field-desc">初始化新数据集时写入 config.yaml 的默认图片根路径</span>
+              </div>
+
+              <div class="config-field">
+                <label><span>HuggingFace/vLLM 模型存储目录 (hf_models_dir)</span><span class="config-key-badge">hf_models_dir</span></label>
+                <input type="text" id="settings-hf-dir" class="input" placeholder="如 D:/models/hf 或 /mnt/models">
+                <span class="config-field-desc">设置后 WebUI 会递归扫描 1~2 层子目录，检测含 config.json / safetensors 的本地 HF 权重</span>
+              </div>
+
+              <div class="config-field">
+                <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
+                <input type="text" id="settings-mnn-dir" class="input" placeholder="如 D:/models/mnn 或 /mnt/mnn_models">
+                <span class="config-field-desc">设置后 WebUI 会递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
+              </div>
+
+              <div class="config-field">
+                <label><span>跨机绝对前缀剥除 (image_strip_prefix)</span><span class="config-key-badge">image_strip_prefix</span></label>
+                <input type="text" id="settings-strip-prefix" class="input" placeholder="如 /root/autodl-tmp/ (本机不需要设为 null)">
+                <span class="config-field-desc">跨机器训练时从图片绝对路径中剥除的前缀，本机评测留空或 null</span>
+              </div>
+
+              <div class="config-grid-3" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
+                <div class="config-field">
+                  <label><span>默认训练集落地</span><span class="config-key-badge">train_out_dir</span></label>
+                  <input type="text" id="settings-train-out" class="input" placeholder="如 D:/LF/data (可选)">
+                </div>
+                <div class="config-field">
+                  <label><span>默认验证集落地</span><span class="config-key-badge">val_out_dir</span></label>
+                  <input type="text" id="settings-val-out" class="input" placeholder="如 D:/LF/data (可选)">
+                </div>
+                <div class="config-field">
+                  <label><span>默认测试集落地</span><span class="config-key-badge">test_out_dir</span></label>
+                  <input type="text" id="settings-test-out" class="input" placeholder="如 D:/LF/data (可选)">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 全局切分比例默认值卡片 -->
+          <div class="dataset-card">
+            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+              ✂️ 数据切分默认参数 (split.*)
+            </h3>
+            <div style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 1rem;">
+              执行 <code>eval-vlm split</code> 时若命令行未显式传入参数，将默认使用下述机器级切分比例与种子：
             </div>
 
-            <div class="config-field">
-              <label><span>跨机绝对前缀剥除 (image_strip_prefix)</span><span class="config-key-badge">image_strip_prefix</span></label>
-              <input type="text" id="settings-strip-prefix" class="input" placeholder="如 /root/autodl-tmp/ (本机不需要设为 null)">
-              <span class="config-field-desc">跨机器训练时从图片绝对路径中剥除的前缀</span>
+            <div class="config-grid-2">
+              <div class="config-field">
+                <label><span>训练集默认比例</span><span class="config-key-badge">split.train</span></label>
+                <input type="number" id="settings-split-train" class="input" min="0" max="1" step="0.01" placeholder="0.95">
+              </div>
+              <div class="config-field">
+                <label><span>测试集默认比例</span><span class="config-key-badge">split.test</span></label>
+                <input type="number" id="settings-split-test" class="input" min="0" max="1" step="0.01" placeholder="0.05">
+              </div>
+              <div class="config-field">
+                <label><span>验证集默认比例</span><span class="config-key-badge">split.val</span></label>
+                <input type="number" id="settings-split-val" class="input" min="0" max="1" step="0.01" placeholder="0.0">
+                <span class="config-field-desc">>0 才产出 val.json 划分</span>
+              </div>
+              <div class="config-field">
+                <label><span>默认随机种子</span><span class="config-key-badge">split.seed</span></label>
+                <input type="number" id="settings-split-seed" class="input" placeholder="42">
+                <span class="config-field-desc">固定随机种子确保抽样划分严格可复现</span>
+              </div>
             </div>
 
-            <div class="config-field">
-              <label><span>HuggingFace/vLLM 模型存储目录 (hf_models_dir)</span><span class="config-key-badge">hf_models_dir</span></label>
-              <input type="text" id="settings-hf-dir" class="input" placeholder="如 D:/models/hf 或 /mnt/models">
-              <span class="config-field-desc">设置后 WebUI 会递归扫描该目录 1~2 层子目录，检测含 config.json / safetensors 的 HF 权重</span>
+            <div class="config-field" style="margin-top: 1rem;">
+              <label><span>分层抽样字段名</span><span class="config-key-badge">split.stratify_by</span></label>
+              <input type="text" id="settings-split-stratify" class="input" placeholder="默认留空表示完全随机打乱抽样">
+              <span class="config-field-desc">按样本某个元数据键分层保比例采样，无特殊需求留空</span>
             </div>
 
-            <div class="config-field">
-              <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
-              <input type="text" id="settings-mnn-dir" class="input" placeholder="如 D:/models/mnn 或 /mnt/mnn_models">
-              <span class="config-field-desc">设置后 WebUI 会递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
-            </div>
-
-            <button class="btn btn-primary" style="margin-top: 0.5rem;" onclick="saveSettings()">
-              💾 保存并生效设置
+            <button class="btn btn-primary" style="margin-top: 1.25rem; width: 100%; font-weight: 700;" onclick="saveSettings()">
+              💾 保存全局配置到 ~/.eval_vlm/config.yaml
             </button>
           </div>
         </div>
@@ -1095,6 +1173,16 @@
             </div>
             <div id="settings-mnn-models-list" class="model-grid"></div>
           </div>
+        </div>
+
+        <!-- 全局配置原始 YAML 查看器 -->
+        <div style="grid-column: 1 / -1;">
+          <details class="config-raw-details">
+            <summary class="config-raw-summary">📄 查看 ~/.eval_vlm/config.yaml 全局原始 YAML 文件内容</summary>
+            <div class="config-raw-content">
+              <pre id="settings-raw-yaml" style="font-family: var(--font-mono); font-size: 0.78rem; color: #cbd5e1; padding: 1rem; overflow-x: auto; margin: 0;"></pre>
+            </div>
+          </details>
         </div>
       </div>
     </section>

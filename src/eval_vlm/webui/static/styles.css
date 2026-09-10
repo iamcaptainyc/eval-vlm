@@ -120,6 +120,9 @@ header.app-header {
   background: linear-gradient(135deg, #ffffff 30%, #cbd5e1 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .brand-badge {
@@ -132,11 +135,15 @@ header.app-header {
   color: #a5b4fc;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 /* 全局数据集切换下拉组件 */
 .global-ds-dropdown {
   position: relative;
+  flex-shrink: 0;
 }
 
 .global-ds-btn {
@@ -151,6 +158,9 @@ header.app-header {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .global-ds-btn:hover {
@@ -303,12 +313,14 @@ nav.nav-tabs {
   padding: 4px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .nav-group {
   display: flex;
   align-items: center;
   gap: 0.2rem;
+  flex-shrink: 0;
 }
 
 .nav-group-label {
@@ -319,6 +331,9 @@ nav.nav-tabs {
   letter-spacing: 0.05em;
   padding: 0 0.35rem;
   user-select: none;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-divider {
@@ -326,6 +341,7 @@ nav.nav-tabs {
   height: 20px;
   background: var(--border-subtle);
   margin: 0 0.35rem;
+  flex-shrink: 0;
 }
 
 .nav-tab-btn {
@@ -342,6 +358,9 @@ nav.nav-tabs {
   border: none;
   background: transparent;
   cursor: pointer;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-tab-btn:hover {
@@ -359,6 +378,7 @@ nav.nav-tabs {
   width: 16px;
   height: 16px;
   stroke-width: 2;
+  flex-shrink: 0;
 }
 
 /* 用户状态区 */
@@ -367,6 +387,9 @@ nav.nav-tabs {
   align-items: center;
   gap: 0.75rem;
   font-size: 0.82rem;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .user-tag {
@@ -375,6 +398,9 @@ nav.nav-tabs {
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .role-badge {
@@ -386,6 +412,9 @@ nav.nav-tabs {
   background: rgba(6, 182, 212, 0.15);
   border: 1px solid rgba(6, 182, 212, 0.3);
   color: #67e8f9;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 /* 主容器 */
@@ -434,15 +463,18 @@ main.app-main {
 }
 
 .section-title {
-  font-size: 1.25rem;
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
   font-weight: 700;
   color: #fff;
   letter-spacing: -0.01em;
+  text-wrap: balance;
+  word-break: keep-all;
 }
 
 .section-subtitle {
-  font-size: 0.82rem;
+  font-size: clamp(0.76rem, 1.4vw, 0.84rem);
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 /* 按钮规范 */
@@ -461,6 +493,9 @@ main.app-main {
   text-decoration: none;
   color: var(--text-secondary);
   background: rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .btn:hover {
@@ -913,12 +948,14 @@ dialog.custom-modal::backdrop {
   background: var(--bg-surface);
   border: 1px solid var(--border-card);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-card);
 }
 
 table.ui-table {
   width: 100%;
+  min-width: 620px;
   border-collapse: collapse;
   text-align: left;
   font-size: 0.85rem;
@@ -1106,6 +1143,9 @@ table.ui-table tr:hover {
   border-radius: calc(var(--radius-sm) - 2px);
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .segmented-btn:hover {
@@ -1438,7 +1478,7 @@ table.ui-table tr:hover {
 
 .config-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 1.25rem;
 }
 
@@ -1461,6 +1501,8 @@ table.ui-table tr:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .config-key-badge {
@@ -1468,6 +1510,9 @@ table.ui-table tr:hover {
   font-size: 0.7rem;
   color: var(--text-dim);
   font-weight: 400;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .config-field-desc {
@@ -1562,12 +1607,6 @@ table.ui-table tr:hover {
   gap: 1.5rem;
 }
 
-@media (max-width: 1024px) {
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1606,4 +1645,284 @@ table.ui-table tr:hover {
   word-break: break-all;
   line-height: 1.4;
 }
+
+/* 配置范围双模式切换条 (全局 vs 数据集专属) */
+.config-scope-banner {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.config-scope-tabs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.config-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  text-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.config-scope-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: var(--cyan-500);
+}
+
+.config-scope-btn.active {
+  background: var(--primary-gradient);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.config-scope-desc {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   全设备现代响应式适配系统 (Responsive Layout System)
+   支持各种笔记本屏幕、DPI 缩放、平板以及移动端阅读
+   ========================================================================== */
+
+/* 笔记本屏 / 中等尺寸适配 (<= 1360px，解决标题折行竖排与挤压问题) */
+@media (max-width: 1360px) {
+  header.app-header {
+    height: auto;
+    min-height: 64px;
+    padding: 0.65rem 1.25rem;
+    flex-wrap: wrap;
+    row-gap: 0.65rem;
+    column-gap: 1rem;
+  }
+
+  .brand-wrapper {
+    flex: 0 1 auto;
+    max-width: calc(100% - 200px);
+    min-width: 0;
+  }
+
+  .user-panel {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  nav.nav-tabs {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 4px 6px;
+    gap: 0.35rem;
+    justify-content: flex-start;
+  }
+
+  nav.nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  main.app-main {
+    padding: 1.25rem 1.25rem;
+  }
+
+  .control-bar {
+    padding: 0.85rem 1.15rem;
+    gap: 0.85rem;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .sweep-container {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+}
+
+/* 小屏笔记本 / 平板横屏适配 (<= 1100px) */
+@media (max-width: 1100px) {
+  .control-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .control-bar-left, .control-bar-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  .dataset-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  }
+
+  .model-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  }
+}
+
+/* 平板竖屏适配 (<= 768px) */
+@media (max-width: 768px) {
+  header.app-header {
+    padding: 0.5rem 0.85rem;
+    row-gap: 0.5rem;
+  }
+
+  .brand-wrapper {
+    gap: 0.5rem;
+    max-width: calc(100% - 90px);
+  }
+
+  .brand-badge {
+    display: none;
+  }
+
+  .ds-prefix {
+    display: none;
+  }
+
+  .ds-name {
+    max-width: 110px;
+  }
+
+  .user-tag {
+    display: none;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-divider {
+    display: none;
+  }
+
+  .nav-tab-btn {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  main.app-main {
+    padding: 0.85rem 0.65rem;
+  }
+
+  .control-bar {
+    padding: 0.75rem 0.85rem;
+    border-radius: var(--radius-md);
+  }
+
+  .control-bar-left, .control-bar-right {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .control-bar-right .btn, 
+  .control-bar-right select, 
+  .control-bar-right input {
+    width: 100%;
+  }
+
+  .dataset-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dataset-metrics-row {
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  }
+
+  .config-backend-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .terminal-drawer {
+    height: 60vh;
+  }
+
+  dialog.custom-modal {
+    width: 96vw;
+    padding: 1.15rem;
+  }
+}
+
+/* 手机竖屏适配 (<= 480px) */
+@media (max-width: 480px) {
+  .brand-title {
+    font-size: 1rem;
+  }
+
+  .global-ds-btn {
+    padding: 0.28rem 0.55rem;
+    font-size: 0.74rem;
+  }
+
+  .ds-name {
+    max-width: 80px;
+  }
+
+  .nav-tab-btn {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.74rem;
+    gap: 0.3rem;
+  }
+
+  .nav-tab-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .dataset-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .dataset-card-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dataset-card-footer .btn {
+    width: 100%;
+  }
+}
+
 

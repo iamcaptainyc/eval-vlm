@@ -183,7 +183,8 @@ function switchTab(tab, dataset = null, updateHash = true) {
 function handleHash() {
   const hash = window.location.hash || "#/datasets";
   const parts = hash.replace("#/", "").split("/");
-  const tab = parts[0] || "datasets";
+  let tab = parts[0] || "datasets";
+  if (tab === "global-config") tab = "settings";
   const ds = parts[1] ? decodeURIComponent(parts[1]) : state.currentDataset;
   if (["datasets", "sweep", "jobs", "settings", "gallery", "config", "runs", "trash", "health"].includes(tab)) {
     switchTab(tab, ds, false);
@@ -282,6 +283,12 @@ function updateHeaderDatasetDropdown() {
   if (inlineDs && inlineDs.value !== state.currentDataset) inlineDs.value = state.currentDataset;
   const cfgBadge = document.getElementById("cfg-active-dataset-badge");
   if (cfgBadge) cfgBadge.textContent = state.currentDataset || "未选定";
+  const cfgScopeDs = document.getElementById("cfg-scope-ds-name");
+  if (cfgScopeDs) cfgScopeDs.textContent = state.currentDataset || "未选定";
+}
+
+function updateHeaderDatasetPill() {
+  updateHeaderDatasetDropdown();
 }
 
 // 点击页面外部区域自动收起全局下拉框
@@ -388,7 +395,7 @@ function renderDatasets() {
 
 function selectDatasetAndNavigate(name, tab) {
   state.currentDataset = name;
-  updateHeaderDatasetPill();
+  updateHeaderDatasetDropdown();
   switchTab(tab, name);
 }
 
@@ -431,7 +438,7 @@ async function loadSamples(offset = 0) {
     state.samples = data.samples;
     state.samplesTotal = data.total;
     state.testSha = data.test_sha256;
-    updateHeaderDatasetPill();
+    updateHeaderDatasetDropdown();
     renderGallery();
   } catch (err) {
     showToast("加载测试样本失败", "error");
@@ -859,12 +866,36 @@ async function loadSettings() {
     const spIn = document.getElementById("settings-strip-prefix");
     const hfIn = document.getElementById("settings-hf-dir");
     const mnnIn = document.getElementById("settings-mnn-dir");
+    const trIn = document.getElementById("settings-train-out");
+    const vaIn = document.getElementById("settings-val-out");
+    const teIn = document.getElementById("settings-test-out");
+    const pathEl = document.getElementById("settings-file-path");
+    const rawEl = document.getElementById("settings-raw-yaml");
+
+    const spTrain = document.getElementById("settings-split-train");
+    const spTest = document.getElementById("settings-split-test");
+    const spVal = document.getElementById("settings-split-val");
+    const spSeed = document.getElementById("settings-split-seed");
+    const spStratify = document.getElementById("settings-split-stratify");
 
     if (wsIn) wsIn.value = cfg.workspace || "";
     if (mrIn) mrIn.value = cfg.media_root || "";
     if (spIn) spIn.value = cfg.image_strip_prefix || "";
     if (hfIn) hfIn.value = cfg.hf_models_dir || "";
     if (mnnIn) mnnIn.value = cfg.mnn_models_dir || "";
+    if (trIn) trIn.value = cfg.train_out_dir || "";
+    if (vaIn) vaIn.value = cfg.val_out_dir || "";
+    if (teIn) teIn.value = cfg.test_out_dir || "";
+    if (pathEl && cfg.config_file) pathEl.textContent = cfg.config_file;
+    if (rawEl && cfg.raw_yaml) rawEl.textContent = cfg.raw_yaml;
+
+    if (cfg.split) {
+      if (spTrain) spTrain.value = cfg.split.train ?? 0.95;
+      if (spTest) spTest.value = cfg.split.test ?? 0.05;
+      if (spVal) spVal.value = cfg.split.val ?? 0.0;
+      if (spSeed) spSeed.value = cfg.split.seed ?? 42;
+      if (spStratify) spStratify.value = cfg.split.stratify_by || "";
+    }
 
     await loadModels();
   } catch (err) {
@@ -874,12 +905,24 @@ async function loadSettings() {
 
 async function saveSettings() {
   try {
+    const splitPayload = {
+      train: parseFloat(document.getElementById("settings-split-train")?.value) || 0.95,
+      test: parseFloat(document.getElementById("settings-split-test")?.value) || 0.05,
+      val: parseFloat(document.getElementById("settings-split-val")?.value) || 0.0,
+      seed: parseInt(document.getElementById("settings-split-seed")?.value) || 42,
+      stratify_by: document.getElementById("settings-split-stratify")?.value.trim() || null,
+    };
+
     const payload = {
       workspace: document.getElementById("settings-workspace")?.value.trim() || undefined,
       media_root: document.getElementById("settings-mediaroot")?.value.trim() || undefined,
       image_strip_prefix: document.getElementById("settings-strip-prefix")?.value.trim() || "",
       hf_models_dir: document.getElementById("settings-hf-dir")?.value.trim() || "",
       mnn_models_dir: document.getElementById("settings-mnn-dir")?.value.trim() || "",
+      train_out_dir: document.getElementById("settings-train-out")?.value.trim() || "",
+      val_out_dir: document.getElementById("settings-val-out")?.value.trim() || "",
+      test_out_dir: document.getElementById("settings-test-out")?.value.trim() || "",
+      split: splitPayload,
     };
 
     const res = await fetch("/api/settings", {
@@ -890,7 +933,7 @@ async function saveSettings() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.settings = data;
-    showToast("全局配置保存成功并已生效！", "success");
+    showToast("全局配置 (~/.eval_vlm/config.yaml) 保存成功并已生效！", "success");
     await loadSettings();
   } catch (err) {
     showToast(`保存全局设置失败: ${err.message}`, "error");
@@ -2359,6 +2402,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 绑定路由与监听
   window.addEventListener("hashchange", handleHash);
   await loadDatasets();
+  await loadSettings();
   handleHash();
 });
 
@@ -2403,6 +2447,8 @@ window.submitInlineJob = submitInlineJob;
 window.toggleDatasetDropdown = toggleDatasetDropdown;
 window.selectGlobalDataset = selectGlobalDataset;
 window.filterDatasetDropdown = filterDatasetDropdown;
+window.updateHeaderDatasetDropdown = updateHeaderDatasetDropdown;
+window.updateHeaderDatasetPill = updateHeaderDatasetPill;
 
 // Sweep 批量评测
 window.loadSweepData = loadSweepData;

@@ -132,12 +132,26 @@ class RunSummary(BaseModel):
     field_metrics_summary: Optional[dict[str, Any]] = None
 
 
+class GlobalSplitConfig(BaseModel):
+    train: float = 0.95
+    test: float = 0.05
+    val: float = 0.0
+    seed: int = 42
+    stratify_by: Optional[str] = None
+
+
 class SettingsResponse(BaseModel):
     workspace: str
     media_root: Optional[str] = None
     image_strip_prefix: Optional[str] = None
     hf_models_dir: Optional[str] = None
     mnn_models_dir: Optional[str] = None
+    train_out_dir: Optional[str] = None
+    val_out_dir: Optional[str] = None
+    test_out_dir: Optional[str] = None
+    split: Optional[GlobalSplitConfig] = None
+    config_file: Optional[str] = None
+    raw_yaml: Optional[str] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -146,4 +160,9 @@ class SettingsUpdateRequest(BaseModel):
     image_strip_prefix: Optional[str] = None
     hf_models_dir: Optional[str] = None
     mnn_models_dir: Optional[str] = None
+    train_out_dir: Optional[str] = None
+    val_out_dir: Optional[str] = None
+    test_out_dir: Optional[str] = None
+    split: Optional[dict[str, Any]] = None
+
 
