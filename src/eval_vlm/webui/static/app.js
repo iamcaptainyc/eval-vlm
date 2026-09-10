@@ -2552,8 +2552,15 @@ async function openDatasetHtmlModal(datasetName = null) {
   const modal = document.getElementById("dataset-html-modal");
   const subTitle = document.getElementById("dataset-html-modal-subtitle");
   const listEl = document.getElementById("dataset-html-list");
+  const searchInput = document.getElementById("dataset-html-search");
   if (subTitle) subTitle.textContent = `当前数据集: ${ds}`;
-  if (listEl) listEl.innerHTML = `<div style="color: var(--text-muted); padding: 1rem; text-align: center;">正在检索当前数据集目录下的 HTML 报告文件...</div>`;
+  if (searchInput) searchInput.value = "";
+  if (listEl) listEl.innerHTML = `<div style="color: var(--text-muted); padding: 1.5rem; text-align: center;">正在检索当前数据集目录下的 HTML 报告文件...</div>`;
+
+  state.datasetHtmlFiles = [];
+  state.datasetHtmlCategory = "all";
+  state.datasetHtmlSearch = "";
+  updateDatasetHtmlFilterTabs();
 
   closeHtmlPreview();
   if (modal) modal.showModal();
@@ -2562,60 +2569,132 @@ async function openDatasetHtmlModal(datasetName = null) {
     const res = await fetch(`/api/datasets/${encodeURIComponent(ds)}/html-files`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const files = await res.json();
+    state.datasetHtmlFiles = Array.isArray(files) ? files : [];
 
     const countEl = document.getElementById("dataset-html-count");
-    if (countEl) countEl.textContent = String(files.length);
+    if (countEl) countEl.textContent = String(state.datasetHtmlFiles.length);
 
-    if (!files || files.length === 0) {
-      listEl.innerHTML = `
-        <div class="empty-state-box" style="padding: 1.5rem 1rem; margin: 0;">
-          <div style="font-size: 2rem; margin-bottom: 0.5rem;">📄</div>
-          <div style="color: #cbd5e1; font-weight: 600; margin-bottom: 0.35rem;">当前数据集暂未生成任何 HTML 报告</div>
-          <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 450px; margin: 0 auto 1rem;">
-            运行 <code>field-eval</code> 任务时将生成 <code>field_mismatches.html</code> 可视化失配清单；运行 <code>eval</code> 任务时若有未命中样本将生成 <code>failures.html</code> 报告。
-          </div>
-          <div style="display: flex; gap: 0.75rem; justify-content: center;">
-            <button class="btn btn-sm btn-primary" onclick="closeDatasetHtmlModal(); openJobModal('field-eval')">🏷️ 发起 field-eval 评测</button>
-            <button class="btn btn-sm btn-primary" onclick="closeDatasetHtmlModal(); openJobModal('eval')">🚀 发起 eval 评测</button>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    listEl.innerHTML = files
-      .map((f) => {
-        const sizeKb = (f.size / 1024).toFixed(1);
-        const mtimeStr = f.modified_at ? new Date(f.modified_at).toLocaleString() : "未知";
-        return `
-          <div class="dataset-card" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; margin: 0; background: rgba(30, 41, 59, 0.45); border-color: var(--border-subtle);">
-            <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0; flex: 1;">
-              <span style="font-size: 1.25rem;">📄</span>
-              <div style="min-width: 0; flex: 1;">
-                <div style="font-weight: 600; color: #fff; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  ${escapeHtml(f.path)}
-                </div>
-                <div style="font-size: 0.75rem; color: var(--text-dim); display: flex; gap: 1rem; margin-top: 2px;">
-                  <span>大小: ${sizeKb} KB</span>
-                  <span>生成时间: ${mtimeStr}</span>
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center; margin-left: 1rem;">
-              <button class="btn btn-sm" onclick="previewDatasetHtml('${escapeHtml(f.url)}', '${escapeHtml(f.name)}')">
-                👁️ 在线预览
-              </button>
-              <a href="${escapeHtml(f.url)}" target="_blank" class="btn btn-sm btn-primary" style="text-decoration: none;">
-                新窗口打开 ↗
-              </a>
-            </div>
-          </div>
-        `;
-      })
-      .join("");
+    renderDatasetHtmlList();
   } catch (err) {
     if (listEl) listEl.innerHTML = `<div style="color: var(--rose-500); padding: 1rem;">加载 HTML 报告列表失败: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function updateDatasetHtmlFilterTabs() {
+  const cat = state.datasetHtmlCategory || "all";
+  ["all", "field", "eval"].forEach((c) => {
+    const btn = document.getElementById(`dataset-html-flt-${c}`);
+    if (btn) btn.classList.toggle("active", c === cat);
+  });
+}
+
+function filterDatasetHtmlCategory(cat) {
+  state.datasetHtmlCategory = cat;
+  updateDatasetHtmlFilterTabs();
+  renderDatasetHtmlList();
+}
+
+function filterDatasetHtmlFiles(query) {
+  state.datasetHtmlSearch = (query || "").trim().toLowerCase();
+  renderDatasetHtmlList();
+}
+
+function renderDatasetHtmlList() {
+  const listEl = document.getElementById("dataset-html-list");
+  if (!listEl) return;
+
+  const files = state.datasetHtmlFiles || [];
+  if (files.length === 0) {
+    listEl.innerHTML = `
+      <div class="empty-state-card" style="padding: 1.75rem 1rem; margin: 0;">
+        <div style="font-size: 2.2rem; margin-bottom: 0.5rem;">📄</div>
+        <div style="color: #cbd5e1; font-weight: 600; font-size: 1rem; margin-bottom: 0.35rem;">当前数据集暂未生成任何 HTML 报告</div>
+        <div style="font-size: 0.82rem; color: var(--text-muted); max-width: 460px; margin: 0 auto 1.25rem; line-height: 1.5;">
+          运行 <code>field-eval</code> 任务将生成 <code>field_mismatches.html</code> 可视化失配清单；运行 <code>eval</code> 对话打分任务若有未命中样本将生成 <code>failures.html</code> 报告。
+        </div>
+        <div style="display: flex; gap: 0.85rem; justify-content: center; flex-wrap: wrap;">
+          <button class="btn btn-sm btn-primary" onclick="closeDatasetHtmlModal(); openJobModal('field-eval')">🏷️ 发起 field-eval 评测</button>
+          <button class="btn btn-sm btn-danger" onclick="closeDatasetHtmlModal(); openJobModal('eval')">💬 发起 eval 评测</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const cat = state.datasetHtmlCategory || "all";
+  const search = state.datasetHtmlSearch || "";
+
+  const filtered = files.filter((f) => {
+    const nameLower = (f.name || "").toLowerCase();
+    const pathLower = (f.path || "").toLowerCase();
+
+    // 分类筛选
+    if (cat === "field" && !nameLower.includes("mismatch")) return false;
+    if (cat === "eval" && !nameLower.includes("failure")) return false;
+
+    // 关键词搜索
+    if (search && !pathLower.includes(search) && !nameLower.includes(search)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align: center; padding: 2rem 1rem; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
+        <div style="font-size: 1.5rem; margin-bottom: 0.4rem;">🔍</div>
+        <div>未找到符合筛选条件的 HTML 报告</div>
+        <button class="btn btn-sm" style="margin-top: 0.75rem;" onclick="filterDatasetHtmlCategory('all'); document.getElementById('dataset-html-search').value=''; filterDatasetHtmlFiles('');">重置筛选</button>
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = filtered
+    .map((f) => {
+      const sizeKb = (f.size / 1024).toFixed(1);
+      const mtimeStr = f.modified_at ? new Date(f.modified_at).toLocaleString() : "未知";
+      const nameLower = (f.name || "").toLowerCase();
+
+      let badge = '<span class="html-report-badge badge-generic">📄 报告</span>';
+      let icon = '📄';
+      if (nameLower.includes("mismatch")) {
+        badge = '<span class="html-report-badge badge-mismatch">🏷️ 字段失配清单</span>';
+        icon = '🏷️';
+      } else if (nameLower.includes("failure")) {
+        badge = '<span class="html-report-badge badge-failures">💬 对话未命中报告</span>';
+        icon = '💬';
+      }
+
+      return `
+        <div class="html-report-card">
+          <div style="display: flex; align-items: center; gap: 0.85rem; min-width: 0; flex: 1;">
+            <span style="font-size: 1.35rem; flex-shrink: 0;">${icon}</span>
+            <div style="min-width: 0; flex: 1;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 4px;">
+                ${badge}
+                <span style="font-weight: 600; color: #fff; font-size: 0.86rem; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(f.path)}">
+                  ${escapeHtml(f.path)}
+                </span>
+              </div>
+              <div style="font-size: 0.74rem; color: var(--text-dim); display: flex; gap: 1.15rem; align-items: center; flex-wrap: wrap;">
+                <span>大小: <strong style="color: var(--text-secondary);">${sizeKb} KB</strong></span>
+                <span>生成时间: <strong style="color: var(--text-secondary);">${mtimeStr}</strong></span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; margin-left: 0.5rem;">
+            <button class="btn btn-sm" onclick="previewDatasetHtml('${escapeHtml(f.url)}', '${escapeHtml(f.path)}')">
+              👁️ 内嵌预览
+            </button>
+            <a href="${escapeHtml(f.url)}" target="_blank" class="btn btn-sm btn-primary" style="text-decoration: none;">
+              新窗口打开 ↗
+            </a>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function closeDatasetHtmlModal() {
@@ -3084,3 +3163,5 @@ window.closeDatasetHtmlModal = closeDatasetHtmlModal;
 window.previewDatasetHtml = previewDatasetHtml;
 window.closeHtmlPreview = closeHtmlPreview;
 window.updateDatasetHtmlCount = updateDatasetHtmlCount;
+window.filterDatasetHtmlCategory = filterDatasetHtmlCategory;
+window.filterDatasetHtmlFiles = filterDatasetHtmlFiles;

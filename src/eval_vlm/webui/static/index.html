@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260910j">
-  <script src="app.js?v=20260910p" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910ui">
+  <script src="app.js?v=20260910ui" defer></script>
 </head>
 <body>
 
@@ -41,7 +41,7 @@
             <span class="global-ds-count" id="global-ds-count">0</span>
           </div>
           <div class="global-ds-search-box">
-            <input type="text" id="global-ds-search" placeholder="🔍 检索数据集名称..." oninput="filterDatasetDropdown(this.value)">
+            <input type="text" id="global-ds-search" class="input" style="width: 100%; height: 32px; font-size: 0.78rem;" placeholder="🔍 检索数据集名称..." oninput="filterDatasetDropdown(this.value)">
           </div>
           <div class="global-ds-list" id="global-ds-list"></div>
         </div>
@@ -1512,7 +1512,13 @@
 
   <!-- 样本删除确认模态框 -->
   <dialog id="delete-modal" class="custom-modal">
-    <h3 class="modal-title">确认删除样本</h3>
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 0.65rem;">
+        <span style="font-size: 1.35rem;">🗑️</span>
+        <h3 class="modal-title">确认删除样本</h3>
+      </div>
+      <button class="modal-close" onclick="closeDeleteModal()" title="关闭">&times;</button>
+    </div>
     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
       <p>操作类型: <strong id="del-target-mode" style="color: var(--rose-500);"></strong></p>
       <p style="margin-top: 0.35rem;">目标 ID: <code id="del-target-id" style="color: #fff; font-weight: 700;"></code></p>
@@ -1536,13 +1542,13 @@
   </dialog>
 
   <!-- 任务启动参数配置模态框 (彻底消除黑盒) -->
-  <dialog id="job-launch-modal" class="custom-modal" style="max-width: 680px; width: 92vw;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+  <dialog id="job-launch-modal" class="custom-modal modal-card" style="max-width: 680px; width: 92vw;">
+    <div class="modal-header">
       <div style="display: flex; align-items: center; gap: 0.65rem;">
         <span id="job-modal-type-icon" style="font-size: 1.35rem;">🚀</span>
-        <h3 id="job-modal-title" class="modal-title" style="margin: 0;">配置并启动任务</h3>
+        <h3 id="job-modal-title" class="modal-title">配置并启动任务</h3>
       </div>
-      <button class="btn btn-sm" onclick="closeJobModal()">&times;</button>
+      <button class="modal-close" onclick="closeJobModal()" title="关闭">&times;</button>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 1.1rem; font-size: 0.84rem;">
@@ -1688,39 +1694,53 @@
   </dialog>
 
   <!-- 数据集 HTML 报告与可视化查看模态框 -->
-  <dialog id="dataset-html-modal" class="modal-card" style="max-width: 960px; width: 92vw;">
+  <dialog id="dataset-html-modal" class="custom-modal modal-card" style="max-width: 980px; width: 94vw;">
     <div class="modal-header">
       <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <span style="font-size: 1.3rem;">📑</span>
+        <span style="font-size: 1.4rem;">📑</span>
         <div>
-          <h3 class="modal-title" style="margin: 0;">数据集 HTML 报告与可视化文件</h3>
+          <h3 class="modal-title" style="margin: 0;">数据集 HTML 报告与可视化总览</h3>
           <span id="dataset-html-modal-subtitle" style="font-size: 0.78rem; color: var(--text-muted);"></span>
         </div>
       </div>
-      <button class="modal-close" onclick="closeDatasetHtmlModal()">&times;</button>
+      <button class="modal-close" onclick="closeDatasetHtmlModal()" title="关闭">&times;</button>
     </div>
 
-    <div style="margin-top: 1rem;">
-      <div id="dataset-html-modal-desc" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.85rem;">
-        以下为当前数据集目录下所有已生成的 HTML 报告文件（含 failures.html、field_mismatches.html 等），支持直接新窗口打开或在线嵌入预览：
+    <div>
+      <div id="dataset-html-modal-desc" style="font-size: 0.84rem; color: var(--text-muted); margin-bottom: 0.85rem; line-height: 1.5;">
+        以下为当前数据集目录下所有已生成的 HTML 报告文件（含 failures.html、field_mismatches.html 等），支持快速检索、新窗口查看或内嵌暗黑沙箱预览：
       </div>
-      <div id="dataset-html-list" style="display: flex; flex-direction: column; gap: 0.6rem; max-height: 280px; overflow-y: auto; padding-right: 0.25rem;">
+
+      <!-- 搜索过滤条 -->
+      <div class="html-filter-bar">
+        <input type="text" id="dataset-html-search" class="input" style="flex: 1; height: 34px; font-size: 0.8rem;" placeholder="🔍 检索报告文件路径或模型名称..." oninput="filterDatasetHtmlFiles(this.value)">
+        <div class="segmented-control" style="padding: 2px;">
+          <button id="dataset-html-flt-all" class="segmented-btn active" style="padding: 3px 10px; font-size: 0.76rem;" onclick="filterDatasetHtmlCategory('all')">全部</button>
+          <button id="dataset-html-flt-field" class="segmented-btn" style="padding: 3px 10px; font-size: 0.76rem;" onclick="filterDatasetHtmlCategory('field')">🏷️ 字段失配 (field_mismatches)</button>
+          <button id="dataset-html-flt-eval" class="segmented-btn" style="padding: 3px 10px; font-size: 0.76rem;" onclick="filterDatasetHtmlCategory('eval')">💬 对话未命中 (failures)</button>
+        </div>
+      </div>
+
+      <div id="dataset-html-list" style="display: flex; flex-direction: column; gap: 0.65rem; max-height: 320px; overflow-y: auto; padding-right: 0.25rem;">
       </div>
 
       <!-- 内嵌在线预览区 -->
-      <div id="dataset-html-preview-box" style="margin-top: 1.25rem; display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; padding: 0.4rem 0; border-top: 1px solid var(--border-subtle);">
-          <span id="dataset-html-preview-title" style="font-weight: 600; font-size: 0.85rem; color: #fff;"></span>
-          <div style="display: flex; gap: 0.5rem;">
-            <a id="dataset-html-preview-external" href="#" target="_blank" class="btn btn-sm">新窗口打开 ↗</a>
-            <button class="btn btn-sm" onclick="closeHtmlPreview()">收起预览</button>
+      <div id="dataset-html-preview-box" class="html-preview-container" style="display: none;">
+        <div class="html-preview-toolbar">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan-500); box-shadow: 0 0 8px var(--cyan-500);"></span>
+            <span id="dataset-html-preview-title" style="font-weight: 600; font-size: 0.85rem; color: #fff;"></span>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <a id="dataset-html-preview-external" href="#" target="_blank" class="btn btn-sm btn-primary" style="text-decoration: none;">新窗口全屏打开 ↗</a>
+            <button class="btn btn-sm" onclick="closeHtmlPreview()">收起预览 ✕</button>
           </div>
         </div>
-        <iframe id="dataset-html-preview-iframe" style="width: 100%; height: 500px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: #fff;" src="about:blank"></iframe>
+        <iframe id="dataset-html-preview-iframe" class="html-preview-iframe" src="about:blank"></iframe>
       </div>
     </div>
 
-    <div class="modal-footer" style="margin-top: 1.5rem;">
+    <div class="modal-footer">
       <button class="btn" onclick="closeDatasetHtmlModal()">关闭</button>
     </div>
   </dialog>

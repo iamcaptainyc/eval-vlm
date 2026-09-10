@@ -577,48 +577,69 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
             f"{images_block}{desc_block}{table}</section>")
 
 
+_FIELD_MISMATCHES_HTML_CSS = """
+:root {
+  --bg-base: #090d16;
+  --bg-surface: #0f172a;
+  --bg-card: #131d35;
+  --bg-input: #0b1120;
+  --border-card: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --primary: #6366f1;
+  --cyan: #06b6d4;
+  --emerald: #10b981;
+  --rose: #f43f5e;
+  --amber: #f59e0b;
+  --text-main: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+body { font-family: var(--font-sans); margin: 0; padding: 24px; background: var(--bg-base); color: var(--text-main); line-height: 1.6; }
+header.summary { margin-bottom: 24px; padding: 20px 24px; background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: 12px; box-shadow: 0 8px 24px -4px rgba(0,0,0,0.45); }
+header.summary h1 { margin: 0 0 10px 0; font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
+header.summary p { margin: 6px 0; font-size: 14px; color: var(--text-muted); }
+header.summary code { font-family: var(--font-mono); background: rgba(99, 102, 241, 0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 8px 24px -4px rgba(0,0,0,0.45); transition: transform 0.15s ease, border-color 0.15s ease; }
+.card:hover { border-color: rgba(99, 102, 241, 0.35); }
+.card h3 { margin: 0 0 12px 0; font-size: 16px; color: #fff; }
+.card.pred-missing { border-left: 5px solid var(--amber); }
+.images { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-start; }
+.img-item { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.img-item img { max-width: 100%; max-height: 560px; width: auto; object-fit: contain; border: 1px solid var(--border-card); border-radius: 8px; cursor: zoom-in; transition: transform .18s; background: #000; }
+.img-item img:hover { transform: scale(1.015); box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+.img-path { font-size: 12px; color: var(--text-dim); font-family: var(--font-mono); word-break: break-all; max-width: 560px; text-align: center; }
+.img-placeholder { width: 560px; max-width: 100%; height: 120px; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.25); color: var(--text-dim); border: 1px dashed var(--border-card); font-size: 12px; text-align: center; padding: 8px; box-sizing: border-box; border-radius: 8px; }
+.pred-desc { margin-bottom: 14px; padding: 10px 14px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-subtle); border-radius: 6px; white-space: pre-wrap; font-size: 13.5px; line-height: 1.55; color: var(--text-secondary); }
+.lightbox { display: none; position: fixed; inset: 0; background: rgba(5, 8, 18, 0.92); z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; backdrop-filter: blur(10px); }
+.lightbox img { max-width: 96vw; max-height: 96vh; object-fit: contain; box-shadow: 0 0 32px rgba(0,0,0,0.8); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid var(--border-subtle); padding: 8px 12px; text-align: left; }
+th { background: rgba(0, 0, 0, 0.35); color: var(--text-secondary); font-weight: 600; }
+td.ok { color: #6ee7b7; font-weight: 700; background: rgba(16, 185, 129, 0.1); }
+td.bad { color: #fda4af; font-weight: 700; background: rgba(244, 63, 94, 0.12); }
+.tag-pred-missing { color: #fcd34d; font-weight: 700; background: rgba(245, 158, 11, 0.18); border: 1px solid rgba(245, 158, 11, 0.35); padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+#filters { margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: var(--bg-surface); padding: 12px 20px; border: 1px solid var(--border-card); border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+#filters label { font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.field-cm-wrapper { background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 8px 24px -4px rgba(0,0,0,0.45); }
+.field-tab-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; background: rgba(0, 0, 0, 0.25); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); }
+.field-tab-btn { border: 1px solid var(--border-card); background: rgba(255, 255, 255, 0.05); padding: 6px 14px; font-size: 13px; font-weight: 600; color: var(--text-secondary); border-radius: 6px; cursor: pointer; transition: all .15s ease; }
+.field-tab-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.field-tab-btn.active { background: var(--primary); color: #ffffff; border-color: var(--primary); box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35); }
+.field-cm-pane { display: none; }
+.field-cm-pane.active { display: block; }
+"""
+
+
 def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str:
     """把失配样本渲染成图文合一的单文件 HTML。"""
     ov = metrics["overall"]
     header = f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <title>{_html_escape(f"字段失配清单 — {cfg.run_name}")}</title>
 <style>
-body {{ font-family: system-ui, sans-serif; margin: 24px; background: #fafafa; color: #222; }}
-header.summary {{ margin-bottom: 20px; padding: 12px 16px; background: #fff;
-                 border: 1px solid #ddd; border-radius: 8px; }}
-.card {{ background: #fff; border: 1px solid #ddd; border-radius: 8px;
-         padding: 16px; margin-bottom: 16px; }}
-.card.pred-missing {{ border-left: 4px solid #d9822b; }}
-.images {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; align-items: flex-start; }}
-.img-item {{ margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }}
-.img-item img {{ max-width: 100%; max-height: 560px; width: auto; object-fit: contain;
-                 border: 1px solid #ccc; border-radius: 4px; cursor: zoom-in; }}
-.img-path {{ font-size: 12px; color: #888; word-break: break-all; max-width: 560px;
-             text-align: center; }}
-.img-placeholder {{ width: 560px; max-width: 100%; height: 120px; display: flex; align-items: center;
-                    justify-content: center; background: #f2f2f2; color: #999;
-                    border: 1px dashed #ccc; font-size: 12px; text-align: center;
-                    padding: 8px; box-sizing: border-box; }}
-.pred-desc {{ margin-bottom: 12px; padding: 8px 10px; background: #f7f7f7;
-              border-radius: 4px; white-space: pre-wrap; font-size: 14px; line-height: 1.5; }}
-.lightbox {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85);
-             z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }}
-.lightbox img {{ max-width: 96vw; max-height: 96vh; object-fit: contain;
-                 box-shadow: 0 0 24px rgba(0,0,0,.5); }}
-table {{ border-collapse: collapse; width: 100%; }}
-th, td {{ border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 14px; }}
-td.ok {{ color: #1a7f37; font-weight: 600; }}
-td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
-.tag-pred-missing {{ color: #d9822b; font-weight: 600; }}
-#filters {{ margin-bottom: 16px; }}
-#filters label {{ margin-right: 16px; font-size: 14px; }}
-.field-cm-wrapper {{ background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }}
-.field-tab-bar {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; background: #f8fafc; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; }}
-.field-tab-btn {{ border: 1px solid #cbd5e1; background: #ffffff; padding: 6px 14px; font-size: 13px; font-weight: 600; color: #334155; border-radius: 6px; cursor: pointer; transition: all .15s ease; }}
-.field-tab-btn:hover {{ background: #f1f5f9; color: #0f172a; }}
-.field-tab-btn.active {{ background: #2563eb; color: #ffffff; border-color: #1d4ed8; box-shadow: 0 2px 5px rgba(37,99,235,0.25); }}
-.field-cm-pane {{ display: none; }}
-.field-cm-pane.active {{ display: block; }}
+{_FIELD_MISMATCHES_HTML_CSS}
 </style></head><body>
 """
     header += f"""<header class="summary">
@@ -652,7 +673,7 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
             cm_tabs.append('<button type="button" class="field-tab-btn" data-target="all">📑 查看全部字段</button>')
         cm_section = (
             '<div class="field-cm-wrapper">'
-            '<div style="font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">'
+            '<div style="font-size: 15px; font-weight: 700; color: var(--text-main); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">'
             '📊 逐字段混淆矩阵 (Confusion Matrices by Field)</div>'
             f'<div class="field-tab-bar">{"".join(cm_tabs)}</div>'
             f'<div class="field-cm-panes">{"".join(cm_panes)}</div>'
@@ -661,7 +682,7 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
         header += cm_section
 
     if not rows:
-        return header + "<p>✅ 无字段失配。</p></body></html>"
+        return header + '<p class="empty-notice">✅ 无字段失配。</p></body></html>'
 
     # 并发预热解码与缓存全部失配图片
     all_imgs = [img for row in rows for img in (row.get("images") or [])]
