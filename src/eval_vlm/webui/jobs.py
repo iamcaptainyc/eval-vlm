@@ -221,10 +221,18 @@ class JobManager:
                 self.queue.task_done()
 
     def _build_cmd(self, job: Job) -> list[str]:
-        cmd = [sys.executable, "-m", "eval_vlm", job.type]
+        cmd = ["python", "-m", "eval_vlm", job.type]
         if job.dataset:
             cmd.extend(["-d", job.dataset])
-        cmd.extend(["--workspace", str(self.settings.workspace)])
+
+        # 仅在 settings.workspace 确实与全局默认 workspace 不同时才附加 --workspace
+        try:
+            from eval_vlm import workspace
+            global_ws = workspace.resolve_workspace(None, workspace.load_global_config())
+            if self.settings.workspace.resolve() != global_ws.resolve():
+                cmd.extend(["--workspace", str(self.settings.workspace)])
+        except Exception:
+            pass
 
         # 附加额外参数 (自动转换下划线为连字符: match_mode -> --match-mode)
         for k, v in (job.params or {}).items():
@@ -239,6 +247,7 @@ class JobManager:
 
     async def _execute_job(self, job: Job) -> None:
         cmd = self._build_cmd(job)
+        exec_cmd = [sys.executable] + cmd[1:]
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
@@ -257,7 +266,7 @@ class JobManager:
             f_log.write(f"=== 日志路径: {job.log_file.resolve()} ===\n")
             f_log.flush()
 
-        proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+        proc = await asyncio.create_subprocess_exec(*exec_cmd, **kwargs)
         job.proc = proc
         job.pid = proc.pid
         job.save_meta()

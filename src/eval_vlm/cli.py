@@ -209,8 +209,8 @@ def _maybe_label_extract(cfg: Config, args: argparse.Namespace) -> None:
               f"(已记录 label_failures.jsonl,可重跑补齐)。")
 
 
-def _do_run(cfg: Config, tag: str = "pred") -> dict:
-    stats = run_inference(cfg)
+def _do_run(cfg: Config, tag: str = "pred", limit: Optional[int] = None) -> dict:
+    stats = run_inference(cfg, limit=limit)
     print(f"[{tag}] 完成 {stats['newly_completed']} 个目标轮,失败 {stats['errors']} 个,"
           f"跳过(已完成样本) {stats['skipped_samples_already_done']} 条 -> {cfg.predictions_path}")
     if stats["errors"]:
@@ -218,8 +218,8 @@ def _do_run(cfg: Config, tag: str = "pred") -> dict:
     return stats
 
 
-def _do_score(cfg: Config, scorer: Optional[str]) -> dict:
-    metrics = score_predictions(cfg, scorer_name=scorer)
+def _do_score(cfg: Config, scorer: Optional[str], limit: Optional[int] = None) -> dict:
+    metrics = score_predictions(cfg, scorer_name=scorer, limit=limit)
     per_turn = metrics.get("per_turn") or {}
     print(f"[score] {len(per_turn)} 个目标轮,总体均分 {metrics.get('overall_mean_score')} "
           f"-> {cfg.metrics_path}")
@@ -280,7 +280,11 @@ def _pred_dataset(args: argparse.Namespace) -> int:
     cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("pred", persisted, folder)
     print(f"[pred] 数据集预测,模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
-    _do_run(cfg)
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        _do_run(cfg, limit=limit)
+    else:
+        _do_run(cfg)
     _maybe_label_extract(cfg, args)
     _maybe_generate_mnn_report(cfg)
     return 0
@@ -291,7 +295,11 @@ def _cmd_score(args: argparse.Namespace) -> int:
     persisted = _persist_overrides(folder, args)      # --scorer 等永久写回
     cfg = load_dataset_config(folder)
     _report_persist("score", persisted, folder)
-    _do_score(cfg, args.scorer)
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        _do_score(cfg, args.scorer, limit=limit)
+    else:
+        _do_score(cfg, args.scorer)
     _maybe_generate_mnn_report(cfg)
     return 0
 
@@ -318,13 +326,20 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
             need_pred = not (expected and expected.issubset(done))
         except Exception:  # noqa: BLE001 - 读不出就当作需要补跑,交给下游报确切错
             need_pred = True
+    limit = getattr(args, "limit", None)
     if need_pred:
         print(f"[field-eval] 预测缺失/不完整,用 backend={cfg.inference.backend} 补跑 pred -> {cfg.run_dir}")
-        _do_run(cfg, "field-eval")
+        if limit is not None:
+            _do_run(cfg, "field-eval", limit=limit)
+        else:
+            _do_run(cfg, "field-eval")
     else:
         print(f"[field-eval] 复用已有完整预测(backend={cfg.inference.backend}) -> {cfg.predictions_path}")
 
-    metrics = run_field_eval(cfg, overwrite=getattr(args, "overwrite", False))
+    fe_kwargs = {"overwrite": getattr(args, "overwrite", False)}
+    if limit is not None:
+        fe_kwargs["limit"] = limit
+    metrics = run_field_eval(cfg, **fe_kwargs)
     ov = metrics["overall"]
     print(f"[field-eval] 已评 {metrics['num_scored']} 样本(模型无输出判错 {metrics['num_pred_missing']},"
           f" 跳过 ref {metrics['skipped_ref']}/pred {metrics['skipped_pred_error']})"
@@ -367,8 +382,13 @@ def run_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     cfg.inference.fail_fast = getattr(args, "fail_fast", False)  # 运行时,不写回 config
     _report_persist("eval", persisted, folder)
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
-    _do_run(cfg, "eval")
-    metrics = _do_score(cfg, args.scorer)
+    limit = getattr(args, "limit", None)
+    if limit is not None:
+        _do_run(cfg, "eval", limit=limit)
+        metrics = _do_score(cfg, args.scorer, limit=limit)
+    else:
+        _do_run(cfg, "eval")
+        metrics = _do_score(cfg, args.scorer)
     _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
@@ -572,6 +592,8 @@ def _add_inference_args(p: argparse.ArgumentParser) -> None:
                    help="临时覆盖 inference.openai.base_url(部署地址,如 http://localhost:8000/v1)")
     p.add_argument("--model", default=None,
                    help="临时覆盖 inference.openai.model(部署时注册的模型名)")
+    p.add_argument("--limit", type=int, default=None,
+                   help="评测样本数量上限(截取前 N 条;<=0 表示不限制,缺省评全部)")
     # 调试用:任一条推理出错立即抛出原始异常(带完整 traceback)并中断整批,不再默默记
     # error 跑完全程。仅运行时生效,不写回 config.yaml。默认关闭(保持容错、可断点续跑)。
     p.add_argument("--fail-fast", dest="fail_fast", action="store_true",
@@ -642,6 +664,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     p_score.add_argument("--scorer", default=None,
                          help=f"临时覆盖评分器。可用: {', '.join(available_scorers())}")
+    p_score.add_argument("--limit", type=int, default=None,
+                         help="评分样本数量上限(截取前 N 条;<=0 表示不限制)")
+    p_score.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
+                         help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)")
     p_score.add_argument("--backend", default=None,
                          choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
                          help="临时覆盖推理后端(写回 inference.backend);定位对应后端的 predictions.jsonl")
@@ -688,6 +714,8 @@ def build_parser() -> argparse.ArgumentParser:
     # eval = run + score
     p_eval = sub.add_parser("eval", help="一键连续执行 run + score(不含 split)")
     p_eval.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_eval.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
+                         help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)")
     _add_inference_args(p_eval)
     p_eval.add_argument("--scorer", default=None, help="临时覆盖评分器")
     # 后端 / 权重 flag(与 pred 一致,永久写回 config.yaml):让每个格式一条 eval 即可跑完 pred+score
@@ -852,7 +880,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--label-extract-url", dest="label_extract_url", default=None,
                         help="临时覆盖标签服务地址 base_url(永久写回 label_extract.base_url)")
     p_pred.add_argument("--label-extract-token", dest="label_extract_token", default=None,
-                        help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
+                         help="临时覆盖 Authorization 头(需含 bearer 前缀;永久写回 label_extract.auth_token)")
+    p_pred.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
+                         help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)")
     _add_inference_args(p_pred)
     _add_vllm_offline_args(p_pred)
     _add_workspace_arg(p_pred)

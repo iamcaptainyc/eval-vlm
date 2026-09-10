@@ -44,7 +44,7 @@ def _is_exact_match_miss(row: dict) -> bool:
     return float(detail["exact_match"]) != 1.0
 
 
-def score_predictions(cfg: Config, scorer_name: Optional[str] = None) -> dict:
+def score_predictions(cfg: Config, scorer_name: Optional[str] = None, limit: Optional[int] = None) -> dict:
     """对已有预测逐轮评分,返回聚合指标。"""
     default_name = scorer_name or cfg.scoring.scorer
     turn_names = list(cfg.scoring.turn_scorers or [])
@@ -55,6 +55,8 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None) -> dict:
             f"未找到测试集 {cfg.test_path},请先运行: python -m eval_vlm split"
         )
     samples = load_samples(cfg, source=cfg.test_path)
+    if limit is not None and limit > 0:
+        samples = samples[:limit]
 
     if not cfg.predictions_path.exists():
         raise FileNotFoundError(

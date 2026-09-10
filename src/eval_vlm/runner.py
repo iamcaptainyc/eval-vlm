@@ -95,13 +95,15 @@ def _rollout_batch(cfg: Config, backend: InferenceBackend, todo: list[Sample],
     return n_ok, n_err
 
 
-def run_inference(cfg: Config) -> dict:
+def run_inference(cfg: Config, limit: Optional[int] = None) -> dict:
     """对测试集执行推理,返回统计信息。"""
     if not cfg.test_path.exists():
         raise FileNotFoundError(
             f"未找到测试集 {cfg.test_path},请先运行: python -m eval_vlm split"
         )
     samples = load_samples(cfg, source=cfg.test_path)   # 按 LlamaFactory 格式读 test.json
+    if limit is not None and limit > 0:
+        samples = samples[:limit]
     meta = load_split_meta(cfg)
 
     done_keys = store.load_prediction_keys(cfg.predictions_path)

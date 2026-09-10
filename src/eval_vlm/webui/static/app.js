@@ -760,21 +760,30 @@ async function loadModels() {
 }
 
 function renderModelSelects() {
-  // 1. Task Queue (任务队列) 模型下拉框
+  // 1. Task Queue (任务队列) 与 任务启动弹窗 模型下拉框
+  const optHF = (state.models.hf_models || [])
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="hf" data-name="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+    .join("");
+  const optMNN = (state.models.mnn_models || [])
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="mnn" data-name="${escapeHtml(m.name)}">⚡ ${escapeHtml(m.name)}</option>`)
+    .join("");
+  const groupedModelOptions = `<option value="">-- 选择已探测模型 --</option>` +
+    (optHF ? `<optgroup label="🤗 HF / vLLM 模型 (本地权重)">${optHF}</optgroup>` : "") +
+    (optMNN ? `<optgroup label="⚡ MNN 离线模型 (本地文件/目录)">${optMNN}</optgroup>` : "") +
+    `<option value="__custom__">✏️ 自定义输入 / 路径</option>`;
+
   const jobModelSelect = document.getElementById("job-inline-model-select");
   if (jobModelSelect) {
     const curVal = jobModelSelect.value;
-    let optHF = (state.models.hf_models || [])
-      .map((m) => `<option value="${escapeHtml(m.path)}" data-type="hf" data-name="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
-      .join("");
-    let optMNN = (state.models.mnn_models || [])
-      .map((m) => `<option value="${escapeHtml(m.path)}" data-type="mnn" data-name="${escapeHtml(m.name)}">⚡ ${escapeHtml(m.name)}</option>`)
-      .join("");
-    jobModelSelect.innerHTML = `<option value="">-- 选择已探测模型 --</option>` +
-      (optHF ? `<optgroup label="🤗 HF / vLLM 模型 (本地权重)">${optHF}</optgroup>` : "") +
-      (optMNN ? `<optgroup label="⚡ MNN 离线模型 (本地文件/目录)">${optMNN}</optgroup>` : "") +
-      `<option value="__custom__">✏️ 自定义输入 / 路径</option>`;
+    jobModelSelect.innerHTML = groupedModelOptions;
     if (curVal) jobModelSelect.value = curVal;
+  }
+
+  const jobModalModelSelect = document.getElementById("job-modal-model-select");
+  if (jobModalModelSelect) {
+    const curVal = jobModalModelSelect.value;
+    jobModalModelSelect.innerHTML = groupedModelOptions;
+    if (curVal) jobModalModelSelect.value = curVal;
   }
 
   // 2. Sweep 页面模型下拉框
@@ -1629,13 +1638,39 @@ function openJobModal(type) {
   // 重置通用输入项默认值
   const backendSelect = document.getElementById("job-modal-backend");
   const modelInput = document.getElementById("job-modal-model");
+  const modelSelect = document.getElementById("job-modal-model-select");
   const limitInput = document.getElementById("job-modal-limit");
   const failfastCb = document.getElementById("job-modal-failfast");
+  const matchModeSelect = document.getElementById("job-modal-matchmode");
+  const targetsSelect = document.getElementById("job-modal-targets");
+  const targetsCustom = document.getElementById("job-modal-targets-custom");
+  const evalTargetsSelect = document.getElementById("job-modal-eval-targets");
+  const evalTargetsCustom = document.getElementById("job-modal-eval-targets-custom");
+  const overwriteCb = document.getElementById("job-modal-overwrite");
+  const scorerSelect = document.getElementById("job-modal-scorer");
+
   if (backendSelect) backendSelect.value = "";
   if (modelInput) modelInput.value = "";
+  if (modelSelect) modelSelect.value = "";
   if (limitInput) limitInput.value = "";
   if (failfastCb) failfastCb.checked = false;
+  if (matchModeSelect) matchModeSelect.value = "";
+  if (targetsSelect) targetsSelect.value = "";
+  if (targetsCustom) { targetsCustom.value = ""; targetsCustom.style.display = "none"; }
+  if (evalTargetsSelect) evalTargetsSelect.value = "";
+  if (evalTargetsCustom) { evalTargetsCustom.value = ""; evalTargetsCustom.style.display = "none"; }
+  if (overwriteCb) overwriteCb.checked = false;
+  if (scorerSelect) scorerSelect.value = "";
 
+  // 确保弹窗内模型列表已渲染最新数据
+  if ((!state.models.hf_models || state.models.hf_models.length === 0) &&
+      (!state.models.mnn_models || state.models.mnn_models.length === 0)) {
+    loadDetectedModels();
+  } else {
+    renderModelSelects();
+  }
+
+  onJobModalBackendChange();
   updateJobCommandPreview();
   if (modal) modal.showModal();
 }
@@ -1645,50 +1680,135 @@ function closeJobModal() {
   if (modal) modal.close();
 }
 
-function updateJobCommandPreview() {
+function onJobModalTargetsChange() {
+  const sel = document.getElementById("job-modal-targets");
+  const customInput = document.getElementById("job-modal-targets-custom");
+  if (!sel || !customInput) return;
+  if (sel.value === "__custom__") {
+    customInput.style.display = "block";
+    customInput.focus();
+  } else {
+    customInput.style.display = "none";
+  }
+  updateJobCommandPreview();
+}
+
+function onJobModalEvalTargetsChange() {
+  const sel = document.getElementById("job-modal-eval-targets");
+  const customInput = document.getElementById("job-modal-eval-targets-custom");
+  if (!sel || !customInput) return;
+  if (sel.value === "__custom__") {
+    customInput.style.display = "block";
+    customInput.focus();
+  } else {
+    customInput.style.display = "none";
+  }
+  updateJobCommandPreview();
+}
+
+function getJobModalTargets(type) {
+  if (type === "field-eval") {
+    const sel = document.getElementById("job-modal-targets");
+    if (!sel || !sel.value) return "";
+    if (sel.value === "__custom__") {
+      return document.getElementById("job-modal-targets-custom")?.value?.trim() || "";
+    }
+    return sel.value;
+  }
+  const sel = document.getElementById("job-modal-eval-targets");
+  if (!sel || !sel.value) return "";
+  if (sel.value === "__custom__") {
+    return document.getElementById("job-modal-eval-targets-custom")?.value?.trim() || "";
+  }
+  return sel.value;
+}
+
+function buildJobModalArgs() {
   const type = state.jobModal.type;
   const dsSelect = document.getElementById("job-modal-dataset");
-  const dsName = dsSelect ? dsSelect.value : state.currentDataset;
+  const dataset = dsSelect ? dsSelect.value : state.currentDataset;
   const pathSpan = document.getElementById("job-modal-dataset-path");
 
   // 更新数据集物理路径提示
   if (pathSpan) {
-    const dsObj = state.datasets.find((d) => d.name === dsName);
+    const dsObj = state.datasets.find((d) => d.name === dataset);
     pathSpan.textContent = dsObj ? `路径: ${dsObj.path}` : "";
   }
 
   const backend = document.getElementById("job-modal-backend")?.value;
-  const model = document.getElementById("job-modal-model")?.value.trim();
-  const limit = document.getElementById("job-modal-limit")?.value.trim();
+  const model = document.getElementById("job-modal-model")?.value?.trim();
+  const limit = document.getElementById("job-modal-limit")?.value?.trim();
   const failfast = document.getElementById("job-modal-failfast")?.checked;
 
+  const params = {};
   const parts = ["python", "-m", "eval_vlm", type];
-  if (dsName) parts.push("-d", dsName);
-  if (backend) parts.push("--backend", backend);
-  if (model) {
-    if (backend === "hf") parts.push("--hf-model", model);
-    else if (backend === "vllm_offline") parts.push("--vllm-model", model);
-    else if (backend === "mnn") parts.push("--mnn-config", model);
-    else parts.push("--model", model);
+  if (dataset) parts.push("-d", dataset);
+
+  if (backend) {
+    params.backend = backend;
+    parts.push("--backend", backend);
   }
-  if (limit) parts.push("--limit", limit);
-  if (failfast) parts.push("--fail-fast");
+  if (model) {
+    if (backend === "hf") {
+      params.hf_model = model;
+      parts.push("--hf-model", model);
+    } else if (backend === "vllm_offline") {
+      params.vllm_model = model;
+      parts.push("--vllm-model", model);
+    } else if (backend === "mnn") {
+      params.mnn_config = model;
+      parts.push("--mnn-config", model);
+    } else {
+      params.model = model;
+      parts.push("--model", model);
+    }
+  }
+  if (limit) {
+    const limInt = parseInt(limit, 10);
+    if (!isNaN(limInt) && limInt > 0) {
+      params.limit = limInt;
+      parts.push("--limit", String(limInt));
+    }
+  }
+  if (failfast) {
+    params.fail_fast = true;
+    parts.push("--fail-fast");
+  }
 
   if (type === "field-eval") {
     const matchMode = document.getElementById("job-modal-matchmode")?.value;
-    const targets = document.getElementById("job-modal-targets")?.value;
+    const targets = getJobModalTargets("field-eval");
     const overwrite = document.getElementById("job-modal-overwrite")?.checked;
-    if (matchMode && matchMode !== "exact") parts.push("--match-mode", matchMode);
-    if (targets && targets !== "first") parts.push("--targets", targets);
-    if (overwrite) parts.push("--overwrite");
+    if (matchMode) {
+      params.match_mode = matchMode;
+      parts.push("--match-mode", matchMode);
+    }
+    if (targets) {
+      params.targets = targets;
+      parts.push("--targets", targets);
+    }
+    if (overwrite) {
+      params.overwrite = true;
+      parts.push("--overwrite");
+    }
   } else if (type === "eval" || type === "score") {
     const scorer = document.getElementById("job-modal-scorer")?.value;
-    const targets = document.getElementById("job-modal-eval-targets")?.value;
-    if (scorer) parts.push("--scorer", scorer);
-    if (targets) parts.push("--targets", targets);
+    const targets = getJobModalTargets("eval");
+    if (scorer) {
+      params.scorer = scorer;
+      parts.push("--scorer", scorer);
+    }
+    if (targets) {
+      params.targets = targets;
+      parts.push("--targets", targets);
+    }
   }
 
-  const cmdStr = parts.join(" ");
+  return { type, dataset, params, parts, cmdStr: parts.join(" ") };
+}
+
+function updateJobCommandPreview() {
+  const { cmdStr } = buildJobModalArgs();
   const previewEl = document.getElementById("job-modal-cmd-preview");
   if (previewEl) previewEl.textContent = cmdStr;
 
@@ -1699,40 +1819,7 @@ function updateJobCommandPreview() {
 }
 
 async function confirmLaunchJob() {
-  const type = state.jobModal.type;
-  const dsSelect = document.getElementById("job-modal-dataset");
-  const dataset = dsSelect ? dsSelect.value : state.currentDataset;
-
-  const backend = document.getElementById("job-modal-backend")?.value;
-  const model = document.getElementById("job-modal-model")?.value.trim();
-  const limit = document.getElementById("job-modal-limit")?.value.trim();
-  const failfast = document.getElementById("job-modal-failfast")?.checked;
-
-  const params = {};
-  if (backend) params.backend = backend;
-  if (model) {
-    if (backend === "hf") params.hf_model = model;
-    else if (backend === "vllm_offline") params.vllm_model = model;
-    else if (backend === "mnn") params.mnn_config = model;
-    else params.model = model;
-  }
-  if (limit) params.limit = parseInt(limit, 10);
-  if (failfast) params.fail_fast = true;
-
-  if (type === "field-eval") {
-    const matchMode = document.getElementById("job-modal-matchmode")?.value;
-    const targets = document.getElementById("job-modal-targets")?.value;
-    const overwrite = document.getElementById("job-modal-overwrite")?.checked;
-    if (matchMode) params.match_mode = matchMode;
-    if (targets) params.targets = targets;
-    if (overwrite) params.overwrite = true;
-  } else if (type === "eval" || type === "score") {
-    const scorer = document.getElementById("job-modal-scorer")?.value;
-    const targets = document.getElementById("job-modal-eval-targets")?.value;
-    if (scorer) params.scorer = scorer;
-    if (targets) params.targets = targets;
-  }
-
+  const { type, dataset, params } = buildJobModalArgs();
   try {
     const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
     const res = await fetch(url, {
@@ -1752,6 +1839,56 @@ async function confirmLaunchJob() {
   } catch (err) {
     showToast(`启动任务失败: ${err.message}`, "error");
   }
+}
+
+function onJobModalModelSelectChange() {
+  const sel = document.getElementById("job-modal-model-select");
+  const input = document.getElementById("job-modal-model");
+  const backendSel = document.getElementById("job-modal-backend");
+  if (!sel || !input) return;
+  const val = sel.value;
+  if (!val) {
+    updateJobCommandPreview();
+    return;
+  }
+  if (val === "__custom__") {
+    input.value = "";
+    input.focus();
+    updateJobCommandPreview();
+    return;
+  }
+  const opt = sel.options[sel.selectedIndex];
+  const modelType = opt?.getAttribute("data-type");
+  input.value = val;
+  if (modelType === "mnn") {
+    if (backendSel) backendSel.value = "mnn";
+  } else if (modelType === "hf") {
+    if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
+      backendSel.value = "vllm_offline";
+    }
+  }
+  onJobModalBackendChange();
+  updateJobCommandPreview();
+}
+
+function onJobModalBackendChange() {
+  const backend = document.getElementById("job-modal-backend")?.value || "";
+  const labelEl = document.getElementById("job-modal-model-label");
+  const badgeEl = document.getElementById("job-modal-model-badge");
+  let flagText = "--model";
+  let descText = "模型覆盖 (--model)";
+  if (backend === "hf") {
+    flagText = "--hf-model";
+    descText = "HF 权重 (--hf-model)";
+  } else if (backend === "vllm_offline") {
+    flagText = "--vllm-model";
+    descText = "vLLM 权重 (--vllm-model)";
+  } else if (backend === "mnn") {
+    flagText = "--mnn-config";
+    descText = "MNN 配置 (--mnn-config)";
+  }
+  if (labelEl) labelEl.textContent = descText;
+  if (badgeEl) badgeEl.textContent = flagText;
 }
 
 // --------------------------------------------------------------------------
@@ -1851,53 +1988,50 @@ function onJobInlineBackendChange() {
   updateInlineJobPreview();
 }
 
-function updateInlineJobPreview() {
-  const type = inlineJobType;
-  const dsSelect = document.getElementById("job-inline-dataset");
-  const dsName = dsSelect ? dsSelect.value : state.currentDataset;
-
-  const backend = document.getElementById("job-inline-backend")?.value;
-  const model = document.getElementById("job-inline-model")?.value?.trim();
-  const limit = document.getElementById("job-inline-limit")?.value?.trim();
-  const failfast = document.getElementById("job-inline-failfast")?.checked;
-
-  const parts = ["python", "-m", "eval_vlm", type];
-  if (dsName) parts.push("-d", dsName);
-  if (backend) parts.push("--backend", backend);
-  if (model) {
-    if (backend === "hf") parts.push("--hf-model", model);
-    else if (backend === "vllm_offline") parts.push("--vllm-model", model);
-    else if (backend === "mnn") parts.push("--mnn-config", model);
-    else parts.push("--model", model);
+function onJobInlineTargetsChange() {
+  const sel = document.getElementById("job-inline-targets");
+  const customInput = document.getElementById("job-inline-targets-custom");
+  if (!sel || !customInput) return;
+  if (sel.value === "__custom__") {
+    customInput.style.display = "block";
+    customInput.focus();
+  } else {
+    customInput.style.display = "none";
   }
-  if (limit) parts.push("--limit", limit);
-  if (failfast) parts.push("--fail-fast");
-
-  if (type === "field-eval") {
-    const matchMode = document.getElementById("job-inline-matchmode")?.value;
-    const targets = document.getElementById("job-inline-targets")?.value;
-    const overwrite = document.getElementById("job-inline-overwrite")?.checked;
-    if (matchMode && matchMode !== "exact") parts.push("--match-mode", matchMode);
-    if (targets && targets !== "first") parts.push("--targets", targets);
-    if (overwrite) parts.push("--overwrite");
-  } else if (type === "eval" || type === "score") {
-    const scorer = document.getElementById("job-inline-scorer")?.value;
-    const targets = document.getElementById("job-inline-eval-targets")?.value;
-    if (scorer) parts.push("--scorer", scorer);
-    if (targets) parts.push("--targets", targets);
-  }
-
-  const cmdStr = parts.join(" ");
-  const previewEl = document.getElementById("job-inline-cmd-preview");
-  if (previewEl) previewEl.textContent = cmdStr;
-
-  const logDest = document.getElementById("job-inline-log-destination");
-  if (logDest) {
-    logDest.textContent = `.../_webui/jobs/<job_id>/log.txt (工作区状态目录)`;
-  }
+  updateInlineJobPreview();
 }
 
-async function submitInlineJob() {
+function onJobInlineEvalTargetsChange() {
+  const sel = document.getElementById("job-inline-eval-targets");
+  const customInput = document.getElementById("job-inline-eval-targets-custom");
+  if (!sel || !customInput) return;
+  if (sel.value === "__custom__") {
+    customInput.style.display = "block";
+    customInput.focus();
+  } else {
+    customInput.style.display = "none";
+  }
+  updateInlineJobPreview();
+}
+
+function getInlineTargets(type) {
+  if (type === "field-eval") {
+    const sel = document.getElementById("job-inline-targets");
+    if (!sel || !sel.value) return "";
+    if (sel.value === "__custom__") {
+      return document.getElementById("job-inline-targets-custom")?.value?.trim() || "";
+    }
+    return sel.value;
+  }
+  const sel = document.getElementById("job-inline-eval-targets");
+  if (!sel || !sel.value) return "";
+  if (sel.value === "__custom__") {
+    return document.getElementById("job-inline-eval-targets-custom")?.value?.trim() || "";
+  }
+  return sel.value;
+}
+
+function buildInlineJobArgs() {
   const type = inlineJobType;
   const dsSelect = document.getElementById("job-inline-dataset");
   const dataset = dsSelect ? dsSelect.value : state.currentDataset;
@@ -1908,30 +2042,85 @@ async function submitInlineJob() {
   const failfast = document.getElementById("job-inline-failfast")?.checked;
 
   const params = {};
-  if (backend) params.backend = backend;
-  if (model) {
-    if (backend === "hf") params.hf_model = model;
-    else if (backend === "vllm_offline") params.vllm_model = model;
-    else if (backend === "mnn") params.mnn_config = model;
-    else params.model = model;
+  const parts = ["python", "-m", "eval_vlm", type];
+  if (dataset) parts.push("-d", dataset);
+
+  if (backend) {
+    params.backend = backend;
+    parts.push("--backend", backend);
   }
-  if (limit) params.limit = parseInt(limit, 10);
-  if (failfast) params.fail_fast = true;
+  if (model) {
+    if (backend === "hf") {
+      params.hf_model = model;
+      parts.push("--hf-model", model);
+    } else if (backend === "vllm_offline") {
+      params.vllm_model = model;
+      parts.push("--vllm-model", model);
+    } else if (backend === "mnn") {
+      params.mnn_config = model;
+      parts.push("--mnn-config", model);
+    } else {
+      params.model = model;
+      parts.push("--model", model);
+    }
+  }
+  if (limit) {
+    const limInt = parseInt(limit, 10);
+    if (!isNaN(limInt) && limInt > 0) {
+      params.limit = limInt;
+      parts.push("--limit", String(limInt));
+    }
+  }
+  if (failfast) {
+    params.fail_fast = true;
+    parts.push("--fail-fast");
+  }
 
   if (type === "field-eval") {
     const matchMode = document.getElementById("job-inline-matchmode")?.value;
-    const targets = document.getElementById("job-inline-targets")?.value;
+    const targets = getInlineTargets("field-eval");
     const overwrite = document.getElementById("job-inline-overwrite")?.checked;
-    if (matchMode) params.match_mode = matchMode;
-    if (targets) params.targets = targets;
-    if (overwrite) params.overwrite = true;
+    if (matchMode) {
+      params.match_mode = matchMode;
+      parts.push("--match-mode", matchMode);
+    }
+    if (targets) {
+      params.targets = targets;
+      parts.push("--targets", targets);
+    }
+    if (overwrite) {
+      params.overwrite = true;
+      parts.push("--overwrite");
+    }
   } else if (type === "eval" || type === "score") {
     const scorer = document.getElementById("job-inline-scorer")?.value;
-    const targets = document.getElementById("job-inline-eval-targets")?.value;
-    if (scorer) params.scorer = scorer;
-    if (targets) params.targets = targets;
+    const targets = getInlineTargets("eval");
+    if (scorer) {
+      params.scorer = scorer;
+      parts.push("--scorer", scorer);
+    }
+    if (targets) {
+      params.targets = targets;
+      parts.push("--targets", targets);
+    }
   }
 
+  return { type, dataset, params, parts, cmdStr: parts.join(" ") };
+}
+
+function updateInlineJobPreview() {
+  const { cmdStr } = buildInlineJobArgs();
+  const previewEl = document.getElementById("job-inline-cmd-preview");
+  if (previewEl) previewEl.textContent = cmdStr;
+
+  const logDest = document.getElementById("job-inline-log-destination");
+  if (logDest) {
+    logDest.textContent = `.../_webui/jobs/<job_id>/log.txt (工作区状态目录)`;
+  }
+}
+
+async function submitInlineJob() {
+  const { type, dataset, params } = buildInlineJobArgs();
   try {
     const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
     const res = await fetch(url, {
@@ -2726,3 +2915,9 @@ window.markConfigDirty = markConfigDirty;
 window.saveAllConfigChanges = saveAllConfigChanges;
 window.onJobInlineModelSelectChange = onJobInlineModelSelectChange;
 window.onJobInlineBackendChange = onJobInlineBackendChange;
+window.onJobInlineTargetsChange = onJobInlineTargetsChange;
+window.onJobInlineEvalTargetsChange = onJobInlineEvalTargetsChange;
+window.onJobModalModelSelectChange = onJobModalModelSelectChange;
+window.onJobModalBackendChange = onJobModalBackendChange;
+window.onJobModalTargetsChange = onJobModalTargetsChange;
+window.onJobModalEvalTargetsChange = onJobModalEvalTargetsChange;

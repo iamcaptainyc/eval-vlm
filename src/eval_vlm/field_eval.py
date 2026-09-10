@@ -735,7 +735,7 @@ td.bad {{ color: #c62828; font-weight: 600; background: #fff2f2; }}
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
+def run_field_eval(cfg: Config, *, overwrite: bool = False, limit: Optional[int] = None) -> dict:
     """三阶段跑通字段抽取评测,落盘并返回聚合指标。"""
     if not cfg.test_path.exists():
         raise FileNotFoundError(
@@ -748,6 +748,8 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False) -> dict:
 
     le = _value_config(cfg.label_extract)
     samples = load_samples(cfg, source=cfg.test_path)
+    if limit is not None and limit > 0:
+        samples = samples[:limit]
 
     # ---- A. 抽 ref 字段(数据集级缓存,跨模型复用)----
     ref_items, desc_turn = _ref_items(samples)

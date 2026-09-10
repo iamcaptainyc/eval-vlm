@@ -72,3 +72,58 @@ async def test_job_log_streaming_sse(job_mgr):
 
     assert any("line 1" in ev for ev in events)
     assert any("status" in ev for ev in events)
+
+
+def test_job_command_canonical_and_targets(job_mgr):
+    """测试命令构建使用规范前缀 python -m eval_vlm，且正确过滤空参数与支持数字 targets。"""
+    summary = job_mgr.submit_job(
+        job_type="field-eval",
+        dataset="test_ds",
+        params={
+            "match_mode": "",       # 保持默认，应被过滤不出现在命令中
+            "targets": 2,           # 数字 targets（第2轮）
+            "limit": 5,             # 样本数量限制
+            "overwrite": True,
+        },
+        user="test_user",
+    )
+    cmd = summary.command
+    assert cmd[0] == "python"
+    assert cmd[1] == "-m"
+    assert cmd[2] == "eval_vlm"
+    assert cmd[3] == "field-eval"
+    assert "-d" in cmd and cmd[cmd.index("-d") + 1] == "test_ds"
+    assert "--match-mode" not in cmd  # 空值被正确过滤
+    assert "--targets" in cmd and cmd[cmd.index("--targets") + 1] == "2"
+    assert "--limit" in cmd and cmd[cmd.index("--limit") + 1] == "5"
+    assert "--overwrite" in cmd
+
+
+def test_cli_targets_and_limit_parsing():
+    """测试 CLI parser 对各子命令的 --targets 与 --limit 参数解析。"""
+    from eval_vlm.cli import build_parser
+
+    parser = build_parser()
+
+    # field-eval 带数字 targets 与 limit
+    args = parser.parse_args(["field-eval", "-d", "ds1", "--targets", "2", "--limit", "10"])
+    assert args.targets == 2
+    assert isinstance(args.targets, int)
+    assert args.limit == 10
+
+    # eval 带 targets first 与 limit
+    args_eval = parser.parse_args(["eval", "-d", "ds1", "--targets", "first", "--limit", "20"])
+    assert args_eval.targets == "first"
+    assert args_eval.limit == 20
+
+    # score 带 targets all 与 limit
+    args_score = parser.parse_args(["score", "-d", "ds1", "--targets", "all", "--limit", "5"])
+    assert args_score.targets == "all"
+    assert args_score.limit == 5
+
+    # pred 带 targets 3 与 limit
+    args_pred = parser.parse_args(["pred", "--dataset", "ds1", "--targets", "3", "--limit", "15"])
+    assert args_pred.targets == 3
+    assert isinstance(args_pred.targets, int)
+    assert args_pred.limit == 15
+

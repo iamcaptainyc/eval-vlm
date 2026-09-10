@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
   <link rel="stylesheet" href="styles.css?v=20260910j">
-  <script src="app.js?v=20260910j" defer></script>
+  <script src="app.js?v=20260910m" defer></script>
 </head>
 <body>
 
@@ -1026,17 +1026,25 @@
               <div>
                 <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">匹配判定模式 (--match-mode)</label>
                 <select id="job-inline-matchmode" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                  <option value="">(保持配置默认)</option>
                   <option value="exact">exact (严格双向相等 set(ref)==set(pred))</option>
                   <option value="contain">contain (包含即算对 set(ref)⊆set(pred))</option>
+                  <option value="subset">subset (子集匹配)</option>
                 </select>
               </div>
               <div>
                 <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测指定轮次 (--targets)</label>
-                <select id="job-inline-targets" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
-                  <option value="first">first (仅第一轮描述，默认)</option>
-                  <option value="all">all (全部 assistant 轮)</option>
+                <select id="job-inline-targets" class="select" style="width: 100%;" onchange="onJobInlineTargetsChange()">
+                  <option value="">(保持配置默认)</option>
+                  <option value="first">first (仅第一轮描述)</option>
                   <option value="last">last (仅最后一轮)</option>
+                  <option value="all">all (全部 assistant 轮)</option>
+                  <option value="1">1 (指定第 1 轮)</option>
+                  <option value="2">2 (指定第 2 轮)</option>
+                  <option value="3">3 (指定第 3 轮)</option>
+                  <option value="__custom__">✏️ 自定义指定轮次数字...</option>
                 </select>
+                <input type="number" id="job-inline-targets-custom" class="input" style="display: none; margin-top: 0.35rem; width: 100%;" placeholder="输入轮次数字，如 4" min="1" oninput="updateInlineJobPreview()">
               </div>
               <div style="padding-top: 0.5rem;">
                 <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
@@ -1064,12 +1072,17 @@
               </div>
               <div>
                 <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测目标轮次 (--targets)</label>
-                <select id="job-inline-eval-targets" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                <select id="job-inline-eval-targets" class="select" style="width: 100%;" onchange="onJobInlineEvalTargetsChange()">
                   <option value="">(保持配置默认)</option>
                   <option value="all">all (全部 assistant 轮)</option>
                   <option value="last">last (仅最后一轮)</option>
                   <option value="first">first (仅第一轮图像描述)</option>
+                  <option value="1">1 (指定第 1 轮)</option>
+                  <option value="2">2 (指定第 2 轮)</option>
+                  <option value="3">3 (指定第 3 轮)</option>
+                  <option value="__custom__">✏️ 自定义指定轮次数字...</option>
                 </select>
+                <input type="number" id="job-inline-eval-targets-custom" class="input" style="display: none; margin-top: 0.35rem; width: 100%;" placeholder="输入轮次数字，如 4" min="1" oninput="updateInlineJobPreview()">
               </div>
             </div>
           </div>
@@ -1532,7 +1545,7 @@
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
         <div>
           <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (--backend)</label>
-          <select id="job-modal-backend" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+          <select id="job-modal-backend" class="select" style="width: 100%;" onchange="onJobModalBackendChange(); updateJobCommandPreview();">
             <option value="">(保持 config.yaml 默认)</option>
             <option value="openai">openai (在线 API / vLLM HTTP)</option>
             <option value="vllm">vllm (OpenAI 兼容协议)</option>
@@ -1543,23 +1556,33 @@
         </div>
 
         <div>
-          <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">临时模型名覆盖 (--model)</label>
-          <input type="text" id="job-modal-model" class="input" style="width: 100%;" placeholder="留空则读取配置文件" oninput="updateJobCommandPreview()">
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-        <div>
           <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">冒烟样本限制 (--limit)</label>
           <input type="number" id="job-modal-limit" class="input" style="width: 100%;" placeholder="如 5 或 10 (留空跑全量)" min="1" oninput="updateJobCommandPreview()">
         </div>
+      </div>
 
-        <div style="display: flex; align-items: flex-end; padding-bottom: 0.5rem;">
-          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
-            <input type="checkbox" id="job-modal-failfast" onchange="updateJobCommandPreview()">
-            <span>遇错立即终止 (--fail-fast)</span>
-          </label>
+      <!-- 探测模型选择与覆盖行 (全宽选择器) -->
+      <div>
+        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <span id="job-modal-model-label">模型覆盖 (--model)</span>
+          <span id="job-modal-model-badge" class="config-key-badge" style="font-size: 0.68rem;">--model</span>
+        </label>
+        <div class="job-model-picker">
+          <select id="job-modal-model-select" class="select" onchange="onJobModalModelSelectChange()">
+            <option value="">-- 选择已探测模型 --</option>
+            <optgroup id="job-modal-optgroup-hf" label="🤗 HF / vLLM 模型 (本地权重)"></optgroup>
+            <optgroup id="job-modal-optgroup-mnn" label="⚡ MNN 离线模型 (本地文件/目录)"></optgroup>
+            <option value="__custom__">✏️ 自定义输入 / 路径</option>
+          </select>
+          <input type="text" id="job-modal-model" class="input" placeholder="留空读配置，或从左侧下拉选取" oninput="updateJobCommandPreview()">
         </div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+          <input type="checkbox" id="job-modal-failfast" onchange="updateJobCommandPreview()">
+          <span>遇错立即终止 (--fail-fast)</span>
+        </label>
       </div>
 
       <!-- 3. field-eval 专属参数 -->
@@ -1569,17 +1592,25 @@
           <div>
             <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">匹配判定模式 (--match-mode)</label>
             <select id="job-modal-matchmode" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+              <option value="">(保持配置默认)</option>
               <option value="exact">exact (严格双向相等 set(ref)==set(pred))</option>
               <option value="contain">contain (包含即算对 set(ref)⊆set(pred))</option>
+              <option value="subset">subset (子集匹配)</option>
             </select>
           </div>
           <div>
             <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测指定轮次 (--targets)</label>
-            <select id="job-modal-targets" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
-              <option value="first">first (仅第一轮描述，默认)</option>
-              <option value="all">all (全部 assistant 轮)</option>
+            <select id="job-modal-targets" class="select" style="width: 100%;" onchange="onJobModalTargetsChange()">
+              <option value="">(保持配置默认)</option>
+              <option value="first">first (仅第一轮描述)</option>
               <option value="last">last (仅最后一轮)</option>
+              <option value="all">all (全部 assistant 轮)</option>
+              <option value="1">1 (指定第 1 轮)</option>
+              <option value="2">2 (指定第 2 轮)</option>
+              <option value="3">3 (指定第 3 轮)</option>
+              <option value="__custom__">✏️ 自定义指定轮次数字...</option>
             </select>
+            <input type="number" id="job-modal-targets-custom" class="input" style="display: none; margin-top: 0.35rem; width: 100%;" placeholder="输入轮次数字，如 4" min="1" oninput="updateJobCommandPreview()">
           </div>
         </div>
         <div style="margin-top: 0.75rem;">
@@ -1607,12 +1638,17 @@
           </div>
           <div>
             <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测目标轮次 (--targets)</label>
-            <select id="job-modal-eval-targets" class="select" style="width: 100%;" onchange="updateJobCommandPreview()">
+            <select id="job-modal-eval-targets" class="select" style="width: 100%;" onchange="onJobModalEvalTargetsChange()">
               <option value="">(保持配置默认)</option>
               <option value="all">all (全部 assistant 轮)</option>
               <option value="last">last (仅最后一轮)</option>
               <option value="first">first (仅第一轮图像描述)</option>
+              <option value="1">1 (指定第 1 轮)</option>
+              <option value="2">2 (指定第 2 轮)</option>
+              <option value="3">3 (指定第 3 轮)</option>
+              <option value="__custom__">✏️ 自定义指定轮次数字...</option>
             </select>
+            <input type="number" id="job-modal-eval-targets-custom" class="input" style="display: none; margin-top: 0.35rem; width: 100%;" placeholder="输入轮次数字，如 4" min="1" oninput="updateJobCommandPreview()">
           </div>
         </div>
       </div>
