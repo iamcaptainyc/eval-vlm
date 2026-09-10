@@ -1205,35 +1205,63 @@ function renderConfig() {
   const oai = cfg.inference?.openai || {};
   const oaiModel = document.getElementById("cfg-form-openai-model");
   const oaiBaseUrl = document.getElementById("cfg-form-openai-baseurl");
+  const oaiApiKeyEnv = document.getElementById("cfg-form-openai-apikeyenv");
   const oaiConcurrency = document.getElementById("cfg-form-openai-concurrency");
   const oaiMaxTokens = document.getElementById("cfg-form-openai-maxtokens");
   const oaiTemp = document.getElementById("cfg-form-openai-temp");
   const oaiTempSlider = document.getElementById("cfg-form-openai-temp-slider");
+  const oaiTopP = document.getElementById("cfg-form-openai-topp");
+  const oaiTimeout = document.getElementById("cfg-form-openai-timeout");
+  const oaiMaxRetries = document.getElementById("cfg-form-openai-maxretries");
   const oaiImageDetail = document.getElementById("cfg-form-openai-imagedetail");
   const oaiSysPrompt = document.getElementById("cfg-form-openai-sysprompt");
 
   if (oaiModel) oaiModel.value = oai.model || "";
   if (oaiBaseUrl) oaiBaseUrl.value = oai.base_url || "";
-  if (oaiConcurrency) oaiConcurrency.value = oai.max_concurrency ?? 4;
-  if (oaiMaxTokens) oaiMaxTokens.value = oai.max_tokens ?? 1024;
+  if (oaiApiKeyEnv) oaiApiKeyEnv.value = oai.api_key_env || "OPENAI_API_KEY";
+  if (oaiConcurrency) oaiConcurrency.value = oai.max_concurrency ?? 8;
+  if (oaiMaxTokens) oaiMaxTokens.value = oai.max_tokens ?? 512;
   if (oaiTemp) oaiTemp.value = oai.temperature ?? 0.0;
   if (oaiTempSlider) oaiTempSlider.value = oai.temperature ?? 0.0;
+  if (oaiTopP) oaiTopP.value = oai.top_p ?? 1.0;
+  if (oaiTimeout) oaiTimeout.value = oai.request_timeout ?? 120.0;
+  if (oaiMaxRetries) oaiMaxRetries.value = oai.max_retries ?? 3;
   if (oaiImageDetail) oaiImageDetail.value = oai.image_detail || "high";
   if (oaiSysPrompt) oaiSysPrompt.value = oai.system_prompt || "";
 
   // MNN 字段
   const mnn = cfg.inference?.mnn || {};
   const mnnConfigPath = document.getElementById("cfg-form-mnn-configpath");
-  const mnnMaxSide = document.getElementById("cfg-form-mnn-maxside");
+  const mnnMaxTokens = document.getElementById("cfg-form-mnn-maxtokens");
   const mnnTemp = document.getElementById("cfg-form-mnn-temp");
   const mnnTempSlider = document.getElementById("cfg-form-mnn-temp-slider");
+  const mnnTopP = document.getElementById("cfg-form-mnn-topp");
+  const mnnTopK = document.getElementById("cfg-form-mnn-topk");
   const mnnRepPenalty = document.getElementById("cfg-form-mnn-reppenalty");
+  const mnnFreqPenalty = document.getElementById("cfg-form-mnn-freqpenalty");
+  const mnnPresPenalty = document.getElementById("cfg-form-mnn-prespenalty");
+  const mnnPenWindow = document.getElementById("cfg-form-mnn-penwindow");
+  const mnnMaxSide = document.getElementById("cfg-form-mnn-maxside");
+  const mnnImgMaxPixels = document.getElementById("cfg-form-mnn-imgmaxpixels");
+  const mnnImgMinPixels = document.getElementById("cfg-form-mnn-imgminpixels");
+  const mnnQuant = document.getElementById("cfg-form-mnn-quant");
+  const mnnSysPrompt = document.getElementById("cfg-form-mnn-sysprompt");
 
   if (mnnConfigPath) mnnConfigPath.value = mnn.config_path || "";
-  if (mnnMaxSide) mnnMaxSide.value = mnn.image_max_side || "";
-  if (mnnTemp) mnnTemp.value = mnn.temperature ?? 0.0;
-  if (mnnTempSlider) mnnTempSlider.value = mnn.temperature ?? 0.0;
-  if (mnnRepPenalty) mnnRepPenalty.value = mnn.repetition_penalty ?? 1.0;
+  if (mnnMaxTokens) mnnMaxTokens.value = mnn.max_tokens ?? 1024;
+  if (mnnTemp) mnnTemp.value = (mnn.temperature !== null && mnn.temperature !== undefined) ? mnn.temperature : 0.0;
+  if (mnnTempSlider) mnnTempSlider.value = (mnn.temperature !== null && mnn.temperature !== undefined) ? mnn.temperature : 0.0;
+  if (mnnTopP) mnnTopP.value = (mnn.top_p !== null && mnn.top_p !== undefined) ? mnn.top_p : "";
+  if (mnnTopK) mnnTopK.value = (mnn.top_k !== null && mnn.top_k !== undefined) ? mnn.top_k : "";
+  if (mnnRepPenalty) mnnRepPenalty.value = mnn.repetition_penalty ?? 1.1;
+  if (mnnFreqPenalty) mnnFreqPenalty.value = mnn.frequency_penalty ?? 0.0;
+  if (mnnPresPenalty) mnnPresPenalty.value = mnn.presence_penalty ?? 0.0;
+  if (mnnPenWindow) mnnPenWindow.value = mnn.penalty_window ?? 0;
+  if (mnnMaxSide) mnnMaxSide.value = mnn.image_max_side ?? 2048;
+  if (mnnImgMaxPixels) mnnImgMaxPixels.value = mnn.image_max_pixels ?? 589824;
+  if (mnnImgMinPixels) mnnImgMinPixels.value = mnn.image_min_pixels ?? 1024;
+  if (mnnQuant) mnnQuant.value = mnn.quant || "";
+  if (mnnSysPrompt) mnnSysPrompt.value = mnn.system_prompt || "";
 
   // vLLM Offline 字段
   const vllm = cfg.inference?.vllm_offline || {};
@@ -1242,6 +1270,7 @@ function renderConfig() {
   const vllmGpuUtilSlider = document.getElementById("cfg-form-vllm-gpuutil-slider");
   const vllmMaxModelLen = document.getElementById("cfg-form-vllm-maxmodellen");
   const vllmMaxNumSeqs = document.getElementById("cfg-form-vllm-maxnumseqs");
+  const vllmMaxBatchedTokens = document.getElementById("cfg-form-vllm-maxbatchedtokens");
   const vllmMaxTokens = document.getElementById("cfg-form-vllm-maxtokens");
   const vllmTemp = document.getElementById("cfg-form-vllm-temp");
   const vllmTempSlider = document.getElementById("cfg-form-vllm-temp-slider");
@@ -1260,6 +1289,7 @@ function renderConfig() {
   if (vllmGpuUtilSlider) vllmGpuUtilSlider.value = vllm.gpu_memory_utilization ?? 0.9;
   if (vllmMaxModelLen) vllmMaxModelLen.value = vllm.max_model_len ?? 4096;
   if (vllmMaxNumSeqs) vllmMaxNumSeqs.value = vllm.max_num_seqs ?? 128;
+  if (vllmMaxBatchedTokens) vllmMaxBatchedTokens.value = vllm.max_num_batched_tokens ?? 20480;
   if (vllmMaxTokens) vllmMaxTokens.value = vllm.max_tokens ?? 512;
   if (vllmTemp) vllmTemp.value = vllm.temperature ?? 0.0;
   if (vllmTempSlider) vllmTempSlider.value = vllm.temperature ?? 0.0;
@@ -1377,18 +1407,43 @@ async function saveAllConfigChanges() {
 
   if (activeBackend === "mnn") {
     const cp = document.getElementById("cfg-form-mnn-configpath")?.value.trim();
-    const ms = document.getElementById("cfg-form-mnn-maxside")?.value.trim();
-    const tp = parseFloat(document.getElementById("cfg-form-mnn-temp")?.value || "0");
-    const rp = parseFloat(document.getElementById("cfg-form-mnn-reppenalty")?.value || "1.0");
+    const mt = parseInt(document.getElementById("cfg-form-mnn-maxtokens")?.value || "1024", 10);
+    const tpVal = document.getElementById("cfg-form-mnn-temp")?.value.trim();
+    const tp = tpVal === "" ? null : parseFloat(tpVal);
+    const topPVal = document.getElementById("cfg-form-mnn-topp")?.value.trim();
+    const topP = topPVal === "" ? null : parseFloat(topPVal);
+    const topKVal = document.getElementById("cfg-form-mnn-topk")?.value.trim();
+    const topK = topKVal === "" ? null : parseInt(topKVal, 10);
+    const rp = parseFloat(document.getElementById("cfg-form-mnn-reppenalty")?.value || "1.1");
+    const fp = parseFloat(document.getElementById("cfg-form-mnn-freqpenalty")?.value || "0.0");
+    const pp = parseFloat(document.getElementById("cfg-form-mnn-prespenalty")?.value || "0.0");
+    const pw = parseInt(document.getElementById("cfg-form-mnn-penwindow")?.value || "0", 10);
+    const ms = parseInt(document.getElementById("cfg-form-mnn-maxside")?.value || "2048", 10);
+    const maxPx = parseInt(document.getElementById("cfg-form-mnn-imgmaxpixels")?.value || "589824", 10);
+    const minPx = parseInt(document.getElementById("cfg-form-mnn-imgminpixels")?.value || "1024", 10);
+    const quant = document.getElementById("cfg-form-mnn-quant")?.value.trim() || null;
+    const sp = document.getElementById("cfg-form-mnn-sysprompt")?.value || "";
+
     if (cp) updates.push({ key: "inference.mnn.config_path", value: cp });
-    if (ms) updates.push({ key: "inference.mnn.image_max_side", value: parseInt(ms, 10) });
+    updates.push({ key: "inference.mnn.max_tokens", value: mt });
     updates.push({ key: "inference.mnn.temperature", value: tp });
+    updates.push({ key: "inference.mnn.top_p", value: topP });
+    updates.push({ key: "inference.mnn.top_k", value: topK });
     updates.push({ key: "inference.mnn.repetition_penalty", value: rp });
+    updates.push({ key: "inference.mnn.frequency_penalty", value: fp });
+    updates.push({ key: "inference.mnn.presence_penalty", value: pp });
+    updates.push({ key: "inference.mnn.penalty_window", value: pw });
+    updates.push({ key: "inference.mnn.image_max_side", value: ms });
+    updates.push({ key: "inference.mnn.image_max_pixels", value: maxPx });
+    updates.push({ key: "inference.mnn.image_min_pixels", value: minPx });
+    updates.push({ key: "inference.mnn.quant", value: quant });
+    updates.push({ key: "inference.mnn.system_prompt", value: sp });
   } else if (activeBackend === "vllm_offline") {
     const mp = document.getElementById("cfg-form-vllm-model")?.value.trim();
     const gu = parseFloat(document.getElementById("cfg-form-vllm-gpuutil")?.value || "0.9");
     const ml = parseInt(document.getElementById("cfg-form-vllm-maxmodellen")?.value || "4096", 10);
     const ns = parseInt(document.getElementById("cfg-form-vllm-maxnumseqs")?.value || "128", 10);
+    const bt = parseInt(document.getElementById("cfg-form-vllm-maxbatchedtokens")?.value || "20480", 10);
     const mt = parseInt(document.getElementById("cfg-form-vllm-maxtokens")?.value || "512", 10);
     const tp = parseFloat(document.getElementById("cfg-form-vllm-temp")?.value || "0");
     const topP = parseFloat(document.getElementById("cfg-form-vllm-topp")?.value || "1.0");
@@ -1405,6 +1460,7 @@ async function saveAllConfigChanges() {
     updates.push({ key: "inference.vllm_offline.gpu_memory_utilization", value: gu });
     updates.push({ key: "inference.vllm_offline.max_model_len", value: ml });
     updates.push({ key: "inference.vllm_offline.max_num_seqs", value: ns });
+    updates.push({ key: "inference.vllm_offline.max_num_batched_tokens", value: bt });
     updates.push({ key: "inference.vllm_offline.max_tokens", value: mt });
     updates.push({ key: "inference.vllm_offline.temperature", value: tp });
     updates.push({ key: "inference.vllm_offline.top_p", value: topP });
@@ -1441,17 +1497,25 @@ async function saveAllConfigChanges() {
   } else {
     const mdl = document.getElementById("cfg-form-openai-model")?.value.trim();
     const bu = document.getElementById("cfg-form-openai-baseurl")?.value.trim();
-    const cc = parseInt(document.getElementById("cfg-form-openai-concurrency")?.value || "4", 10);
-    const mt = parseInt(document.getElementById("cfg-form-openai-maxtokens")?.value || "1024", 10);
+    const ake = document.getElementById("cfg-form-openai-apikeyenv")?.value.trim() || "OPENAI_API_KEY";
+    const cc = parseInt(document.getElementById("cfg-form-openai-concurrency")?.value || "8", 10);
+    const mt = parseInt(document.getElementById("cfg-form-openai-maxtokens")?.value || "512", 10);
     const tp = parseFloat(document.getElementById("cfg-form-openai-temp")?.value || "0");
+    const topP = parseFloat(document.getElementById("cfg-form-openai-topp")?.value || "1.0");
+    const to = parseFloat(document.getElementById("cfg-form-openai-timeout")?.value || "120.0");
+    const mr = parseInt(document.getElementById("cfg-form-openai-maxretries")?.value || "3", 10);
     const id = document.getElementById("cfg-form-openai-imagedetail")?.value || "high";
     const sp = document.getElementById("cfg-form-openai-sysprompt")?.value || "";
 
     if (mdl) updates.push({ key: "inference.openai.model", value: mdl });
     if (bu) updates.push({ key: "inference.openai.base_url", value: bu });
+    updates.push({ key: "inference.openai.api_key_env", value: ake });
     updates.push({ key: "inference.openai.max_concurrency", value: cc });
     updates.push({ key: "inference.openai.max_tokens", value: mt });
     updates.push({ key: "inference.openai.temperature", value: tp });
+    updates.push({ key: "inference.openai.top_p", value: topP });
+    updates.push({ key: "inference.openai.request_timeout", value: to });
+    updates.push({ key: "inference.openai.max_retries", value: mr });
     updates.push({ key: "inference.openai.image_detail", value: id });
     updates.push({ key: "inference.openai.system_prompt", value: sp });
   }

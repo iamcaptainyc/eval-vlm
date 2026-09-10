@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260910i">
-  <script src="app.js?v=20260910i" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910j">
+  <script src="app.js?v=20260910j" defer></script>
 </head>
 <body>
 
@@ -370,10 +370,10 @@
           <div class="config-group-desc">支持标准 OpenAI 接口以及 vLLM / Ollama / SGLang 暴露的兼容 HTTP 端口</div>
 
           <div class="config-grid-2">
-            <div class="config-field">
+            <div class="config-field" style="grid-column: 1 / -1;">
               <label><span>模型标识符</span><span class="config-key-badge">inference.openai.model</span></label>
               <div style="display: flex; gap: 0.5rem;">
-                <select id="cfg-form-openai-model-select" class="select" style="width: 45%;" onchange="if(this.value) { document.getElementById('cfg-form-openai-model').value=this.value; markConfigDirty(); }">
+                <select id="cfg-form-openai-model-select" class="select" style="width: 35%;" onchange="if(this.value) { document.getElementById('cfg-form-openai-model').value=this.value; markConfigDirty(); }">
                   <option value="">(选择本地已探测模型)</option>
                 </select>
                 <input type="text" id="cfg-form-openai-model" class="input" style="flex: 1;" placeholder="如 Qwen2-VL-7B-Instruct 或 gpt-4o" oninput="markConfigDirty()">
@@ -388,15 +388,21 @@
             </div>
 
             <div class="config-field">
-              <label><span>最大并发生成数</span><span class="config-key-badge">inference.openai.max_concurrency</span></label>
-              <input type="number" id="cfg-form-openai-concurrency" class="input" min="1" max="128" placeholder="默认 4" oninput="markConfigDirty()">
-              <span class="config-field-desc">客户端异步请求并发度，根据 GPU 显存与推理服务算力调整</span>
+              <label><span>API Key 环境变量名</span><span class="config-key-badge">inference.openai.api_key_env</span></label>
+              <input type="text" id="cfg-form-openai-apikeyenv" class="input" placeholder="默认 OPENAI_API_KEY" oninput="markConfigDirty()">
+              <span class="config-field-desc">进程从该环境变量读取 Authorization 鉴权密钥，空或未设则回落 EMPTY</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>客户端最大并发生成数</span><span class="config-key-badge">inference.openai.max_concurrency</span></label>
+              <input type="number" id="cfg-form-openai-concurrency" class="input" min="1" max="128" placeholder="默认 8" oninput="markConfigDirty()">
+              <span class="config-field-desc">客户端异步并发请求数，根据 GPU 显存与服务吞吐调节</span>
             </div>
 
             <div class="config-field">
               <label><span>单次请求最大 Token</span><span class="config-key-badge">inference.openai.max_tokens</span></label>
-              <input type="number" id="cfg-form-openai-maxtokens" class="input" min="1" max="32768" placeholder="默认 1024" oninput="markConfigDirty()">
-              <span class="config-field-desc">控制输出文本截断长度，评测复杂描述任务建议 ≥ 1024</span>
+              <input type="number" id="cfg-form-openai-maxtokens" class="input" min="1" max="32768" placeholder="默认 512" oninput="markConfigDirty()">
+              <span class="config-field-desc">控制输出文本截断长度，评测复杂描述任务建议 ≥ 512</span>
             </div>
 
             <div class="config-field">
@@ -405,7 +411,25 @@
                 <input type="range" id="cfg-form-openai-temp-slider" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-openai-temp').value=this.value; markConfigDirty();">
                 <input type="number" id="cfg-form-openai-temp" class="input" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-openai-temp-slider').value=this.value; markConfigDirty();">
               </div>
-              <span class="config-field-desc">评测基准通常推荐 0.0 ~ 0.2，以保障输出稳定性与可复现性</span>
+              <span class="config-field-desc">0.0 表示贪心解码，评测基准推荐 0.0 以保障稳定可复现</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-P (Nucleus)</span><span class="config-key-badge">inference.openai.top_p</span></label>
+              <input type="number" id="cfg-form-openai-topp" class="input" min="0" max="1" step="0.05" placeholder="默认 1.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">累积概率采样阈值，1.0 表示不截断</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>请求超时秒数 (timeout)</span><span class="config-key-badge">inference.openai.request_timeout</span></label>
+              <input type="number" id="cfg-form-openai-timeout" class="input" min="1" step="5" placeholder="默认 120.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">单次 HTTP 请求超时上限（秒），长序列生成建议保持 120+</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>失败重试次数 (max_retries)</span><span class="config-key-badge">inference.openai.max_retries</span></label>
+              <input type="number" id="cfg-form-openai-maxretries" class="input" min="0" max="20" placeholder="默认 3" oninput="markConfigDirty()">
+              <span class="config-field-desc">遭遇网络波动或限频时带退避的重试上限次数</span>
             </div>
 
             <div class="config-field">
@@ -421,7 +445,7 @@
 
           <div class="config-field" style="margin-top: 1rem;">
             <label><span>系统提示词设定</span><span class="config-key-badge">inference.openai.system_prompt</span></label>
-            <textarea id="cfg-form-openai-sysprompt" class="textarea" rows="3" placeholder="（可选）设定 System 角色全局提示词" oninput="markConfigDirty()"></textarea>
+            <textarea id="cfg-form-openai-sysprompt" class="textarea" rows="2" placeholder="（可选）设定 System 角色全局提示词，留空则不追加" oninput="markConfigDirty()"></textarea>
             <span class="config-field-desc">在对话开头自动注入的 system 角色消息，留空则不追加</span>
           </div>
         </div>
@@ -429,39 +453,100 @@
         <!-- MNN 后端参数卡片 -->
         <div id="cfg-group-mnn" class="config-group-card" style="display: none;">
           <div class="config-group-title"><span>⚡</span><span>MNN 引擎离线参数 (inference.mnn.*)</span></div>
-          <div class="config-group-desc">阿里 MNN 极速离线推理后端，支持端侧与服务端多硬件加速</div>
+          <div class="config-group-desc">阿里 MNN 极速离线推理后端，支持端侧与服务端多硬件加速与 Value-gated 采样管线</div>
 
           <div class="config-grid-2">
-            <div class="config-field">
-              <label><span>MNN 配置文件路径</span><span class="config-key-badge">inference.mnn.config_path</span></label>
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>MNN 配置文件路径 (config.json)</span><span class="config-key-badge">inference.mnn.config_path</span></label>
               <div style="display: flex; gap: 0.5rem;">
-                <select id="cfg-form-mnn-model-select" class="select" style="width: 45%;" onchange="if(this.value) { document.getElementById('cfg-form-mnn-configpath').value=this.value; markConfigDirty(); }">
+                <select id="cfg-form-mnn-model-select" class="select" style="width: 35%;" onchange="if(this.value) { document.getElementById('cfg-form-mnn-configpath').value=this.value; markConfigDirty(); }">
                   <option value="">(选择已探测 MNN 模型)</option>
                 </select>
                 <input type="text" id="cfg-form-mnn-configpath" class="input" style="flex: 1;" placeholder="如 D:/models/qwen2-vl/config.json" oninput="markConfigDirty()">
               </div>
-              <span class="config-field-desc">MNN 模型的 config.json 或 .mnn 绝对路径，可从探测下拉框选取</span>
+              <span class="config-field-desc">MNN 模型的 config.json 路径，传给 MNN.llm.create()；所在目录名决定产物子目录名</span>
             </div>
 
             <div class="config-field">
-              <label><span>图片最长边限制 (像素)</span><span class="config-key-badge">inference.mnn.image_max_side</span></label>
-              <input type="number" id="cfg-form-mnn-maxside" class="input" min="64" step="32" placeholder="如 448 或 896" oninput="markConfigDirty()">
-              <span class="config-field-desc">图片预处理最长边限制，严格对齐 LlamaFactory 训练时的动态图像分辨率规则</span>
+              <label><span>单条输出最大 Token (max_tokens)</span><span class="config-key-badge">inference.mnn.max_tokens</span></label>
+              <input type="number" id="cfg-form-mnn-maxtokens" class="input" min="16" max="8192" placeholder="默认 1024" oninput="markConfigDirty()">
+              <span class="config-field-desc">作为 response 的 max_new_tokens，控制回答截断长度</span>
             </div>
 
             <div class="config-field">
               <label><span>采样温度 (Temperature)</span><span class="config-key-badge">inference.mnn.temperature</span></label>
               <div class="config-slider-wrap">
                 <input type="range" id="cfg-form-mnn-temp-slider" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-mnn-temp').value=this.value; markConfigDirty();">
-                <input type="number" id="cfg-form-mnn-temp" class="input" min="0" max="2" step="0.05" oninput="document.getElementById('cfg-form-mnn-temp-slider').value=this.value; markConfigDirty();">
+                <input type="number" id="cfg-form-mnn-temp" class="input" min="0" max="2" step="0.05" placeholder="0 表示确定性 argmax" oninput="document.getElementById('cfg-form-mnn-temp-slider').value=this.value; markConfigDirty();">
               </div>
+              <span class="config-field-desc">留空或 &le;0 为确定性贪心解码（可复现）；&gt;0 为温度随机采样</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-P (Nucleus)</span><span class="config-key-badge">inference.mnn.top_p</span></label>
+              <input type="number" id="cfg-form-mnn-topp" class="input" min="0" max="1" step="0.05" placeholder="留空关闭截断" oninput="markConfigDirty()">
+              <span class="config-field-desc">启用 nucleus 截断；仅在 temperature &gt; 0 随机采样时生效</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-K</span><span class="config-key-badge">inference.mnn.top_k</span></label>
+              <input type="number" id="cfg-form-mnn-topk" class="input" min="1" step="1" placeholder="留空关闭截断" oninput="markConfigDirty()">
+              <span class="config-field-desc">启用 top-k 截断，只在前 K 个候选里选；仅在随机采样时生效</span>
             </div>
 
             <div class="config-field">
               <label><span>重复惩罚系数 (repetition_penalty)</span><span class="config-key-badge">inference.mnn.repetition_penalty</span></label>
-              <input type="number" id="cfg-form-mnn-reppenalty" class="input" step="0.05" min="1.0" max="2.0" placeholder="默认 1.0" oninput="markConfigDirty()">
-              <span class="config-field-desc">大于 1.0 可有效抑制小参数量模型输出满屏重复换行退化现象</span>
+              <input type="number" id="cfg-form-mnn-reppenalty" class="input" step="0.05" min="1.0" max="2.5" placeholder="默认 1.1" oninput="markConfigDirty()">
+              <span class="config-field-desc">&gt;1.0 惩罚已出现 token；默认 1.1 可有效止住小模型 \n\n\n… 复读退化</span>
             </div>
+
+            <div class="config-field">
+              <label><span>词频惩罚系数 (frequency_penalty)</span><span class="config-key-badge">inference.mnn.frequency_penalty</span></label>
+              <input type="number" id="cfg-form-mnn-freqpenalty" class="input" step="0.05" min="0" max="2.0" placeholder="默认 0.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">&gt;0 按出现次数累加惩罚，专治同一字符/标点刷屏；0 为关闭</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>存在惩罚系数 (presence_penalty)</span><span class="config-key-badge">inference.mnn.presence_penalty</span></label>
+              <input type="number" id="cfg-form-mnn-prespenalty" class="input" step="0.05" min="0" max="2.0" placeholder="默认 0.0" oninput="markConfigDirty()">
+              <span class="config-field-desc">&gt;0 对出现过的 token 一次性惩罚；0 为关闭</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>惩罚窗口长度 (penalty_window)</span><span class="config-key-badge">inference.mnn.penalty_window</span></label>
+              <input type="number" id="cfg-form-mnn-penwindow" class="input" min="0" step="16" placeholder="默认 0 (整段历史)" oninput="markConfigDirty()">
+              <span class="config-field-desc">惩罚仅回看最近 N 个 token；0 表示整段历史</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>图片最长边限制 (image_max_side)</span><span class="config-key-badge">inference.mnn.image_max_side</span></label>
+              <input type="number" id="cfg-form-mnn-maxside" class="input" min="0" step="64" placeholder="默认 2048 (0为关闭)" oninput="markConfigDirty()">
+              <span class="config-field-desc">纯等比缩放兜底，超大图超过此上限将先等比缩小，防止原生层 OOM/Crash</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最大像素 (image_max_pixels)</span><span class="config-key-badge">inference.mnn.image_max_pixels</span></label>
+              <input type="number" id="cfg-form-mnn-imgmaxpixels" class="input" placeholder="默认 589824 (768*768)" oninput="markConfigDirty()">
+              <span class="config-field-desc">严格对齐 LlamaFactory 训练时的总像素上限，不做缩小会导致 token 远超训练分布</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>视觉输入最小像素 (image_min_pixels)</span><span class="config-key-badge">inference.mnn.image_min_pixels</span></label>
+              <input type="number" id="cfg-form-mnn-imgminpixels" class="input" placeholder="默认 1024 (32*32)" oninput="markConfigDirty()">
+              <span class="config-field-desc">总像素下限，过小的图按 sqrt 因子放大，&le;0 关闭</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>量化配方标签 (quant)</span><span class="config-key-badge">inference.mnn.quant</span></label>
+              <input type="text" id="cfg-form-mnn-quant" class="input" placeholder="如 hqq-4bit, w4a16 等" oninput="markConfigDirty()">
+              <span class="config-field-desc">纯记录用，落进 run_meta 供并在并排对比报告中展示量化档位</span>
+            </div>
+          </div>
+
+          <div class="config-field" style="margin-top: 1rem;">
+            <label><span>系统提示词设定</span><span class="config-key-badge">inference.mnn.system_prompt</span></label>
+            <textarea id="cfg-form-mnn-sysprompt" class="textarea" rows="2" placeholder="（可选）经 set_config 下发给 MNN 引擎拼进对话模板，应与训练保持一致" oninput="markConfigDirty()"></textarea>
+            <span class="config-field-desc">经 set_config 下发给 MNN 引擎拼进对话模板，若未设则沿用模型 config.json 自带系统提示</span>
           </div>
         </div>
 
@@ -501,6 +586,12 @@
               <label><span>引擎最大并发序列数</span><span class="config-key-badge">max_num_seqs</span></label>
               <input type="number" id="cfg-form-vllm-maxnumseqs" class="input" min="1" max="512" placeholder="默认 128" oninput="markConfigDirty()">
               <span class="config-field-desc">vLLM 内部调度并发 Batch 大小</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>单 Batch 最大 Token 数</span><span class="config-key-badge">max_num_batched_tokens</span></label>
+              <input type="number" id="cfg-form-vllm-maxbatchedtokens" class="input" min="512" max="131072" step="1024" placeholder="默认 20480" oninput="markConfigDirty()">
+              <span class="config-field-desc">单个迭代中所有并发序列累加的最大 Token 处理上限</span>
             </div>
 
             <div class="config-field">
@@ -861,9 +952,9 @@
         </div>
       </div>
 
-      <!-- 任务直接启动与参数控制台 (消除黑盒，所见即所得) -->
-      <div class="dataset-card" style="margin-bottom: 1.75rem; border: 1px solid var(--border-subtle); background: var(--bg-surface-elevated);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+      <!-- 任务直接启动与参数控制台 (消除黑盒，所见即所得，多尺寸自适应) -->
+      <div class="dataset-card job-launcher-card">
+        <div class="job-launcher-header">
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <span style="font-size: 1.3rem;">⚡</span>
             <div>
@@ -872,19 +963,21 @@
             </div>
           </div>
 
-          <!-- 任务类型选择器 -->
-          <div id="job-inline-type-tabs" class="segmented-control">
-            <button class="segmented-btn active" id="btn-type-field-eval" onclick="switchInlineJobType('field-eval')">🏷️ 字段评测 (field-eval)</button>
-            <button class="segmented-btn" id="btn-type-eval" onclick="switchInlineJobType('eval')">🚀 对话评测 (eval)</button>
-            <button class="segmented-btn" id="btn-type-pred" onclick="switchInlineJobType('pred')">⚡ 仅推理 (pred)</button>
-            <button class="segmented-btn" id="btn-type-score" onclick="switchInlineJobType('score')">🎯 仅打分 (score)</button>
-            <button class="segmented-btn" id="btn-type-sweep" onclick="switchInlineJobType('sweep')">🌐 跨数据集扫描 (sweep)</button>
+          <!-- 任务类型选择器 (支持窄屏横向平滑滚动) -->
+          <div class="job-type-segmented-wrap">
+            <div id="job-inline-type-tabs" class="segmented-control">
+              <button class="segmented-btn active" id="btn-type-field-eval" onclick="switchInlineJobType('field-eval')">🏷️ 字段评测 (field-eval)</button>
+              <button class="segmented-btn" id="btn-type-eval" onclick="switchInlineJobType('eval')">🚀 对话评测 (eval)</button>
+              <button class="segmented-btn" id="btn-type-pred" onclick="switchInlineJobType('pred')">⚡ 仅推理 (pred)</button>
+              <button class="segmented-btn" id="btn-type-score" onclick="switchInlineJobType('score')">🎯 仅打分 (score)</button>
+              <button class="segmented-btn" id="btn-type-sweep" onclick="switchInlineJobType('sweep')">🌐 跨数据集扫描 (sweep)</button>
+            </div>
           </div>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 1.1rem;">
-          <!-- 数据集与通用参数 -->
-          <div style="display: grid; grid-template-columns: 1.1fr 1fr 1.8fr 0.7fr auto; gap: 0.85rem; align-items: flex-end;">
+          <!-- 数据集与通用参数响应式栅格 -->
+          <div class="job-launcher-grid">
             <div>
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">目标数据集 (Dataset)</label>
               <select id="job-inline-dataset" class="select" style="width: 100%;" onchange="updateInlineJobPreview()"></select>
@@ -899,26 +992,26 @@
                 <option value="vllm_offline">vllm_offline (本地 vLLM 离线推理)</option>
               </select>
             </div>
-            <div>
+            <div class="job-grid-col-model">
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
                 <span id="job-inline-model-label">模型覆盖 (--model)</span>
                 <span id="job-inline-model-badge" class="config-key-badge" style="font-size: 0.68rem;">--model</span>
               </label>
-              <div style="display: flex; gap: 0.4rem;">
-                <select id="job-inline-model-select" class="select" style="flex: 1; min-width: 140px;" onchange="onJobInlineModelSelectChange()">
+              <div class="job-model-picker">
+                <select id="job-inline-model-select" class="select" onchange="onJobInlineModelSelectChange()">
                   <option value="">-- 选择已探测模型 --</option>
                   <optgroup id="job-optgroup-hf" label="🤗 HF / vLLM 模型"></optgroup>
                   <optgroup id="job-optgroup-mnn" label="⚡ MNN 离线模型"></optgroup>
                   <option value="__custom__">✏️ 自定义输入 / 路径</option>
                 </select>
-                <input type="text" id="job-inline-model" class="input" style="flex: 1.2; min-width: 120px;" placeholder="留空读配置，或从左侧下拉选取" oninput="updateInlineJobPreview()">
+                <input type="text" id="job-inline-model" class="input" placeholder="留空读配置，或从左侧下拉选取" oninput="updateInlineJobPreview()">
               </div>
             </div>
             <div>
               <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">冒烟条数 (--limit)</label>
               <input type="number" id="job-inline-limit" class="input" style="width: 100%;" placeholder="跑全量" min="1" oninput="updateInlineJobPreview()">
             </div>
-            <div style="padding-bottom: 0.45rem;">
+            <div class="job-grid-col-failfast">
               <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap;">
                 <input type="checkbox" id="job-inline-failfast" onchange="updateInlineJobPreview()">
                 <span>遇错即终止 (--fail-fast)</span>
@@ -929,7 +1022,7 @@
           <!-- 字段评测 (field-eval) 专属参数 -->
           <div id="job-inline-field-eval-params" style="background: rgba(6, 182, 212, 0.06); border: 1px solid rgba(6, 182, 212, 0.25); padding: 0.85rem 1rem; border-radius: var(--radius-md);">
             <div style="font-weight: 600; color: var(--cyan-500); margin-bottom: 0.6rem; font-size: 0.82rem;">🏷️ 字段抽取评测专用参数 (Field-Eval Settings)</div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; align-items: center;">
+            <div class="job-subparams-grid">
               <div>
                 <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">匹配判定模式 (--match-mode)</label>
                 <select id="job-inline-matchmode" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
@@ -945,7 +1038,7 @@
                   <option value="last">last (仅最后一轮)</option>
                 </select>
               </div>
-              <div style="padding-top: 1rem;">
+              <div style="padding-top: 0.5rem;">
                 <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
                   <input type="checkbox" id="job-inline-overwrite" onchange="updateInlineJobPreview()">
                   <span>强制重新抽取 (--overwrite)</span>
@@ -957,7 +1050,7 @@
           <!-- 对话打分 (eval / score) 专属参数 -->
           <div id="job-inline-eval-params" style="display: none; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); padding: 0.85rem 1rem; border-radius: var(--radius-md);">
             <div style="font-weight: 600; color: var(--emerald-500); margin-bottom: 0.6rem; font-size: 0.82rem;">💬 对话打分专用参数 (Eval Settings)</div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+            <div class="job-subparams-grid">
               <div>
                 <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">打分器类型 (--scorer)</label>
                 <select id="job-inline-scorer" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
@@ -982,8 +1075,8 @@
           </div>
 
           <!-- 实时命令预览与启动栏 -->
-          <div style="display: flex; gap: 1rem; align-items: stretch; margin-top: 0.25rem; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 0.4rem;">
+          <div class="job-launcher-actions">
+            <div class="job-preview-wrapper">
               <div class="code-preview-box" style="margin: 0; padding: 0.65rem 0.9rem;">
                 <div class="code-preview-title" style="margin-bottom: 0.35rem;">
                   <span>🖥️ 即将执行的完整 CLI 指令预览</span>
@@ -997,7 +1090,7 @@
               </div>
             </div>
 
-            <button class="btn btn-primary" style="min-width: 170px; font-size: 0.95rem; font-weight: 700; background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);" onclick="submitInlineJob()">
+            <button class="btn btn-primary job-submit-btn" onclick="submitInlineJob()">
               🚀 立即提交任务
             </button>
           </div>

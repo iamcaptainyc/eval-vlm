@@ -141,3 +141,72 @@ def test_api_auth_token_enforcement(tmp_path, monkeypatch):
     # 附带正确 Bearer Token
     ok_resp = client.get("/api/datasets", headers={"Authorization": "Bearer secret123"})
     assert ok_resp.status_code == 200
+
+
+def test_api_config_all_backends_full_parameters(api_client):
+    """验证所有推理引擎后端（MNN 完整参数、OpenAI 扩展参数、vLLM Offline 批处理参数）的读写配置持久化。"""
+    client, ds_name, cfg, _ = api_client
+
+    updates = [
+        {"key": "inference.backend", "value": "mnn"},
+        # MNN 完整参数
+        {"key": "inference.mnn.config_path", "value": "/models/mnn/config.json"},
+        {"key": "inference.mnn.quant", "value": "int4"},
+        {"key": "inference.mnn.system_prompt", "value": "You are an expert evaluator."},
+        {"key": "inference.mnn.max_tokens", "value": 2048},
+        {"key": "inference.mnn.temperature", "value": 0.7},
+        {"key": "inference.mnn.top_p", "value": 0.85},
+        {"key": "inference.mnn.top_k", "value": 40},
+        {"key": "inference.mnn.repetition_penalty", "value": 1.15},
+        {"key": "inference.mnn.frequency_penalty", "value": 0.3},
+        {"key": "inference.mnn.presence_penalty", "value": 0.2},
+        {"key": "inference.mnn.penalty_window", "value": 128},
+        {"key": "inference.mnn.image_max_side", "value": 1024},
+        {"key": "inference.mnn.image_max_pixels", "value": 1048576},
+        {"key": "inference.mnn.image_min_pixels", "value": 4096},
+        # OpenAI 补充参数
+        {"key": "inference.openai.api_key_env", "value": "CUSTOM_OPENAI_KEY"},
+        {"key": "inference.openai.top_p", "value": 0.95},
+        {"key": "inference.openai.request_timeout", "value": 90.0},
+        {"key": "inference.openai.max_retries", "value": 5},
+        # vLLM Offline 补充参数
+        {"key": "inference.vllm_offline.max_num_batched_tokens", "value": 8192},
+    ]
+
+    w_resp = client.put(f"/api/datasets/{ds_name}/config", json={"updates": updates})
+    assert w_resp.status_code == 200
+    assert w_resp.json()["success"] is True
+
+    # 通过 GET /api/datasets/{ds_name}/config 读回
+    r_resp = client.get(f"/api/datasets/{ds_name}/config")
+    assert r_resp.status_code == 200
+    cfg_data = r_resp.json().get("config", {})
+
+    inf = cfg_data.get("inference", {})
+    assert inf.get("backend") == "mnn"
+
+    mnn = inf.get("mnn", {})
+    assert mnn.get("config_path") == "/models/mnn/config.json"
+    assert mnn.get("quant") == "int4"
+    assert mnn.get("system_prompt") == "You are an expert evaluator."
+    assert mnn.get("max_tokens") == 2048
+    assert mnn.get("temperature") == 0.7
+    assert mnn.get("top_p") == 0.85
+    assert mnn.get("top_k") == 40
+    assert mnn.get("repetition_penalty") == 1.15
+    assert mnn.get("frequency_penalty") == 0.3
+    assert mnn.get("presence_penalty") == 0.2
+    assert mnn.get("penalty_window") == 128
+    assert mnn.get("image_max_side") == 1024
+    assert mnn.get("image_max_pixels") == 1048576
+    assert mnn.get("image_min_pixels") == 4096
+
+    openai = inf.get("openai", {})
+    assert openai.get("api_key_env") == "CUSTOM_OPENAI_KEY"
+    assert openai.get("top_p") == 0.95
+    assert openai.get("request_timeout") == 90.0
+    assert openai.get("max_retries") == 5
+
+    vllm = inf.get("vllm_offline", {})
+    assert vllm.get("max_num_batched_tokens") == 8192
+

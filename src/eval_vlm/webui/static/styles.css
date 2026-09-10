@@ -984,6 +984,92 @@ table.ui-table tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* 任务队列调度控制台与多尺寸排版适配 (Task Queue Launcher) */
+.job-launcher-card {
+  margin-bottom: 1.75rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-elevated);
+}
+
+.job-launcher-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.job-type-segmented-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+.job-type-segmented-wrap .segmented-control {
+  white-space: nowrap;
+}
+
+.job-launcher-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(150px, 1fr) minmax(280px, 2fr) minmax(100px, 0.7fr) auto;
+  gap: 0.85rem;
+  align-items: flex-end;
+}
+
+.job-model-picker {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.job-model-picker select {
+  flex: 1;
+  min-width: 130px;
+}
+
+.job-model-picker input {
+  flex: 1.2;
+  min-width: 120px;
+}
+
+.job-subparams-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 1.15rem;
+  align-items: flex-end;
+}
+
+.job-launcher-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.job-launcher-actions .job-preview-wrapper {
+  flex: 1;
+  min-width: min(100%, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.job-launcher-actions .job-submit-btn {
+  min-width: 170px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
 /* 实时终端抽屉 (Terminal Drawer) */
 .terminal-drawer {
   position: fixed;
@@ -1822,6 +1908,46 @@ table.ui-table tr:hover {
   .model-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
   }
+
+  /* 任务调度栏小屏笔记本适配 */
+  .job-launcher-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .job-type-segmented-wrap {
+    width: 100%;
+  }
+
+  .job-type-segmented-wrap .segmented-control {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .job-type-segmented-wrap .segmented-btn {
+    flex: 1;
+    min-width: max-content;
+    text-align: center;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  .job-launcher-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+  }
+
+  .job-launcher-grid .job-grid-col-model {
+    grid-column: 1 / -1;
+  }
+
+  .job-launcher-grid .job-grid-col-failfast {
+    display: flex;
+    align-items: center;
+    padding-bottom: 0.4rem;
+  }
 }
 
 /* 平板竖屏适配 (<= 768px) */
@@ -1903,6 +2029,35 @@ table.ui-table tr:hover {
 
   .config-backend-cards {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* 任务调度移动端单列排版 */
+  .job-launcher-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .job-launcher-grid .job-grid-col-model {
+    grid-column: 1 / -1;
+  }
+
+  .job-model-picker {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .job-model-picker select,
+  .job-model-picker input {
+    width: 100%;
+  }
+
+  .job-launcher-actions {
+    flex-direction: column;
+  }
+
+  .job-launcher-actions .job-submit-btn {
+    width: 100%;
+    padding: 0.85rem 1rem;
   }
 
   .terminal-drawer {
