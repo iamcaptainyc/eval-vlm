@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260910b">
+  <script src="app.js?v=20260910b" defer></script>
 </head>
 <body>
 
@@ -197,13 +197,146 @@
           <p class="section-subtitle">串行化异步调度，子进程执行 CLI，透明化命令与日志落盘</p>
         </div>
         <div class="control-bar-right">
-          <button class="btn btn-primary" onclick="openJobModal('eval')">🚀 一键评测 (eval)</button>
-          <button class="btn btn-primary" style="background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);" onclick="openJobModal('field-eval')">🏷️ 字段评测 (field-eval)</button>
-          <button class="btn" onclick="openJobModal('pred')">⚡ 仅推理 (pred)</button>
-          <button class="btn" onclick="openJobModal('score')">🎯 仅打分 (score)</button>
-          <button class="btn" onclick="openJobModal('sweep')">🌐 跨数据集扫描 (sweep)</button>
-          <button class="btn" onclick="loadJobs()">🔄 刷新列表</button>
+          <button class="btn btn-primary" onclick="loadJobs()">🔄 刷新列表</button>
         </div>
+      </div>
+
+      <!-- 任务直接启动与参数控制台 (消除黑盒，所见即所得) -->
+      <div class="dataset-card" style="margin-bottom: 1.75rem; border: 1px solid var(--border-subtle); background: var(--bg-surface-elevated);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.3rem;">⚡</span>
+            <div>
+              <h3 style="font-size: 1.1rem; color: #fff; margin: 0;">发起评测与推理任务</h3>
+              <p style="font-size: 0.78rem; color: var(--text-dim); margin: 0.2rem 0 0 0;">自由选择数据集、评测类型与模型参数，实时生成底层 CLI 命令行与日志路径</p>
+            </div>
+          </div>
+
+          <!-- 任务类型选择器 -->
+          <div id="job-inline-type-tabs" class="segmented-control">
+            <button class="segmented-btn active" id="btn-type-field-eval" onclick="switchInlineJobType('field-eval')">🏷️ 字段评测 (field-eval)</button>
+            <button class="segmented-btn" id="btn-type-eval" onclick="switchInlineJobType('eval')">🚀 对话评测 (eval)</button>
+            <button class="segmented-btn" id="btn-type-pred" onclick="switchInlineJobType('pred')">⚡ 仅推理 (pred)</button>
+            <button class="segmented-btn" id="btn-type-score" onclick="switchInlineJobType('score')">🎯 仅打分 (score)</button>
+            <button class="segmented-btn" id="btn-type-sweep" onclick="switchInlineJobType('sweep')">🌐 跨数据集扫描 (sweep)</button>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 1.1rem;">
+          <!-- 数据集与通用参数 -->
+          <div style="display: grid; grid-template-columns: 1.3fr 1.1fr 1.2fr 0.8fr 1fr; gap: 1rem; align-items: flex-end;">
+            <div>
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">目标数据集 (Dataset)</label>
+              <select id="job-inline-dataset" class="select" style="width: 100%;" onchange="updateInlineJobPreview()"></select>
+            </div>
+            <div>
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">推理后端 (--backend)</label>
+              <select id="job-inline-backend" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                <option value="">(读取配置文件)</option>
+                <option value="openai">openai (兼容 API)</option>
+                <option value="mnn">mnn (本地 MNN 离线推理)</option>
+                <option value="hf">hf (本地 HuggingFace)</option>
+                <option value="vllm_offline">vllm_offline (本地 vLLM 离线推理)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">模型名覆盖 (--model)</label>
+              <input type="text" id="job-inline-model" class="input" style="width: 100%;" placeholder="留空读取配置文件" oninput="updateInlineJobPreview()">
+            </div>
+            <div>
+              <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">冒烟条数 (--limit)</label>
+              <input type="number" id="job-inline-limit" class="input" style="width: 100%;" placeholder="跑全量" min="1" oninput="updateInlineJobPreview()">
+            </div>
+            <div style="padding-bottom: 0.45rem;">
+              <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
+                <input type="checkbox" id="job-inline-failfast" onchange="updateInlineJobPreview()">
+                <span>遇错即终止 (--fail-fast)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 字段评测 (field-eval) 专属参数 -->
+          <div id="job-inline-field-eval-params" style="background: rgba(6, 182, 212, 0.06); border: 1px solid rgba(6, 182, 212, 0.25); padding: 0.85rem 1rem; border-radius: var(--radius-md);">
+            <div style="font-weight: 600; color: var(--cyan-500); margin-bottom: 0.6rem; font-size: 0.82rem;">🏷️ 字段抽取评测专用参数 (Field-Eval Settings)</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; align-items: center;">
+              <div>
+                <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">匹配判定模式 (--match-mode)</label>
+                <select id="job-inline-matchmode" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                  <option value="exact">exact (严格双向相等 set(ref)==set(pred))</option>
+                  <option value="contain">contain (包含即算对 set(ref)⊆set(pred))</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测指定轮次 (--targets)</label>
+                <select id="job-inline-targets" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                  <option value="first">first (仅第一轮描述，默认)</option>
+                  <option value="all">all (全部 assistant 轮)</option>
+                  <option value="last">last (仅最后一轮)</option>
+                </select>
+              </div>
+              <div style="padding-top: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">
+                  <input type="checkbox" id="job-inline-overwrite" onchange="updateInlineJobPreview()">
+                  <span>强制重新抽取 (--overwrite)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 对话打分 (eval / score) 专属参数 -->
+          <div id="job-inline-eval-params" style="display: none; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); padding: 0.85rem 1rem; border-radius: var(--radius-md);">
+            <div style="font-weight: 600; color: var(--emerald-500); margin-bottom: 0.6rem; font-size: 0.82rem;">💬 对话打分专用参数 (Eval Settings)</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+              <div>
+                <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">打分器类型 (--scorer)</label>
+                <select id="job-inline-scorer" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                  <option value="">(保持配置默认)</option>
+                  <option value="exact_match">exact_match</option>
+                  <option value="token_f1">token_f1</option>
+                  <option value="contain">contain</option>
+                  <option value="bleu">bleu</option>
+                  <option value="rouge">rouge</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">评测目标轮次 (--targets)</label>
+                <select id="job-inline-eval-targets" class="select" style="width: 100%;" onchange="updateInlineJobPreview()">
+                  <option value="">(保持配置默认)</option>
+                  <option value="all">all (全部 assistant 轮)</option>
+                  <option value="last">last (仅最后一轮)</option>
+                  <option value="first">first (仅第一轮图像描述)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- 实时命令预览与启动栏 -->
+          <div style="display: flex; gap: 1rem; align-items: stretch; margin-top: 0.25rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 0.4rem;">
+              <div class="code-preview-box" style="margin: 0; padding: 0.65rem 0.9rem;">
+                <div class="code-preview-title" style="margin-bottom: 0.35rem;">
+                  <span>🖥️ 即将执行的完整 CLI 指令预览</span>
+                  <span style="font-size: 0.7rem; color: var(--cyan-500);">非黑盒执行</span>
+                </div>
+                <code id="job-inline-cmd-preview" style="font-size: 0.82rem;">python -m eval_vlm field-eval ...</code>
+              </div>
+              <div class="log-path-notice" style="margin: 0; padding: 0.5rem 0.85rem; font-size: 0.75rem;">
+                <span>📁 日志文件落盘位置：</span>
+                <code id="job-inline-log-destination">.../_webui/jobs/&lt;job_id&gt;/log.txt</code>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" style="min-width: 170px; font-size: 0.95rem; font-weight: 700; background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);" onclick="submitInlineJob()">
+              🚀 立即提交任务
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务历史与队列列表 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <h3 style="font-size: 1rem; color: #fff; margin: 0;">📋 调度队列与执行历史</h3>
+        <span style="font-size: 0.78rem; color: var(--text-dim);">点击【🖥️ 实时日志】即可展开终端抽屉实时查看标准输出</span>
       </div>
 
       <div class="data-table-container">

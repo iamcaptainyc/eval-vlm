@@ -143,7 +143,10 @@ function switchTab(tab, dataset = null, updateHash = true) {
   if (tab === "datasets") loadDatasets();
   if (tab === "gallery") loadSamples(0);
   if (tab === "config") loadConfig();
-  if (tab === "jobs") loadJobs();
+  if (tab === "jobs") {
+    initInlineJobConsole();
+    loadJobs();
+  }
   if (tab === "runs") loadRuns();
   if (tab === "trash") loadTrash();
   if (tab === "health") loadHealth();
@@ -187,6 +190,7 @@ async function loadDatasets() {
       updateHeaderDatasetPill();
     }
     renderDatasets();
+    initInlineJobConsole();
   } catch (err) {
     showToast("获取数据集列表失败", "error");
   }
@@ -817,6 +821,143 @@ async function confirmLaunchJob() {
     openTerminal(job.id);
   } catch (err) {
     showToast(`启动任务失败: ${err.message}`, "error");
+  }
+}
+
+// --------------------------------------------------------------------------
+// 任务面板内联启动控制台 (Inline Launch Console)
+// --------------------------------------------------------------------------
+let inlineJobType = "field-eval";
+
+function initInlineJobConsole() {
+  const dsSelect = document.getElementById("job-inline-dataset");
+  if (dsSelect) {
+    if (inlineJobType === "sweep") {
+      dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
+    } else {
+      dsSelect.innerHTML = (state.datasets || [])
+        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+        .join("");
+    }
+  }
+  updateInlineJobPreview();
+}
+
+function switchInlineJobType(type) {
+  inlineJobType = type;
+  const types = ["field-eval", "eval", "pred", "score", "sweep"];
+  types.forEach((t) => {
+    const btn = document.getElementById(`btn-type-${t}`);
+    if (btn) btn.classList.toggle("active", t === type);
+  });
+
+  const feParams = document.getElementById("job-inline-field-eval-params");
+  const evalParams = document.getElementById("job-inline-eval-params");
+  if (feParams) feParams.style.display = type === "field-eval" ? "block" : "none";
+  if (evalParams) evalParams.style.display = (type === "eval" || type === "score") ? "block" : "none";
+
+  const dsSelect = document.getElementById("job-inline-dataset");
+  if (dsSelect) {
+    if (type === "sweep") {
+      dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
+    } else {
+      dsSelect.innerHTML = (state.datasets || [])
+        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+        .join("");
+    }
+  }
+
+  updateInlineJobPreview();
+}
+
+function updateInlineJobPreview() {
+  const type = inlineJobType;
+  const dsSelect = document.getElementById("job-inline-dataset");
+  const dsName = dsSelect ? dsSelect.value : state.currentDataset;
+
+  const backend = document.getElementById("job-inline-backend")?.value;
+  const model = document.getElementById("job-inline-model")?.value?.trim();
+  const limit = document.getElementById("job-inline-limit")?.value?.trim();
+  const failfast = document.getElementById("job-inline-failfast")?.checked;
+
+  const parts = ["python", "-m", "eval_vlm", type];
+  if (dsName) parts.push("-d", dsName);
+  if (backend) parts.push("--backend", backend);
+  if (model) parts.push("--model", model);
+  if (limit) parts.push("--limit", limit);
+  if (failfast) parts.push("--fail-fast");
+
+  if (type === "field-eval") {
+    const matchMode = document.getElementById("job-inline-matchmode")?.value;
+    const targets = document.getElementById("job-inline-targets")?.value;
+    const overwrite = document.getElementById("job-inline-overwrite")?.checked;
+    if (matchMode && matchMode !== "exact") parts.push("--match-mode", matchMode);
+    if (targets && targets !== "first") parts.push("--targets", targets);
+    if (overwrite) parts.push("--overwrite");
+  } else if (type === "eval" || type === "score") {
+    const scorer = document.getElementById("job-inline-scorer")?.value;
+    const targets = document.getElementById("job-inline-eval-targets")?.value;
+    if (scorer) parts.push("--scorer", scorer);
+    if (targets) parts.push("--targets", targets);
+  }
+
+  const cmdStr = parts.join(" ");
+  const previewEl = document.getElementById("job-inline-cmd-preview");
+  if (previewEl) previewEl.textContent = cmdStr;
+
+  const logDest = document.getElementById("job-inline-log-destination");
+  if (logDest) {
+    logDest.textContent = `.../_webui/jobs/<job_id>/log.txt (工作区状态目录)`;
+  }
+}
+
+async function submitInlineJob() {
+  const type = inlineJobType;
+  const dsSelect = document.getElementById("job-inline-dataset");
+  const dataset = dsSelect ? dsSelect.value : state.currentDataset;
+
+  const backend = document.getElementById("job-inline-backend")?.value;
+  const model = document.getElementById("job-inline-model")?.value?.trim();
+  const limit = document.getElementById("job-inline-limit")?.value?.trim();
+  const failfast = document.getElementById("job-inline-failfast")?.checked;
+
+  const params = {};
+  if (backend) params.backend = backend;
+  if (model) params.model = model;
+  if (limit) params.limit = parseInt(limit, 10);
+  if (failfast) params.fail_fast = true;
+
+  if (type === "field-eval") {
+    const matchMode = document.getElementById("job-inline-matchmode")?.value;
+    const targets = document.getElementById("job-inline-targets")?.value;
+    const overwrite = document.getElementById("job-inline-overwrite")?.checked;
+    if (matchMode) params.match_mode = matchMode;
+    if (targets) params.targets = targets;
+    if (overwrite) params.overwrite = true;
+  } else if (type === "eval" || type === "score") {
+    const scorer = document.getElementById("job-inline-scorer")?.value;
+    const targets = document.getElementById("job-inline-eval-targets")?.value;
+    if (scorer) params.scorer = scorer;
+    if (targets) params.targets = targets;
+  }
+
+  try {
+    const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, dataset, params }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const job = await res.json();
+    showToast(`任务已成功提交入队: ${job.id}`, "success");
+    await loadJobs();
+    openTerminal(job.id);
+  } catch (err) {
+    showToast(`提交任务失败: ${err.message}`, "error");
   }
 }
 
@@ -1558,3 +1699,7 @@ window.switchRunMethod = switchRunMethod;
 window.loadScored = loadScored;
 window.loadFieldMismatches = loadFieldMismatches;
 window.showToast = showToast;
+window.initInlineJobConsole = initInlineJobConsole;
+window.switchInlineJobType = switchInlineJobType;
+window.updateInlineJobPreview = updateInlineJobPreview;
+window.submitInlineJob = submitInlineJob;
