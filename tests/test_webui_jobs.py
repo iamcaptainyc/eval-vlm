@@ -127,3 +127,36 @@ def test_cli_targets_and_limit_parsing():
     assert isinstance(args_pred.targets, int)
     assert args_pred.limit == 15
 
+
+@pytest.mark.anyio
+async def test_job_worker_execution_and_log_emission(tmp_path):
+    """测试任务调度器在活跃事件循环中正确执行子进程并输出日志。"""
+    settings = Settings(workspace_dir=tmp_path)
+    mgr = JobManager(settings)
+    loop = asyncio.get_running_loop()
+    mgr.start_worker(loop=loop)
+
+    summary = mgr.submit_job(
+        job_type="sweep",
+        dataset="demo_ds",
+        params={"backend": "fake", "dry_run": True},
+        user="test_worker",
+    )
+    assert summary.id in mgr.jobs
+
+    # 等待任务进入运行或完成
+    for _ in range(30):
+        await asyncio.sleep(0.1)
+        job = mgr.get_job(summary.id)
+        if job and job.status in ("succeeded", "failed"):
+            break
+
+    job = mgr.get_job(summary.id)
+    assert job is not None
+    assert job.status in ("succeeded", "failed")
+    assert job.log_file.exists()
+    log_content = job.log_file.read_text(encoding="utf-8")
+    assert "=== 正在启动任务" in log_content
+    assert "=== 任务进程已就绪" in log_content
+
+

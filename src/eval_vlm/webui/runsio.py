@@ -1,9 +1,11 @@
 """运行结果、指标与报告查看服务。"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Optional
+import urllib.parse
 
 from fastapi import HTTPException, status
 from fastapi.responses import FileResponse, HTMLResponse
@@ -34,6 +36,8 @@ def list_runs(cfg: Config) -> list[RunSummary]:
         metrics_file = rdir / "metrics.json"
         scored_file = rdir / "scored.jsonl"
         failures_file = rdir / "failures.html"
+        if not failures_file.exists() and (rdir / "failure.html").exists():
+            failures_file = rdir / "failure.html"
         dirty_file = rdir / "dataset_dirty.json"
         meta_file = rdir / "run_meta.json"
 
@@ -41,6 +45,8 @@ def list_runs(cfg: Config) -> list[RunSummary]:
         field_metrics_file = rdir / "field_metrics.json"
         field_mismatches_file = rdir / "field_mismatches.json"
         field_mismatches_html = rdir / "field_mismatches.html"
+        if not field_mismatches_html.exists() and (rdir / "field_mismatch.html").exists():
+            field_mismatches_html = rdir / "field_mismatch.html"
 
         is_stale = False
         stale_reason: Optional[str] = None
@@ -234,24 +240,87 @@ def get_field_mismatches_records(
 
 
 def serve_failures_html(cfg: Config, model: str, backend: str) -> FileResponse:
-    """返回生成的 failures.html 文件。"""
+    """返回生成的 failures.html 文件 (兼容 failure.html 命名)。"""
     rdir = _find_run_dir(cfg, model, backend)
     failures_file = rdir / "failures.html"
     if not failures_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="该运行未生成 failures.html (可能全部命中或未运行 evaluate)",
-        )
+        if (rdir / "failure.html").exists():
+            failures_file = rdir / "failure.html"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{model}/{backend} 未生成 failures.html (或 failure.html)，可能全部命中或尚未运行 eval",
+            )
     return FileResponse(path=str(failures_file), media_type="text/html")
 
 
 def serve_field_mismatches_html(cfg: Config, model: str, backend: str) -> FileResponse:
-    """返回生成的 field_mismatches.html 文件。"""
+    """返回生成的 field_mismatches.html 文件 (兼容 field_mismatch.html 命名)。"""
     rdir = _find_run_dir(cfg, model, backend)
     html_file = rdir / "field_mismatches.html"
     if not html_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到 field_mismatches.html",
-        )
+        if (rdir / "field_mismatch.html").exists():
+            html_file = rdir / "field_mismatch.html"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{model}/{backend} 缺少 field_mismatches.html",
+            )
     return FileResponse(path=str(html_file), media_type="text/html")
+
+
+def list_dataset_html_files(cfg: Config) -> list[dict[str, Any]]:
+    """递归检索当前数据集目录下的全部 HTML 报告/可视化文件 (含 failures.html, field_mismatches.html 等)。"""
+    if not cfg.dataset_dir.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for p in sorted(cfg.dataset_dir.rglob("*.html")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(cfg.dataset_dir).as_posix()
+        # 排除隐藏或状态目录
+        if any(part.startswith(".") or part.startswith("_") for part in p.parts):
+            continue
+        st = p.stat()
+        items.append({
+            "name": p.name,
+            "path": rel,
+            "size": st.st_size,
+            "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+            "url": f"/api/datasets/{urllib.parse.quote(cfg.dataset_dir.name)}/html-view?path={urllib.parse.quote(rel)}",
+        })
+    return items
+
+
+def serve_dataset_html(cfg: Config, rel_path: str) -> FileResponse:
+    """安全读取并返回数据集目录内的 HTML 文件，严防路径穿越并支持友好回退查找。"""
+    clean_path = rel_path.strip().replace("\\", "/").lstrip("/")
+    target = (cfg.dataset_dir / clean_path).resolve()
+    ds_root = cfg.dataset_dir.resolve()
+    if not str(target).startswith(str(ds_root)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="非法路径访问：禁止访问数据集目录之外的文件",
+        )
+
+    if not target.exists() or not target.is_file():
+        # 容错查找：如传入 failure.html，自动在数据集内寻找 failures.html 等
+        fname = Path(clean_path).name.lower()
+        candidates: list[Path] = []
+        if fname in ("failure.html", "failures.html"):
+            candidates = list(cfg.dataset_dir.rglob("*failure*.html"))
+        elif "mismatch" in fname:
+            candidates = list(cfg.dataset_dir.rglob("*mismatch*.html"))
+        else:
+            candidates = list(cfg.dataset_dir.rglob(Path(clean_path).name))
+
+        valid_candidates = [c for c in candidates if c.is_file() and not c.name.startswith(".")]
+        if valid_candidates:
+            target = valid_candidates[0].resolve()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"在数据集 {cfg.dataset_dir.name} 中未找到 HTML 文件: {clean_path}",
+            )
+
+    return FileResponse(path=str(target), media_type="text/html")

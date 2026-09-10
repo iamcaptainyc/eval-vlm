@@ -1,6 +1,8 @@
 """FastAPI 应用工厂与路由注册。"""
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -33,7 +35,17 @@ from .models import (
     SettingsResponse,
     SettingsUpdateRequest,
 )
-from .runsio import get_field_metrics_detail, get_field_mismatches_records, get_metrics_detail, get_scored_records, list_runs, serve_failures_html, serve_field_mismatches_html
+from .runsio import (
+    get_field_metrics_detail,
+    get_field_mismatches_records,
+    get_metrics_detail,
+    get_scored_records,
+    list_dataset_html_files,
+    list_runs,
+    serve_dataset_html,
+    serve_failures_html,
+    serve_field_mismatches_html,
+)
 from .settings import Settings, get_settings, set_settings
 
 
@@ -43,10 +55,19 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     else:
         set_settings(settings)
 
+    job_manager = get_job_manager(settings)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        loop = asyncio.get_running_loop()
+        job_manager.start_worker(loop=loop)
+        yield
+
     app = FastAPI(
         title="eval_vlm Web UI",
         description="VLM 测试集评测与可视化审查平台",
         version="0.1.0",
+        lifespan=lifespan,
     )
     app.dependency_overrides[get_settings] = lambda: settings
 
@@ -69,8 +90,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
         return response
-
-    job_manager = get_job_manager(settings)
 
     # -----------------------------------------------------------------------
     # 鉴权与当前用户
@@ -362,6 +381,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.get("/api/datasets/{name}/runs/{model}/{backend}/failures.html")
+    @app.get("/api/datasets/{name}/runs/{model}/{backend}/failure.html")
     def api_get_run_failures_html(
         model: str,
         backend: str,
@@ -369,6 +389,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         _user: User = Depends(require_viewer),
     ) -> FileResponse:
         return serve_failures_html(cfg, model, backend)
+
+    @app.get("/api/datasets/{name}/html-files")
+    def api_list_dataset_html_files(
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> list[dict[str, Any]]:
+        return list_dataset_html_files(cfg)
+
+    @app.get("/api/datasets/{name}/html-view")
+    def api_serve_dataset_html_view(
+        path: str = Query(..., description="相对数据集目录的 HTML 报告路径"),
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> FileResponse:
+        return serve_dataset_html(cfg, path)
+
+    @app.get("/api/datasets/{name}/failures.html")
+    @app.get("/api/datasets/{name}/failure.html")
+    def api_serve_dataset_root_failures_html(
+        cfg: Config = Depends(get_dataset_cfg),
+        _user: User = Depends(require_viewer),
+    ) -> FileResponse:
+        return serve_dataset_html(cfg, "failures.html")
 
     @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-metrics")
     def api_get_run_field_metrics(
@@ -399,6 +442,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-mismatches.html")
+    @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-mismatch.html")
     def api_get_run_field_mismatches_html(
         model: str,
         backend: str,
@@ -430,11 +474,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # 任务执行 (Jobs)
     # -----------------------------------------------------------------------
     @app.post("/api/datasets/{name}/jobs")
-    def api_create_dataset_job(
+    async def api_create_dataset_job(
         name: str,
         body: JobCreateRequest,
         user: User = Depends(require_editor),
     ) -> JobSummary:
+        job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type=body.type,
             dataset=name,
@@ -443,10 +488,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.post("/api/sweep/jobs")
-    def api_create_sweep_job(
+    async def api_create_sweep_job(
         body: JobCreateRequest,
         user: User = Depends(require_editor),
     ) -> JobSummary:
+        job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type="sweep",
             dataset=body.dataset,
@@ -455,10 +501,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.post("/api/jobs")
-    def api_create_job(
+    async def api_create_job(
         body: JobCreateRequest,
         user: User = Depends(require_editor),
     ) -> JobSummary:
+        job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type=body.type,
             dataset=body.dataset,
@@ -467,11 +514,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.get("/api/jobs")
-    def api_list_jobs(_user: User = Depends(require_viewer)) -> list[JobSummary]:
+    async def api_list_jobs(_user: User = Depends(require_viewer)) -> list[JobSummary]:
         return job_manager.list_jobs()
 
     @app.get("/api/jobs/{job_id}")
-    def api_get_job(
+    async def api_get_job(
         job_id: str,
         _user: User = Depends(require_viewer),
     ) -> JobSummary:
@@ -500,7 +547,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.post("/api/jobs/{job_id}/cancel")
-    def api_cancel_job(
+    async def api_cancel_job(
         job_id: str,
         _user: User = Depends(require_editor),
     ) -> dict[str, Any]:
@@ -508,10 +555,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"success": ok, "job_id": job_id}
 
     @app.post("/api/jobs/{job_id}/resume")
-    def api_resume_job(
+    async def api_resume_job(
         job_id: str,
         user: User = Depends(require_editor),
     ) -> JobSummary:
+        job_manager.start_worker(asyncio.get_running_loop())
         old_job = job_manager.get_job(job_id)
         if not old_job:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")

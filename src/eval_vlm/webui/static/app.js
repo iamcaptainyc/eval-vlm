@@ -383,6 +383,9 @@ function renderDatasets() {
           <button class="btn btn-sm" onclick="selectDatasetAndNavigate('${escapeHtml(ds.name)}', 'runs')">
             📊 评测结果
           </button>
+          <button class="btn btn-sm" onclick="openDatasetHtmlModal('${escapeHtml(ds.name)}')" title="查看该数据集下的所有 HTML 报告文件">
+            📑 HTML
+          </button>
           <button class="btn btn-sm" onclick="selectDatasetAndNavigate('${escapeHtml(ds.name)}', 'health')">
             🩺 体检
           </button>
@@ -1599,7 +1602,7 @@ async function saveSingleConfigKey(key, value) {
 // --------------------------------------------------------------------------
 // 任务启动模态框配置 (消除黑盒)
 // --------------------------------------------------------------------------
-function openJobModal(type) {
+function openJobModal(type, prefill = null) {
   state.jobModal.type = type;
   const modal = document.getElementById("job-launch-modal");
   const titleEl = document.getElementById("job-modal-title");
@@ -1626,7 +1629,7 @@ function openJobModal(type) {
       dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
     } else {
       dsSelect.innerHTML = state.datasets
-        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === (prefill?.dataset || state.currentDataset) ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
         .join("");
     }
   }
@@ -1668,6 +1671,21 @@ function openJobModal(type) {
     loadDetectedModels();
   } else {
     renderModelSelects();
+  }
+
+  // 应用预填充参数（针对一键重跑）
+  if (prefill) {
+    if (prefill.dataset && dsSelect) dsSelect.value = prefill.dataset;
+    if (prefill.backend && backendSelect) backendSelect.value = prefill.backend;
+    if (prefill.model) {
+      if (modelInput) modelInput.value = prefill.model;
+      if (modelSelect) {
+        modelSelect.value = prefill.model;
+        if (modelSelect.value !== prefill.model) {
+          modelSelect.value = "__custom__";
+        }
+      }
+    }
   }
 
   onJobModalBackendChange();
@@ -2222,7 +2240,8 @@ function openTerminal(jobId) {
   const pre = document.getElementById("terminal-pre");
 
   if (drawer) drawer.classList.remove("hidden");
-  if (pre) pre.textContent = "正在连接进程日志输出流...\\n";
+  if (jobLabel) jobLabel.textContent = `任务: ${jobId}`;
+  if (pre) pre.textContent = "正在连接进程日志输出流...\n";
 
   // 读取已缓存的 job 元信息
   const job = state.jobs.find((j) => j.id === jobId);
@@ -2230,6 +2249,9 @@ function openTerminal(jobId) {
     if (dsLabel) dsLabel.textContent = `数据集: ${job.dataset || "全量"}`;
     if (cmdDisplay) cmdDisplay.textContent = job.command?.length ? job.command.join(" ") : "—";
     if (logDisplay) logDisplay.textContent = job.log_file || "—";
+    if (job.status === "queued") {
+      pre.textContent = `[调度队列] 任务已进入等待执行队列 (ID: ${job.id})\n即将执行: ${job.command?.length ? job.command.join(" ") : "—"}\n正在连接调度器并等待拉起进程...\n\n`;
+    }
   }
 
   if (state.eventSource) {
@@ -2243,6 +2265,7 @@ function openTerminal(jobId) {
       const data = JSON.parse(e.data);
       if (cmdDisplay && data.command) cmdDisplay.textContent = data.command.join(" ");
       if (logDisplay && data.log_file) logDisplay.textContent = data.log_file;
+      loadJobs();
     } catch (_) {}
   });
 
@@ -2260,7 +2283,8 @@ function openTerminal(jobId) {
   state.eventSource.addEventListener("status", (e) => {
     try {
       const statusData = JSON.parse(e.data);
-      state.terminalLogs += `\n[系统状态更新: ${statusData.status}]\n`;
+      const exitInfo = statusData.exit_code !== undefined && statusData.exit_code !== null ? ` (exit_code=${statusData.exit_code})` : "";
+      state.terminalLogs += `\n[系统状态更新: ${statusData.status}${exitInfo}]\n`;
       if (pre) pre.textContent = state.terminalLogs;
       loadJobs();
     } catch (_) {}
@@ -2489,6 +2513,137 @@ async function renderActiveRunView() {
     await loadRunMetrics();
     await loadScored(0);
   }
+
+  // 刷新当前数据集全部 HTML 报告统计
+  updateDatasetHtmlCount();
+}
+
+function rerunCurrentRun(method = null) {
+  const run = state.selectedRun;
+  const targetMethod = method || state.activeRunMethod || (run?.has_field_eval ? "field-eval" : "eval");
+  openJobModal(targetMethod, {
+    dataset: state.currentDataset,
+    model: run?.model || "",
+    backend: run?.backend || "",
+  });
+}
+
+async function updateDatasetHtmlCount() {
+  const countEl = document.getElementById("dataset-html-count");
+  if (!state.currentDataset) {
+    if (countEl) countEl.textContent = "0";
+    return;
+  }
+  try {
+    const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/html-files`);
+    if (res.ok) {
+      const files = await res.json();
+      if (countEl) countEl.textContent = String(files.length);
+    }
+  } catch (_) {}
+}
+
+async function openDatasetHtmlModal(datasetName = null) {
+  const ds = datasetName || state.currentDataset;
+  if (!ds) {
+    showToast("请先选择一个活动数据集", "warning");
+    return;
+  }
+  const modal = document.getElementById("dataset-html-modal");
+  const subTitle = document.getElementById("dataset-html-modal-subtitle");
+  const listEl = document.getElementById("dataset-html-list");
+  if (subTitle) subTitle.textContent = `当前数据集: ${ds}`;
+  if (listEl) listEl.innerHTML = `<div style="color: var(--text-muted); padding: 1rem; text-align: center;">正在检索当前数据集目录下的 HTML 报告文件...</div>`;
+
+  closeHtmlPreview();
+  if (modal) modal.showModal();
+
+  try {
+    const res = await fetch(`/api/datasets/${encodeURIComponent(ds)}/html-files`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const files = await res.json();
+
+    const countEl = document.getElementById("dataset-html-count");
+    if (countEl) countEl.textContent = String(files.length);
+
+    if (!files || files.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state-box" style="padding: 1.5rem 1rem; margin: 0;">
+          <div style="font-size: 2rem; margin-bottom: 0.5rem;">📄</div>
+          <div style="color: #cbd5e1; font-weight: 600; margin-bottom: 0.35rem;">当前数据集暂未生成任何 HTML 报告</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 450px; margin: 0 auto 1rem;">
+            运行 <code>field-eval</code> 任务时将生成 <code>field_mismatches.html</code> 可视化失配清单；运行 <code>eval</code> 任务时若有未命中样本将生成 <code>failures.html</code> 报告。
+          </div>
+          <div style="display: flex; gap: 0.75rem; justify-content: center;">
+            <button class="btn btn-sm btn-primary" onclick="closeDatasetHtmlModal(); openJobModal('field-eval')">🏷️ 发起 field-eval 评测</button>
+            <button class="btn btn-sm btn-primary" onclick="closeDatasetHtmlModal(); openJobModal('eval')">🚀 发起 eval 评测</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = files
+      .map((f) => {
+        const sizeKb = (f.size / 1024).toFixed(1);
+        const mtimeStr = f.modified_at ? new Date(f.modified_at).toLocaleString() : "未知";
+        return `
+          <div class="dataset-card" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; margin: 0; background: rgba(30, 41, 59, 0.45); border-color: var(--border-subtle);">
+            <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0; flex: 1;">
+              <span style="font-size: 1.25rem;">📄</span>
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 600; color: #fff; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  ${escapeHtml(f.path)}
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-dim); display: flex; gap: 1rem; margin-top: 2px;">
+                  <span>大小: ${sizeKb} KB</span>
+                  <span>生成时间: ${mtimeStr}</span>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center; margin-left: 1rem;">
+              <button class="btn btn-sm" onclick="previewDatasetHtml('${escapeHtml(f.url)}', '${escapeHtml(f.name)}')">
+                👁️ 在线预览
+              </button>
+              <a href="${escapeHtml(f.url)}" target="_blank" class="btn btn-sm btn-primary" style="text-decoration: none;">
+                新窗口打开 ↗
+              </a>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div style="color: var(--rose-500); padding: 1rem;">加载 HTML 报告列表失败: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeDatasetHtmlModal() {
+  const modal = document.getElementById("dataset-html-modal");
+  closeHtmlPreview();
+  if (modal) modal.close();
+}
+
+function previewDatasetHtml(url, name) {
+  const previewBox = document.getElementById("dataset-html-preview-box");
+  const iframe = document.getElementById("dataset-html-preview-iframe");
+  const title = document.getElementById("dataset-html-preview-title");
+  const extLink = document.getElementById("dataset-html-preview-external");
+
+  if (previewBox && iframe) {
+    previewBox.style.display = "block";
+    iframe.src = url;
+    if (title) title.textContent = `预览报告: ${name}`;
+    if (extLink) extLink.href = url;
+    previewBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function closeHtmlPreview() {
+  const previewBox = document.getElementById("dataset-html-preview-box");
+  const iframe = document.getElementById("dataset-html-preview-iframe");
+  if (previewBox) previewBox.style.display = "none";
+  if (iframe) iframe.src = "about:blank";
 }
 
 // --------------------------------------------------------------------------
@@ -2921,3 +3076,11 @@ window.onJobModalModelSelectChange = onJobModalModelSelectChange;
 window.onJobModalBackendChange = onJobModalBackendChange;
 window.onJobModalTargetsChange = onJobModalTargetsChange;
 window.onJobModalEvalTargetsChange = onJobModalEvalTargetsChange;
+
+// 重跑与 HTML 报告
+window.rerunCurrentRun = rerunCurrentRun;
+window.openDatasetHtmlModal = openDatasetHtmlModal;
+window.closeDatasetHtmlModal = closeDatasetHtmlModal;
+window.previewDatasetHtml = previewDatasetHtml;
+window.closeHtmlPreview = closeHtmlPreview;
+window.updateDatasetHtmlCount = updateDatasetHtmlCount;

@@ -210,3 +210,64 @@ def test_api_config_all_backends_full_parameters(api_client):
     vllm = inf.get("vllm_offline", {})
     assert vllm.get("max_num_batched_tokens") == 8192
 
+
+def test_api_dataset_html_reports(api_client):
+    """验证数据集目录下 HTML 文件检索、在线打开/预览以及别名支持与防越界。"""
+    client, ds_name, cfg, _ = api_client
+
+    # 1. 初始状态下无 HTML 文件
+    res_empty = client.get(f"/api/datasets/{ds_name}/html-files")
+    assert res_empty.status_code == 200
+    assert res_empty.json() == []
+
+    # 2. 在运行目录下创建 failures.html 与 field_mismatches.html
+    run_dir = cfg.dataset_dir / "qwen2-vl" / "hf"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    failures_file = run_dir / "failures.html"
+    failures_file.write_text("<html><body><h1>Failures Report</h1></body></html>", encoding="utf-8")
+    field_file = run_dir / "field_mismatches.html"
+    field_file.write_text("<html><body><h1>Field Mismatches</h1></body></html>", encoding="utf-8")
+
+    # 3. 检索全部 HTML 文件
+    res_list = client.get(f"/api/datasets/{ds_name}/html-files")
+    assert res_list.status_code == 200
+    files = res_list.json()
+    assert len(files) == 2
+    names = [f["name"] for f in files]
+    assert "failures.html" in names
+    assert "field_mismatches.html" in names
+
+    # 4. 通过 html-view 访问
+    rel_path = f"qwen2-vl/hf/failures.html"
+    res_view = client.get(f"/api/datasets/{ds_name}/html-view?path={rel_path}")
+    assert res_view.status_code == 200
+    assert "Failures Report" in res_view.text
+    assert "text/html" in res_view.headers.get("content-type", "")
+
+    # 5. 测试 failures.html 及 failure.html 别名端点
+    res_run_fail1 = client.get(f"/api/datasets/{ds_name}/runs/qwen2-vl/hf/failures.html")
+    assert res_run_fail1.status_code == 200
+    assert "Failures Report" in res_run_fail1.text
+
+    res_run_fail2 = client.get(f"/api/datasets/{ds_name}/runs/qwen2-vl/hf/failure.html")
+    assert res_run_fail2.status_code == 200
+    assert "Failures Report" in res_run_fail2.text
+
+    # 6. 测试数据集顶层 failure.html / failures.html 回退访问
+    res_root_fail = client.get(f"/api/datasets/{ds_name}/failure.html")
+    assert res_root_fail.status_code == 200
+    assert "Failures Report" in res_root_fail.text
+
+    # 7. 测试 field-mismatches.html 及 field-mismatch.html 别名端点
+    res_fm1 = client.get(f"/api/datasets/{ds_name}/runs/qwen2-vl/hf/field-mismatches.html")
+    assert res_fm1.status_code == 200
+    assert "Field Mismatches" in res_fm1.text
+
+    res_fm2 = client.get(f"/api/datasets/{ds_name}/runs/qwen2-vl/hf/field-mismatch.html")
+    assert res_fm2.status_code == 200
+    assert "Field Mismatches" in res_fm2.text
+
+    # 8. 路径穿越防护验证
+    res_traverse = client.get(f"/api/datasets/{ds_name}/html-view?path=../../forbidden.html")
+    assert res_traverse.status_code in (400, 403)
+

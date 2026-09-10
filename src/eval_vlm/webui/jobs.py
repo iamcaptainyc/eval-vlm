@@ -108,6 +108,7 @@ class JobManager:
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.worker_task: Optional[asyncio.Task] = None
         self.current_job_id: Optional[str] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._reconcile_on_startup()
 
     def _reconcile_on_startup(self) -> None:
@@ -150,13 +151,18 @@ class JobManager:
                 except Exception:
                     continue
 
-    def start_worker(self) -> None:
-        try:
-            loop = asyncio.get_running_loop()
+    def start_worker(self, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+        if loop is not None:
+            self.loop = loop
+        elif self.loop is None or self.loop.is_closed():
+            try:
+                self.loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+        if self.loop is not None and self.loop.is_running():
             if self.worker_task is None or self.worker_task.done():
-                self.worker_task = loop.create_task(self._queue_worker())
-        except RuntimeError:
-            pass
+                self.worker_task = self.loop.create_task(self._queue_worker())
 
     def is_dataset_busy(self, dataset_name: str) -> bool:
         """检查该数据集是否有正在运行或排队的任务。"""
@@ -188,8 +194,22 @@ class JobManager:
         self._build_cmd(job)
         job.save_meta()
         self.jobs[job_id] = job
-        self.queue.put_nowait(job_id)
+
+        # 确保 worker 调度循环已就绪
         self.start_worker()
+
+        # 安全入队（兼容跨线程或异步事件循环环境）
+        if self.loop is not None and self.loop.is_running():
+            try:
+                curr_loop = asyncio.get_running_loop()
+                if curr_loop is self.loop:
+                    self.queue.put_nowait(job_id)
+                else:
+                    self.loop.call_soon_threadsafe(self.queue.put_nowait, job_id)
+            except RuntimeError:
+                self.loop.call_soon_threadsafe(self.queue.put_nowait, job_id)
+        else:
+            self.queue.put_nowait(job_id)
 
         queue_pos = self.queue.qsize()
         return job.to_summary(queue_pos=queue_pos)
@@ -247,7 +267,8 @@ class JobManager:
 
     async def _execute_job(self, job: Job) -> None:
         cmd = self._build_cmd(job)
-        exec_cmd = [sys.executable] + cmd[1:]
+        # 强制添加 -u 参数确保 Python 子进程标准输入输出完全无缓冲 (Unbuffered binary stdout/stderr)
+        exec_cmd = [sys.executable, "-u"] + cmd[1:]
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
@@ -261,14 +282,42 @@ class JobManager:
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
+        start_line1 = f"=== 正在启动任务: {' '.join(cmd)} ===\n"
+        start_line2 = f"=== 工作区目录: {self.settings.workspace} ===\n"
+        start_line3 = f"=== 日志文件: {job.log_file.resolve()} ===\n"
         with job.log_file.open("a", encoding="utf-8") as f_log:
-            f_log.write(f"=== 命令启动: {' '.join(cmd)} ===\n")
-            f_log.write(f"=== 日志路径: {job.log_file.resolve()} ===\n")
+            f_log.write(start_line1)
+            f_log.write(start_line2)
+            f_log.write(start_line3)
             f_log.flush()
 
-        proc = await asyncio.create_subprocess_exec(*exec_cmd, **kwargs)
+        job.broadcast("log", start_line1)
+        job.broadcast("log", start_line2)
+        job.broadcast("log", start_line3)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(*exec_cmd, **kwargs)
+        except Exception as e:
+            err_line = f"=== 启动进程失败: {e} ===\n"
+            with job.log_file.open("a", encoding="utf-8") as f_log:
+                f_log.write(err_line)
+                f_log.flush()
+            job.broadcast("log", err_line)
+            job.status = "failed"
+            job.progress_msg = f"启动失败: {e}"
+            job.finished_at = datetime.now(timezone.utc).isoformat()
+            job.save_meta()
+            job.broadcast("status", {"status": "failed", "error": str(e)})
+            return
+
         job.proc = proc
         job.pid = proc.pid
+        pid_line = f"=== 任务进程已就绪 (PID: {proc.pid})，开始执行并实时推流 ===\n\n"
+        with job.log_file.open("a", encoding="utf-8") as f_log:
+            f_log.write(pid_line)
+            f_log.flush()
+        job.broadcast("log", pid_line)
+
         job.save_meta()
         job.broadcast("started", {
             "status": "running",
@@ -295,6 +344,12 @@ class JobManager:
         if job.status != "canceled":
             job.status = "succeeded" if exit_code == 0 else "failed"
 
+        finish_line = f"\n=== 任务执行结束 (PID: {proc.pid}, 状态: {job.status}, 退出码: {exit_code}) ===\n"
+        with job.log_file.open("a", encoding="utf-8") as f_log:
+            f_log.write(finish_line)
+            f_log.flush()
+        job.broadcast("log", finish_line)
+
         job.save_meta()
         job.broadcast(
             "status",
@@ -309,6 +364,15 @@ class JobManager:
         job = self.jobs.get(job_id)
         if not job or job.status not in ("queued", "running"):
             return False
+
+        cancel_msg = f"\n=== 任务已手动取消终止 ({datetime.now(timezone.utc).isoformat()}) ===\n"
+        try:
+            with job.log_file.open("a", encoding="utf-8") as f_log:
+                f_log.write(cancel_msg)
+                f_log.flush()
+        except Exception:
+            pass
+        job.broadcast("log", cancel_msg)
 
         if job.status == "queued":
             job.status = "canceled"
@@ -362,6 +426,10 @@ class JobManager:
                 content = f.read()
                 if content:
                     yield f"event: log\ndata: {json.dumps(content)}\n\n"
+        elif job.status == "queued":
+            cmd_preview = " ".join(job.command) if job.command else "—"
+            queued_msg = f"=== 任务已进入调度队列等待执行 (ID: {job.id}) ===\n=== 预备执行: {cmd_preview} ===\n\n"
+            yield f"event: log\ndata: {json.dumps(queued_msg)}\n\n"
 
         # 推送当前状态
         yield f"event: status\ndata: {json.dumps({'status': job.status, 'exit_code': job.exit_code})}\n\n"
