@@ -27,6 +27,7 @@ from .models import (
     DeleteSampleRequest,
     DeleteSampleResponse,
     GlobalSplitConfig,
+    GGUFConvertRequest,
     JobCreateRequest,
     JobSummary,
     RestoreRequest,
@@ -243,6 +244,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             params["no_mmproj"] = True
         if body.mmproj_outtype:
             params["mmproj_outtype"] = body.mmproj_outtype
+        if body.mmproj_type:
+            params["mmproj_type"] = body.mmproj_type
         if body.quantize:
             params["quantize"] = body.quantize
         if body.clean_intermediate:

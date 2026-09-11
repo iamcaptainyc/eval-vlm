@@ -175,6 +175,7 @@ class GGUFConvertRequest(BaseModel):
     outtype: str = "bf16"
     is_multimodal: bool = True
     mmproj_outtype: str = "f16"
+    mmproj_type: Optional[str] = None
     quantize: Optional[str] = None
     clean_intermediate: bool = False
     llama_cpp_dir: Optional[str] = None

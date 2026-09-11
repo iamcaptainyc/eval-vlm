@@ -3313,7 +3313,7 @@ function onGGUFConvertHfInput() {
 
 function toggleGGUFConvertMMProj(enabled) {
   const panel = document.getElementById("gguf-conv-mmproj-panel");
-  if (panel) panel.style.display = enabled ? "grid" : "none";
+  if (panel) panel.style.display = enabled ? "flex" : "none";
   updateGGUFConvertPreview();
 }
 
@@ -3322,6 +3322,7 @@ function updateGGUFConvertPreview() {
   const name = document.getElementById("gguf-conv-name")?.value.trim() || "";
   const outtype = document.getElementById("gguf-conv-outtype")?.value || "bf16";
   const mmprojEnable = document.getElementById("gguf-conv-mmproj-enable")?.checked ?? true;
+  const mmprojType = document.getElementById("gguf-conv-mmproj-type")?.value || "auto";
   const mmprojOuttype = document.getElementById("gguf-conv-mmproj-outtype")?.value || "f16";
   const quant = document.getElementById("gguf-conv-quant")?.value || "";
   const llamaCppDir = document.getElementById("gguf-conv-llamacpp-dir")?.value.trim() || "";
@@ -3344,8 +3345,12 @@ function updateGGUFConvertPreview() {
   if (hfPath) parts.push("--hf-path", hfPath.includes(" ") ? `"${hfPath}"` : hfPath);
   if (name) parts.push("--name", name.includes(" ") ? `"${name}"` : name);
   if (outtype) parts.push("--outtype", outtype);
-  if (!mmprojEnable) parts.push("--no-mmproj");
-  else if (mmprojOuttype) parts.push("--mmproj-outtype", mmprojOuttype);
+  if (!mmprojEnable) {
+    parts.push("--no-mmproj");
+  } else {
+    if (mmprojType && mmprojType !== "auto") parts.push("--mmproj-type", mmprojType);
+    if (mmprojOuttype) parts.push("--mmproj-outtype", mmprojOuttype);
+  }
   if (quant) parts.push("--quantize", quant);
   if (cleanInter) parts.push("--clean-intermediate");
   if (llamaCppDir) parts.push("--llama-cpp-dir", llamaCppDir.includes(" ") ? `"${llamaCppDir}"` : llamaCppDir);
@@ -3364,6 +3369,7 @@ async function submitGGUFConvertTask() {
   const name = document.getElementById("gguf-conv-name")?.value.trim() || null;
   const outtype = document.getElementById("gguf-conv-outtype")?.value || "bf16";
   const isMultimodal = document.getElementById("gguf-conv-mmproj-enable")?.checked ?? true;
+  const mmprojType = document.getElementById("gguf-conv-mmproj-type")?.value || "auto";
   const mmprojOuttype = document.getElementById("gguf-conv-mmproj-outtype")?.value || "f16";
   const quantize = document.getElementById("gguf-conv-quant")?.value || null;
   const llamaCppDir = document.getElementById("gguf-conv-llamacpp-dir")?.value.trim() || null;
@@ -3375,6 +3381,7 @@ async function submitGGUFConvertTask() {
     outtype: outtype,
     is_multimodal: isMultimodal,
     mmproj_outtype: mmprojOuttype,
+    mmproj_type: (mmprojType && mmprojType !== "auto") ? mmprojType : null,
     quantize: quantize,
     clean_intermediate: cleanIntermediate,
     llama_cpp_dir: llamaCppDir,
@@ -3401,9 +3408,36 @@ async function submitGGUFConvertTask() {
 }
 
 // --------------------------------------------------------------------------
+// 浅色 / 暗黑主题系统
+// --------------------------------------------------------------------------
+function initTheme() {
+  const savedTheme = localStorage.getItem("eval_vlm_theme") || "dark";
+  applyTheme(savedTheme);
+}
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  const newTheme = currentTheme === "light" ? "dark" : "light";
+  applyTheme(newTheme);
+  localStorage.setItem("eval_vlm_theme", newTheme);
+  showToast(`已切换至${newTheme === "light" ? "简洁明亮浅色" : "暗黑科技深色"}主题`, "info");
+}
+
+// --------------------------------------------------------------------------
 // 页面初始化
 // --------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
+  // 初始化主题
+  initTheme();
+
   // 检查鉴权
   try {
     const authRes = await fetch("/api/whoami");
@@ -3498,6 +3532,11 @@ window.onJobModalTargetsChange = onJobModalTargetsChange;
 window.onJobModalEvalTargetsChange = onJobModalEvalTargetsChange;
 window.onLlamaCppModeChange = onLlamaCppModeChange;
 window.onLlamaCppModelSelectChange = onLlamaCppModelSelectChange;
+
+// 主题切换
+window.initTheme = initTheme;
+window.applyTheme = applyTheme;
+window.toggleTheme = toggleTheme;
 
 // GGUF 转换工坊
 window.openGGUFConvertModal = openGGUFConvertModal;

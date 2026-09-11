@@ -97,8 +97,13 @@
       </div>
     </nav>
 
-    <!-- 用户身份 -->
+    <!-- 用户身份与全局操作 -->
     <div class="user-panel">
+      <!-- 浅色/深色主题切换按钮 -->
+      <button id="theme-toggle-btn" class="theme-toggle-btn" onclick="toggleTheme()" title="切换明亮/暗黑主题" aria-label="切换主题">
+        <span class="theme-icon theme-icon-dark">🌙</span>
+        <span class="theme-icon theme-icon-light">☀️</span>
+      </button>
       <span id="header-username" class="user-tag">anonymous</span>
       <span id="header-role" class="role-badge">editor</span>
     </div>
@@ -1844,20 +1849,20 @@
   </dialog>
 
   <!-- GGUF 模型转换工坊弹窗 -->
-  <dialog id="gguf-convert-modal" class="modal-card" style="max-width: 680px; width: 92%;">
-    <div class="modal-header">
-      <div style="display: flex; align-items: center; gap: 0.65rem;">
-        <span style="font-size: 1.4rem;">📦</span>
+  <dialog id="gguf-convert-modal" class="modal-card" style="max-width: 840px; width: 92vw; padding: 1.5rem 1.75rem;">
+    <div class="modal-header" style="margin-bottom: 1.25rem;">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <span style="font-size: 1.5rem;">📦</span>
         <div>
-          <h3 style="margin: 0; color: #fff; font-size: 1.05rem;">HuggingFace 转 GGUF 可视化工坊</h3>
-          <p style="margin: 0; font-size: 0.76rem; color: var(--text-dim);">支持多模态两阶段导出(主骨干 + mmproj)及 llama-quantize 低比特量化</p>
+          <h3 class="modal-title" style="margin: 0; font-size: 1.15rem;">HuggingFace 转 GGUF 可视化工坊</h3>
+          <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: var(--text-dim);">支持多模态两阶段导出 (主骨干 + mmproj) 及 llama-quantize 低比特量化</p>
         </div>
       </div>
       <button class="btn-close" onclick="closeGGUFConvertModal()">&times;</button>
     </div>
 
-    <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem; max-height: 75vh; overflow-y: auto; padding-right: 0.25rem;">
-      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; line-height: 1.5;">
+    <div class="modal-body" style="display: flex; flex-direction: column; gap: 1.25rem; max-height: 74vh; overflow-y: auto; padding-right: 0.35rem;">
+      <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: var(--radius-md); padding: 0.85rem 1.1rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
         💡 <strong>模型文件夹自动组织规范</strong>：<br>
         转换产物将统一收录在全局目录 <code>&lt;llamacpp_models_dir&gt;/&lt;模型名 A&gt;/</code> 下。<br>
         内部规范命名为 <code>A_&lt;QUANT&gt;.gguf</code> 与 <code>A_&lt;DTYPE&gt;_mmproj.gguf</code>，评测时系统自动识别 <code>A</code> 为模型名并成对绑定！
@@ -1865,9 +1870,9 @@
 
       <!-- 源模型选择 -->
       <div class="config-field">
-        <label><span>源 HuggingFace 模型路径 (--hf-path)</span><span class="config-key-badge">必需</span></label>
-        <div style="display: flex; gap: 0.5rem;">
-          <select id="gguf-conv-hf-select" class="select" style="width: 45%;" onchange="onGGUFConvertHfSelect(this.value)">
+        <label style="margin-bottom: 0.45rem;"><span>源 HuggingFace 模型路径 (--hf-path)</span><span class="config-key-badge">必需</span></label>
+        <div style="display: flex; gap: 0.65rem;">
+          <select id="gguf-conv-hf-select" class="select" style="width: 42%;" onchange="onGGUFConvertHfSelect(this.value)">
             <option value="">(从已探测 HF 模型中快速选择)</option>
           </select>
           <input type="text" id="gguf-conv-hf-path" class="input" style="flex: 1;" placeholder="如 /root/autodl-tmp/Qwen2.5-VL-7B-Instruct" oninput="onGGUFConvertHfInput()">
@@ -1876,15 +1881,15 @@
       </div>
 
       <!-- 目标模型名与输出目录 -->
-      <div class="config-grid-2">
+      <div class="config-grid-2" style="gap: 1.25rem;">
         <div class="config-field">
-          <label><span>目标模型名 A (--name)</span><span class="config-key-badge">推荐</span></label>
+          <label style="margin-bottom: 0.45rem;"><span>目标模型名 A (--name)</span><span class="config-key-badge">推荐</span></label>
           <input type="text" id="gguf-conv-name" class="input" placeholder="如 Qwen2.5-VL-7B-Instruct" oninput="updateGGUFConvertPreview()">
           <span class="config-field-desc">产物模型文件夹名与评测模型标识名</span>
         </div>
 
         <div class="config-field">
-          <label><span>主模型导出精度 (--outtype)</span><span class="config-key-badge">outtype</span></label>
+          <label style="margin-bottom: 0.45rem;"><span>主模型导出精度 (--outtype)</span><span class="config-key-badge">outtype</span></label>
           <select id="gguf-conv-outtype" class="select" onchange="updateGGUFConvertPreview()">
             <option value="bf16">bf16 (推荐, 动态范围大, 与训练对齐)</option>
             <option value="f16">f16 (半精度浮点)</option>
@@ -1894,38 +1899,57 @@
         </div>
       </div>
 
-      <!-- 多模态专项设置 -->
-      <div class="dataset-card" style="background: rgba(255, 255, 255, 0.02); border: 1px dashed rgba(245, 158, 11, 0.35); padding: 0.85rem 1rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
-          <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: #fff; font-weight: 600; font-size: 0.86rem;">
+      <!-- 多模态视觉投影器专项设置 -->
+      <div class="dataset-card" style="background: rgba(245, 158, 11, 0.03); border: 1px dashed rgba(245, 158, 11, 0.35); border-radius: var(--radius-md); padding: 1.1rem 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-subtle);">
+          <label style="display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text-main); font-weight: 600; font-size: 0.9rem;">
             <input type="checkbox" id="gguf-conv-mmproj-enable" checked onchange="toggleGGUFConvertMMProj(this.checked)">
             <span>👁️ 导出多模态视觉投影器 (--mmproj)</span>
           </label>
           <span class="role-badge" style="background: rgba(245,158,11,0.15); color: var(--amber-500);">多模态两阶段专属</span>
         </div>
 
-        <div id="gguf-conv-mmproj-panel" class="config-grid-2" style="margin-top: 0.5rem;">
-          <div class="config-field">
-            <label><span>mmproj 导出精度 (--mmproj-outtype)</span></label>
-            <select id="gguf-conv-mmproj-outtype" class="select" onchange="updateGGUFConvertPreview()">
-              <option value="f16">f16 (推荐, 高保真视觉特征)</option>
-              <option value="bf16">bf16 (bfloat16)</option>
-              <option value="f32">f32 (float32)</option>
-            </select>
-            <span class="config-field-desc">投影器通常建议保持高精度，不进行低比特量化</span>
+        <div id="gguf-conv-mmproj-panel" style="display: flex; flex-direction: column; gap: 0.9rem;">
+          <div class="config-grid-2" style="gap: 1.25rem;">
+            <div class="config-field">
+              <label style="margin-bottom: 0.45rem;"><span>mmproj 导出类型 / 精度 (--mmproj-outtype)</span><span class="config-key-badge">数据类型</span></label>
+              <select id="gguf-conv-mmproj-outtype" class="select" onchange="updateGGUFConvertPreview()">
+                <option value="f16">f16 (float16: 推荐, 高保真视觉特征)</option>
+                <option value="bf16">bf16 (bfloat16: 动态范围大, 适配高版本)</option>
+                <option value="f32">f32 (float32: 单精度全量无损)</option>
+              </select>
+              <span class="config-field-desc">投影器目标数据类型，通常保持高精度不进行低比特量化</span>
+            </div>
+
+            <div class="config-field">
+              <label style="margin-bottom: 0.45rem;"><span>mmproj 架构类型 (--mmproj-type)</span><span class="config-key-badge">可选</span></label>
+              <select id="gguf-conv-mmproj-type" class="select" onchange="updateGGUFConvertPreview()">
+                <option value="auto">auto (自动根据模型 config.json 探测识别)</option>
+                <option value="qwen2vl">Qwen2-VL / Qwen2.5-VL (qwenvl)</option>
+                <option value="minicpmv">MiniCPM-V (minicpm)</option>
+                <option value="llava">LLaVA / LLaVA-NeXT (llava)</option>
+                <option value="internvl">InternVL (internvl)</option>
+                <option value="gemma">Gemma-3 / PaliGemma (gemma)</option>
+                <option value="clip">CLIP / SigLIP 标准投影器</option>
+                <option value="glm4v">GLM-4V / GLM-5V (glm4v)</option>
+                <option value="cogvlm">CogVLM / CogAgent (cogvlm)</option>
+                <option value="step3">Step-VL / Step3 (step3)</option>
+              </select>
+              <span class="config-field-desc">视觉架构算子覆盖，绝大多数模型选 auto 即可</span>
+            </div>
           </div>
 
           <div class="config-field">
-            <label><span>投影器产物文件名</span></label>
-            <input type="text" id="gguf-conv-mmproj-filename" class="input" readonly style="color: var(--text-dim); background: rgba(0,0,0,0.25);" value="<A>_f16_mmproj.gguf">
+            <label style="margin-bottom: 0.45rem;"><span>投影器产物目标文件名 (只读展示)</span></label>
+            <input type="text" id="gguf-conv-mmproj-filename" class="input" readonly style="color: var(--text-dim); background: var(--bg-input); font-family: var(--font-mono); font-size: 0.8rem;" value="<A>_f16_mmproj.gguf">
           </div>
         </div>
       </div>
 
       <!-- 量化与高级设置 -->
-      <div class="config-grid-2">
+      <div class="config-grid-2" style="gap: 1.25rem;">
         <div class="config-field">
-          <label><span>目标量化规格 (--quantize)</span><span class="config-key-badge">可选</span></label>
+          <label style="margin-bottom: 0.45rem;"><span>目标量化规格 (--quantize)</span><span class="config-key-badge">可选</span></label>
           <select id="gguf-conv-quant" class="select" onchange="updateGGUFConvertPreview()">
             <option value="">(不量化 - 保持 bf16/f16 基座精度)</option>
             <option value="Q4_K_M">Q4_K_M (中等推荐: 权重高质量中等体积)</option>
@@ -1940,32 +1964,32 @@
         </div>
 
         <div class="config-field">
-          <label><span>llama.cpp 源码/编译目录</span><span class="config-key-badge">可选</span></label>
+          <label style="margin-bottom: 0.45rem;"><span>llama.cpp 源码/编译目录</span><span class="config-key-badge">可选</span></label>
           <input type="text" id="gguf-conv-llamacpp-dir" class="input" placeholder="留空自动在系统 PATH 与常见路径检索" oninput="updateGGUFConvertPreview()">
           <span class="config-field-desc">需包含 convert_hf_to_gguf.py 或 build/bin/llama-quantize</span>
         </div>
       </div>
 
-      <div class="config-field">
-        <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+      <div class="config-field" style="padding-top: 0.2rem;">
+        <label style="display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text-secondary); font-size: 0.84rem;">
           <input type="checkbox" id="gguf-conv-clean-intermediate" onchange="updateGGUFConvertPreview()">
           <span>量化完成后自动删除未量化的中间基座 gguf 文件 (--clean-intermediate)</span>
         </label>
       </div>
 
       <!-- 命令预览与落地提示 -->
-      <div class="code-preview-box" style="margin-top: 0.25rem;">
+      <div class="code-preview-box" style="margin-top: 0.4rem;">
         <div class="code-preview-title">
           <span>🖥️ 即将异步执行的任务指令</span>
-          <span id="gguf-conv-dest-hint" style="font-size: 0.72rem; color: var(--amber-500);">落地: &lt;llamacpp_models_dir&gt;/&lt;A&gt;/</span>
+          <span id="gguf-conv-dest-hint" style="font-size: 0.74rem; color: var(--amber-500); font-weight: 600;">落地: &lt;llamacpp_models_dir&gt;/&lt;A&gt;/</span>
         </div>
-        <div id="gguf-conv-cmd-preview" class="code-preview-content" style="white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.78rem;">python -m eval_vlm convert-gguf ...</div>
+        <div id="gguf-conv-cmd-preview" class="code-preview-content" style="white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55;">python -m eval_vlm convert-gguf ...</div>
       </div>
     </div>
 
-    <div class="modal-footer">
+    <div class="modal-footer" style="margin-top: 1.25rem;">
       <button class="btn" onclick="closeGGUFConvertModal()">取消</button>
-      <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b;" onclick="submitGGUFConvertTask()">🚀 开始执行转换</button>
+      <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b; padding: 0.55rem 1.5rem;" onclick="submitGGUFConvertTask()">🚀 开始执行转换</button>
     </div>
   </dialog>
 

@@ -597,6 +597,7 @@ def _cmd_convert_gguf(args: argparse.Namespace) -> int:
             outtype=args.outtype,
             is_multimodal=True if args.mmproj else (False if args.no_mmproj else None),
             mmproj_outtype=args.mmproj_outtype,
+            mmproj_type=args.mmproj_type,
             quantize=args.quantize,
             clean_intermediate=args.clean_intermediate,
             llama_cpp_dir=args.llama_cpp_dir,
@@ -696,6 +697,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="强制禁用多模态投影器导出(纯文本语言模型)")
     p_conv.add_argument("--mmproj-outtype", default="f16", choices=["f16", "bf16", "f32"],
                         help="多模态投影器导出精度(默认 f16)")
+    p_conv.add_argument("--mmproj-type", default=None,
+                        help="多模态投影器架构类型(如 auto, qwen2vl, minicpmv, llava, clip 等;缺省自动检测)")
     p_conv.add_argument("--quantize", "-q", default=None,
                         help="llama-quantize 量化格式(如 Q4_K_M, Q8_0, Q5_K_M 等;投影器保持不量化)")
     p_conv.add_argument("--clean-intermediate", action="store_true", default=False,

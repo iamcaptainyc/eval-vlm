@@ -93,6 +93,7 @@ def run_gguf_conversion(
     outtype: str = "bf16",
     is_multimodal: Optional[bool] = None,
     mmproj_outtype: str = "f16",
+    mmproj_type: Optional[str] = None,
     quantize: Optional[str] = None,
     clean_intermediate: bool = False,
     llama_cpp_dir: Optional[str | Path] = None,
@@ -171,6 +172,8 @@ def run_gguf_conversion(
     print(f"  - 多模态转换:   {'是 (将两阶段导出主模型与 mmproj)' if is_multimodal else '否 (纯语言模型)'}", flush=True)
     if is_multimodal:
         print(f"  - 投影器精度:   {mmproj_outtype_clean}", flush=True)
+        if mmproj_type and mmproj_type.strip() and mmproj_type.strip().lower() != "auto":
+            print(f"  - 投影器类型:   {mmproj_type.strip()}", flush=True)
     if quantize:
         print(f"  - 目标量化格式: {quantize.upper()}", flush=True)
     print(f"========================================================\n", flush=True)
@@ -203,6 +206,9 @@ def run_gguf_conversion(
             "--outfile", str(base_mmproj_gguf),
             "--outtype", mmproj_outtype_clean,
         ]
+        if mmproj_type and mmproj_type.strip() and mmproj_type.strip().lower() != "auto":
+            # 某些 llama.cpp 分支支持 --model-name 或特定的投影器模式覆盖
+            cmd_mmproj.extend(["--model-name", mmproj_type.strip()])
         history_cmds.append(cmd_mmproj)
         print(f"\n[阶段 2/3] 导出多模态视觉投影器 (--mmproj) -> {base_mmproj_gguf.name}...", flush=True)
         print(f"  执行指令: {' '.join(cmd_mmproj)}\n", flush=True)
