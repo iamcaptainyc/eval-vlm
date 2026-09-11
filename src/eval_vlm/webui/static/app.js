@@ -43,8 +43,8 @@ const state = {
   },
 
   // 本地模型与全局设置
-  models: { hf_models: [], mnn_models: [], hf_dir: null, mnn_dir: null },
-  settings: { workspace: "", media_root: "", image_strip_prefix: "", hf_models_dir: "", mnn_models_dir: "" },
+  models: { hf_models: [], mnn_models: [], llamacpp_models: [], hf_dir: null, mnn_dir: null, llamacpp_dir: null },
+  settings: { workspace: "", media_root: "", image_strip_prefix: "", hf_models_dir: "", mnn_models_dir: "", llamacpp_models_dir: "" },
 
   // Sweep 跨集批量扫描
   sweep: {
@@ -752,11 +752,14 @@ async function loadModels() {
     state.models = {
       hf_models: data.hf_models || [],
       mnn_models: data.mnn_models || [],
+      llamacpp_models: data.llamacpp_models || [],
       hf_dir: data.hf_dir || null,
       mnn_dir: data.mnn_dir || null,
+      llamacpp_dir: data.llamacpp_dir || null,
     };
     renderModelSelects();
     renderModelCards();
+    updateGGUFConvertHfOptions();
   } catch (err) {
     console.warn("加载本地模型失败:", err);
   }
@@ -765,12 +768,17 @@ async function loadModels() {
 function renderModelSelects() {
   // 1. Task Queue (任务队列) 与 任务启动弹窗 模型下拉框
   const optHF = (state.models.hf_models || [])
-    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="hf" data-name="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="hf" data-name="${escapeHtml(m.name)}" data-modelname="${escapeHtml(m.model_name || '')}">🤗 ${escapeHtml(m.name)}</option>`)
     .join("");
   const optMNN = (state.models.mnn_models || [])
-    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="mnn" data-name="${escapeHtml(m.name)}">⚡ ${escapeHtml(m.name)}</option>`)
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="mnn" data-name="${escapeHtml(m.name)}" data-modelname="${escapeHtml(m.model_name || '')}">⚡ ${escapeHtml(m.name)}</option>`)
     .join("");
+  const optLlamaCpp = (state.models.llamacpp_models || [])
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-type="llamacpp" data-name="${escapeHtml(m.name)}" data-modelname="${escapeHtml(m.model_name || '')}" data-mmproj="${escapeHtml(m.mmproj_path || '')}">🦙 ${escapeHtml(m.name)}</option>`)
+    .join("");
+
   const groupedModelOptions = `<option value="">-- 选择已探测模型 --</option>` +
+    (optLlamaCpp ? `<optgroup label="🦙 llama.cpp GGUF 模型 (成对双 GGUF)">${optLlamaCpp}</optgroup>` : "") +
     (optHF ? `<optgroup label="🤗 HF / vLLM 模型 (本地权重)">${optHF}</optgroup>` : "") +
     (optMNN ? `<optgroup label="⚡ MNN 离线模型 (本地文件/目录)">${optMNN}</optgroup>` : "") +
     `<option value="__custom__">✏️ 自定义输入 / 路径</option>`;
@@ -796,7 +804,11 @@ function renderModelSelects() {
     let options = `<option value="">(选择本地已探测模型)</option>`;
     if (backend === "mnn") {
       options += (state.models.mnn_models || [])
-        .map((m) => `<option value="${escapeHtml(m.path)}">⚡ ${escapeHtml(m.name)}</option>`)
+        .map((m) => `<option value="${escapeHtml(m.path)}" data-modelname="${escapeHtml(m.model_name || '')}">⚡ ${escapeHtml(m.name)}</option>`)
+        .join("");
+    } else if (backend === "llamacpp") {
+      options += (state.models.llamacpp_models || [])
+        .map((m) => `<option value="${escapeHtml(m.path)}" data-modelname="${escapeHtml(m.model_name || '')}" data-mmproj="${escapeHtml(m.mmproj_path || '')}">🦙 ${escapeHtml(m.name)}</option>`)
         .join("");
     } else {
       options += (state.models.hf_models || [])
@@ -838,6 +850,14 @@ function renderModelSelects() {
         .map((m) => `<option value="${escapeHtml(m.path)}">🤗 ${escapeHtml(m.name)}</option>`)
         .join("");
   }
+
+  const cfgLlamaCppSelect = document.getElementById("cfg-form-llamacpp-model-select");
+  if (cfgLlamaCppSelect) {
+    cfgLlamaCppSelect.innerHTML = `<option value="">(从已探测 llamacpp 成对模型中选择)</option>` +
+      (state.models.llamacpp_models || [])
+        .map((m) => `<option value="${escapeHtml(m.path)}" data-mmproj="${escapeHtml(m.mmproj_path || '')}" data-modelname="${escapeHtml(m.model_name || '')}">🦙 ${escapeHtml(m.name)}</option>`)
+        .join("");
+  }
 }
 
 function renderModelCards() {
@@ -845,6 +865,8 @@ function renderModelCards() {
   if (hfBadge) hfBadge.textContent = `HF/vLLM: ${(state.models.hf_models || []).length} 个`;
   const mnnBadge = document.getElementById("settings-scan-badge-mnn");
   if (mnnBadge) mnnBadge.textContent = `MNN: ${(state.models.mnn_models || []).length} 个`;
+  const llamacppBadge = document.getElementById("settings-scan-badge-llamacpp");
+  if (llamacppBadge) llamacppBadge.textContent = `llama.cpp(GGUF): ${(state.models.llamacpp_models || []).length} 个`;
 }
 
 
@@ -863,6 +885,7 @@ async function loadSettings() {
     const spIn = document.getElementById("settings-strip-prefix");
     const hfIn = document.getElementById("settings-hf-dir");
     const mnnIn = document.getElementById("settings-mnn-dir");
+    const llamacppIn = document.getElementById("settings-llamacpp-dir");
     const trIn = document.getElementById("settings-train-out");
     const vaIn = document.getElementById("settings-val-out");
     const teIn = document.getElementById("settings-test-out");
@@ -890,6 +913,13 @@ async function loadSettings() {
         mnnIn.value = cfg.mnn_models_dir.join("\n");
       } else {
         mnnIn.value = cfg.mnn_models_dir || "";
+      }
+    }
+    if (llamacppIn) {
+      if (Array.isArray(cfg.llamacpp_models_dir)) {
+        llamacppIn.value = cfg.llamacpp_models_dir.join("\n");
+      } else {
+        llamacppIn.value = cfg.llamacpp_models_dir || "";
       }
     }
     if (trIn) trIn.value = cfg.train_out_dir || "";
@@ -928,6 +958,7 @@ async function saveSettings() {
       image_strip_prefix: document.getElementById("settings-strip-prefix")?.value.trim() || "",
       hf_models_dir: document.getElementById("settings-hf-dir")?.value.trim() || "",
       mnn_models_dir: document.getElementById("settings-mnn-dir")?.value.trim() || "",
+      llamacpp_models_dir: document.getElementById("settings-llamacpp-dir")?.value.trim() || "",
       train_out_dir: document.getElementById("settings-train-out")?.value.trim() || "",
       val_out_dir: document.getElementById("settings-val-out")?.value.trim() || "",
       test_out_dir: document.getElementById("settings-test-out")?.value.trim() || "",
@@ -1047,15 +1078,34 @@ function onSweepBackendChange() {
 
 function onSweepModelSelect(val) {
   if (val) {
+    const sel = document.getElementById("sweep-model-select");
+    const opt = sel?.options[sel.selectedIndex];
+    const backend = document.getElementById("sweep-backend")?.value || "openai";
     const input = document.getElementById("sweep-model-input");
-    if (input) input.value = val;
+    if (backend === "llamacpp") {
+      const modelName = opt?.getAttribute("data-modelname");
+      const mmprojPath = opt?.getAttribute("data-mmproj");
+      if (input) {
+        input.value = modelName || val;
+        input.setAttribute("data-modelpath", val);
+        if (mmprojPath) input.setAttribute("data-mmproj", mmprojPath);
+        else input.removeAttribute("data-mmproj");
+      }
+    } else {
+      if (input) {
+        input.value = val;
+        input.removeAttribute("data-modelpath");
+        input.removeAttribute("data-mmproj");
+      }
+    }
   }
   updateSweepCmdPreview();
 }
 
 function updateSweepCmdPreview() {
   const backend = document.getElementById("sweep-backend")?.value || "";
-  const model = document.getElementById("sweep-model-input")?.value.trim() || "";
+  const modelInput = document.getElementById("sweep-model-input");
+  const model = modelInput?.value.trim() || "";
   const baseUrl = document.getElementById("sweep-base-url")?.value.trim() || "";
   const method = document.getElementById("sweep-method")?.value || "";
   const limit = document.getElementById("sweep-limit")?.value.trim() || "";
@@ -1072,6 +1122,12 @@ function updateSweepCmdPreview() {
   }
   if (backend) parts.push("--backend", backend);
   if (model) parts.push("--model", model.includes(" ") ? `"${model}"` : model);
+  if (backend === "llamacpp") {
+    const mp = modelInput?.getAttribute("data-modelpath");
+    const mm = modelInput?.getAttribute("data-mmproj");
+    if (mp) parts.push("--llamacpp-model-path", mp.includes(" ") ? `"${mp}"` : mp);
+    if (mm) parts.push("--llamacpp-mmproj", mm.includes(" ") ? `"${mm}"` : mm);
+  }
   if (baseUrl) parts.push("--base-url", baseUrl);
   if (method) parts.push("--method", method);
   if (limit) parts.push("--limit", limit);
@@ -1163,10 +1219,12 @@ function setConfigBackend(backend) {
   const grpMNN = document.getElementById("cfg-group-mnn");
   const grpVLLM = document.getElementById("cfg-group-vllm_offline");
   const grpHF = document.getElementById("cfg-group-hf");
+  const grpLlamaCpp = document.getElementById("cfg-group-llamacpp");
   if (grpOpenAI) grpOpenAI.style.display = (backend === "openai" || backend === "vllm" || backend === "fake") ? "block" : "none";
   if (grpMNN) grpMNN.style.display = backend === "mnn" ? "block" : "none";
   if (grpVLLM) grpVLLM.style.display = backend === "vllm_offline" ? "block" : "none";
   if (grpHF) grpHF.style.display = backend === "hf" ? "block" : "none";
+  if (grpLlamaCpp) grpLlamaCpp.style.display = backend === "llamacpp" ? "block" : "none";
   markConfigDirty();
 }
 
@@ -1339,6 +1397,35 @@ function renderConfig() {
   if (hfGreedy) hfGreedy.checked = hf.greedy !== false;
   if (hfSysPrompt) hfSysPrompt.value = hf.system_prompt || "";
 
+  // llama.cpp 字段
+  const lcpp = cfg.inference?.llamacpp || {};
+  const lcppMode = document.getElementById("cfg-form-llamacpp-mode");
+  const lcppBaseUrl = document.getElementById("cfg-form-llamacpp-baseurl");
+  const lcppModelPath = document.getElementById("cfg-form-llamacpp-modelpath");
+  const lcppMmprojPath = document.getElementById("cfg-form-llamacpp-mmprojpath");
+  const lcppCliBinary = document.getElementById("cfg-form-llamacpp-clibinary");
+  const lcppMaxTokens = document.getElementById("cfg-form-llamacpp-maxtokens");
+  const lcppTemp = document.getElementById("cfg-form-llamacpp-temp");
+  const lcppTopP = document.getElementById("cfg-form-llamacpp-topp");
+  const lcppRepPenalty = document.getElementById("cfg-form-llamacpp-reppenalty");
+  const lcppConcurrency = document.getElementById("cfg-form-llamacpp-concurrency");
+  const lcppMaxSide = document.getElementById("cfg-form-llamacpp-maxside");
+  const lcppSysPrompt = document.getElementById("cfg-form-llamacpp-sysprompt");
+
+  if (lcppMode) lcppMode.value = lcpp.mode || "server";
+  if (lcppBaseUrl) lcppBaseUrl.value = lcpp.base_url || "http://127.0.0.1:8080/v1";
+  if (lcppModelPath) lcppModelPath.value = lcpp.model_path || "";
+  if (lcppMmprojPath) lcppMmprojPath.value = lcpp.mmproj_path || "";
+  if (lcppCliBinary) lcppCliBinary.value = lcpp.cli_binary || "";
+  if (lcppMaxTokens) lcppMaxTokens.value = lcpp.max_tokens ?? 512;
+  if (lcppTemp) lcppTemp.value = (lcpp.temperature !== null && lcpp.temperature !== undefined) ? lcpp.temperature : 0.0;
+  if (lcppTopP) lcppTopP.value = (lcpp.top_p !== null && lcpp.top_p !== undefined) ? lcpp.top_p : 1.0;
+  if (lcppRepPenalty) lcppRepPenalty.value = lcpp.repetition_penalty ?? 1.0;
+  if (lcppConcurrency) lcppConcurrency.value = lcpp.max_concurrency ?? 4;
+  if (lcppMaxSide) lcppMaxSide.value = lcpp.image_max_side ?? 2048;
+  if (lcppSysPrompt) lcppSysPrompt.value = lcpp.system_prompt || "";
+  onLlamaCppModeChange();
+
   // 2. 评测策略
   const evMethod = document.getElementById("cfg-form-eval-method");
   const evScorer = document.getElementById("cfg-form-scoring-scorer");
@@ -1507,6 +1594,34 @@ async function saveAllConfigChanges() {
     updates.push({ key: "inference.hf.image_max_pixels", value: maxPx });
     updates.push({ key: "inference.hf.greedy", value: gr });
     updates.push({ key: "inference.hf.system_prompt", value: sp });
+  } else if (activeBackend === "llamacpp") {
+    const md = document.getElementById("cfg-form-llamacpp-mode")?.value || "server";
+    const bu = document.getElementById("cfg-form-llamacpp-baseurl")?.value.trim() || "http://127.0.0.1:8080/v1";
+    const mp = document.getElementById("cfg-form-llamacpp-modelpath")?.value.trim();
+    const mm = document.getElementById("cfg-form-llamacpp-mmprojpath")?.value.trim();
+    const cb = document.getElementById("cfg-form-llamacpp-clibinary")?.value.trim();
+    const mt = parseInt(document.getElementById("cfg-form-llamacpp-maxtokens")?.value || "512", 10);
+    const tpVal = document.getElementById("cfg-form-llamacpp-temp")?.value.trim();
+    const tp = tpVal === "" ? 0.0 : parseFloat(tpVal);
+    const topPVal = document.getElementById("cfg-form-llamacpp-topp")?.value.trim();
+    const topP = topPVal === "" ? 1.0 : parseFloat(topPVal);
+    const rp = parseFloat(document.getElementById("cfg-form-llamacpp-reppenalty")?.value || "1.0");
+    const cc = parseInt(document.getElementById("cfg-form-llamacpp-concurrency")?.value || "4", 10);
+    const ms = parseInt(document.getElementById("cfg-form-llamacpp-maxside")?.value || "2048", 10);
+    const sp = document.getElementById("cfg-form-llamacpp-sysprompt")?.value || "";
+
+    updates.push({ key: "inference.llamacpp.mode", value: md });
+    updates.push({ key: "inference.llamacpp.base_url", value: bu });
+    if (mp) updates.push({ key: "inference.llamacpp.model_path", value: mp });
+    if (mm) updates.push({ key: "inference.llamacpp.mmproj_path", value: mm });
+    if (cb) updates.push({ key: "inference.llamacpp.cli_binary", value: cb });
+    updates.push({ key: "inference.llamacpp.max_tokens", value: mt });
+    updates.push({ key: "inference.llamacpp.temperature", value: tp });
+    updates.push({ key: "inference.llamacpp.top_p", value: topP });
+    updates.push({ key: "inference.llamacpp.repetition_penalty", value: rp });
+    updates.push({ key: "inference.llamacpp.max_concurrency", value: cc });
+    updates.push({ key: "inference.llamacpp.image_max_side", value: ms });
+    updates.push({ key: "inference.llamacpp.system_prompt", value: sp });
   } else {
     const mdl = document.getElementById("cfg-form-openai-model")?.value.trim();
     const bu = document.getElementById("cfg-form-openai-baseurl")?.value.trim();
@@ -1598,6 +1713,26 @@ async function saveSingleConfigKey(key, value) {
   } catch (err) {
     showToast(`更新配置失败: ${err.message}`, "error");
   }
+}
+
+function onLlamaCppModeChange() {
+  const mode = document.getElementById("cfg-form-llamacpp-mode")?.value || "server";
+  const urlField = document.getElementById("cfg-field-llamacpp-baseurl");
+  const cliField = document.getElementById("cfg-field-llamacpp-clibinary");
+  if (urlField) urlField.style.display = (mode === "server") ? "block" : "none";
+  if (cliField) cliField.style.display = (mode === "cli") ? "block" : "none";
+}
+
+function onLlamaCppModelSelectChange(val) {
+  if (!val) return;
+  const sel = document.getElementById("cfg-form-llamacpp-model-select");
+  const opt = sel?.options[sel.selectedIndex];
+  const mmproj = opt?.getAttribute("data-mmproj") || "";
+  const modelPathInput = document.getElementById("cfg-form-llamacpp-modelpath");
+  const mmprojPathInput = document.getElementById("cfg-form-llamacpp-mmprojpath");
+  if (modelPathInput) modelPathInput.value = val;
+  if (mmprojPathInput && mmproj) mmprojPathInput.value = mmproj;
+  markConfigDirty();
 }
 
 // --------------------------------------------------------------------------
@@ -1755,7 +1890,8 @@ function buildJobModalArgs() {
   }
 
   const backend = document.getElementById("job-modal-backend")?.value;
-  const model = document.getElementById("job-modal-model")?.value?.trim();
+  const modelInput = document.getElementById("job-modal-model");
+  const model = modelInput?.value?.trim();
   const limit = document.getElementById("job-modal-limit")?.value?.trim();
   const failfast = document.getElementById("job-modal-failfast")?.checked;
 
@@ -1777,6 +1913,19 @@ function buildJobModalArgs() {
     } else if (backend === "mnn") {
       params.mnn_config = model;
       parts.push("--mnn-config", model);
+    } else if (backend === "llamacpp") {
+      const modelPath = modelInput?.getAttribute("data-modelpath") || model;
+      const mmprojPath = modelInput?.getAttribute("data-mmproj") || "";
+      params.model = model;
+      parts.push("--model", model);
+      if (modelPath) {
+        params.llamacpp_model_path = modelPath;
+        parts.push("--llamacpp-model-path", modelPath);
+      }
+      if (mmprojPath) {
+        params.llamacpp_mmproj = mmprojPath;
+        parts.push("--llamacpp-mmproj", mmprojPath);
+      }
     } else {
       params.model = model;
       parts.push("--model", model);
@@ -1878,12 +2027,25 @@ function onJobModalModelSelectChange() {
   }
   const opt = sel.options[sel.selectedIndex];
   const modelType = opt?.getAttribute("data-type");
-  input.value = val;
-  if (modelType === "mnn") {
-    if (backendSel) backendSel.value = "mnn";
-  } else if (modelType === "hf") {
-    if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
-      backendSel.value = "vllm_offline";
+  const modelName = opt?.getAttribute("data-modelname");
+  const mmprojPath = opt?.getAttribute("data-mmproj");
+
+  if (modelType === "llamacpp") {
+    input.value = modelName || val;
+    input.setAttribute("data-modelpath", val);
+    if (mmprojPath) input.setAttribute("data-mmproj", mmprojPath);
+    else input.removeAttribute("data-mmproj");
+    if (backendSel) backendSel.value = "llamacpp";
+  } else {
+    input.value = val;
+    input.removeAttribute("data-modelpath");
+    input.removeAttribute("data-mmproj");
+    if (modelType === "mnn") {
+      if (backendSel) backendSel.value = "mnn";
+    } else if (modelType === "hf") {
+      if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
+        backendSel.value = "vllm_offline";
+      }
     }
   }
   onJobModalBackendChange();
@@ -1905,6 +2067,9 @@ function onJobModalBackendChange() {
   } else if (backend === "mnn") {
     flagText = "--mnn-config";
     descText = "MNN 配置 (--mnn-config)";
+  } else if (backend === "llamacpp") {
+    flagText = "--model";
+    descText = "GGUF 模型名 A (--model)";
   }
   if (labelEl) labelEl.textContent = descText;
   if (badgeEl) badgeEl.textContent = flagText;
@@ -1974,12 +2139,25 @@ function onJobInlineModelSelectChange() {
   }
   const opt = sel.options[sel.selectedIndex];
   const modelType = opt?.getAttribute("data-type");
-  input.value = val;
-  if (modelType === "mnn") {
-    if (backendSel) backendSel.value = "mnn";
-  } else if (modelType === "hf") {
-    if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
-      backendSel.value = "vllm_offline";
+  const modelName = opt?.getAttribute("data-modelname");
+  const mmprojPath = opt?.getAttribute("data-mmproj");
+
+  if (modelType === "llamacpp") {
+    input.value = modelName || val;
+    input.setAttribute("data-modelpath", val);
+    if (mmprojPath) input.setAttribute("data-mmproj", mmprojPath);
+    else input.removeAttribute("data-mmproj");
+    if (backendSel) backendSel.value = "llamacpp";
+  } else {
+    input.value = val;
+    input.removeAttribute("data-modelpath");
+    input.removeAttribute("data-mmproj");
+    if (modelType === "mnn") {
+      if (backendSel) backendSel.value = "mnn";
+    } else if (modelType === "hf") {
+      if (backendSel && (!backendSel.value || backendSel.value === "mnn")) {
+        backendSel.value = "vllm_offline";
+      }
     }
   }
   onJobInlineBackendChange();
@@ -2001,6 +2179,9 @@ function onJobInlineBackendChange() {
   } else if (backend === "mnn") {
     flagText = "--mnn-config";
     descText = "MNN 配置 (--mnn-config)";
+  } else if (backend === "llamacpp") {
+    flagText = "--model";
+    descText = "GGUF 模型名 A (--model)";
   }
   if (labelEl) labelEl.textContent = descText;
   if (badgeEl) badgeEl.textContent = flagText;
@@ -2056,7 +2237,8 @@ function buildInlineJobArgs() {
   const dataset = dsSelect ? dsSelect.value : state.currentDataset;
 
   const backend = document.getElementById("job-inline-backend")?.value;
-  const model = document.getElementById("job-inline-model")?.value?.trim();
+  const modelInput = document.getElementById("job-inline-model");
+  const model = modelInput?.value?.trim();
   const limit = document.getElementById("job-inline-limit")?.value?.trim();
   const failfast = document.getElementById("job-inline-failfast")?.checked;
 
@@ -2078,6 +2260,19 @@ function buildInlineJobArgs() {
     } else if (backend === "mnn") {
       params.mnn_config = model;
       parts.push("--mnn-config", model);
+    } else if (backend === "llamacpp") {
+      const modelPath = modelInput?.getAttribute("data-modelpath") || model;
+      const mmprojPath = modelInput?.getAttribute("data-mmproj") || "";
+      params.model = model;
+      parts.push("--model", model);
+      if (modelPath) {
+        params.llamacpp_model_path = modelPath;
+        parts.push("--llamacpp-model-path", modelPath);
+      }
+      if (mmprojPath) {
+        params.llamacpp_mmproj = mmprojPath;
+        parts.push("--llamacpp-mmproj", mmprojPath);
+      }
     } else {
       params.model = model;
       parts.push("--model", model);
@@ -3061,6 +3256,151 @@ function renderHealth() {
 }
 
 // --------------------------------------------------------------------------
+// HuggingFace 转 GGUF 可视化工坊 (GGUF Conversion Workshop)
+// --------------------------------------------------------------------------
+function updateGGUFConvertHfOptions() {
+  const sel = document.getElementById("gguf-conv-hf-select");
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = (state.models.hf_models || [])
+    .map((m) => `<option value="${escapeHtml(m.path)}" data-name="${escapeHtml(m.name)}">🤗 ${escapeHtml(m.name)}</option>`)
+    .join("");
+  sel.innerHTML = `<option value="">(从已探测 HF 模型中快速选择)</option>` + opts;
+  if (cur) sel.value = cur;
+}
+
+function openGGUFConvertModal() {
+  const modal = document.getElementById("gguf-convert-modal");
+  if (!modal) return;
+  updateGGUFConvertHfOptions();
+  updateGGUFConvertPreview();
+  modal.showModal();
+}
+
+function closeGGUFConvertModal() {
+  const modal = document.getElementById("gguf-convert-modal");
+  if (modal) modal.close();
+}
+
+function onGGUFConvertHfSelect(val) {
+  const pathInput = document.getElementById("gguf-conv-hf-path");
+  const nameInput = document.getElementById("gguf-conv-name");
+  if (pathInput) pathInput.value = val || "";
+  if (val && nameInput && !nameInput.value.trim()) {
+    const sel = document.getElementById("gguf-conv-hf-select");
+    const opt = sel?.options[sel.selectedIndex];
+    const detectedName = opt?.getAttribute("data-name");
+    if (detectedName) {
+      nameInput.value = detectedName;
+    } else {
+      const parts = val.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
+      nameInput.value = parts[parts.length - 1] || "";
+    }
+  }
+  updateGGUFConvertPreview();
+}
+
+function onGGUFConvertHfInput() {
+  const pathInput = document.getElementById("gguf-conv-hf-path");
+  const nameInput = document.getElementById("gguf-conv-name");
+  const val = pathInput?.value.trim() || "";
+  if (val && nameInput && !nameInput.value.trim()) {
+    const parts = val.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
+    nameInput.value = parts[parts.length - 1] || "";
+  }
+  updateGGUFConvertPreview();
+}
+
+function toggleGGUFConvertMMProj(enabled) {
+  const panel = document.getElementById("gguf-conv-mmproj-panel");
+  if (panel) panel.style.display = enabled ? "grid" : "none";
+  updateGGUFConvertPreview();
+}
+
+function updateGGUFConvertPreview() {
+  const hfPath = document.getElementById("gguf-conv-hf-path")?.value.trim() || "";
+  const name = document.getElementById("gguf-conv-name")?.value.trim() || "";
+  const outtype = document.getElementById("gguf-conv-outtype")?.value || "bf16";
+  const mmprojEnable = document.getElementById("gguf-conv-mmproj-enable")?.checked ?? true;
+  const mmprojOuttype = document.getElementById("gguf-conv-mmproj-outtype")?.value || "f16";
+  const quant = document.getElementById("gguf-conv-quant")?.value || "";
+  const llamaCppDir = document.getElementById("gguf-conv-llamacpp-dir")?.value.trim() || "";
+  const cleanInter = document.getElementById("gguf-conv-clean-intermediate")?.checked ?? false;
+
+  const modelName = name || (hfPath ? hfPath.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() : "A");
+
+  // 更新文件名只读展示
+  const mmprojFileEl = document.getElementById("gguf-conv-mmproj-filename");
+  if (mmprojFileEl) {
+    mmprojFileEl.value = `${modelName}_${mmprojOuttype}_mmproj.gguf`;
+  }
+
+  const destHint = document.getElementById("gguf-conv-dest-hint");
+  if (destHint) {
+    destHint.textContent = `落地: <llamacpp_models_dir>/${modelName}/`;
+  }
+
+  const parts = ["python", "-m", "eval_vlm", "convert-gguf"];
+  if (hfPath) parts.push("--hf-path", hfPath.includes(" ") ? `"${hfPath}"` : hfPath);
+  if (name) parts.push("--name", name.includes(" ") ? `"${name}"` : name);
+  if (outtype) parts.push("--outtype", outtype);
+  if (!mmprojEnable) parts.push("--no-mmproj");
+  else if (mmprojOuttype) parts.push("--mmproj-outtype", mmprojOuttype);
+  if (quant) parts.push("--quantize", quant);
+  if (cleanInter) parts.push("--clean-intermediate");
+  if (llamaCppDir) parts.push("--llama-cpp-dir", llamaCppDir.includes(" ") ? `"${llamaCppDir}"` : llamaCppDir);
+
+  const previewEl = document.getElementById("gguf-conv-cmd-preview");
+  if (previewEl) previewEl.textContent = parts.join(" ");
+}
+
+async function submitGGUFConvertTask() {
+  const hfPath = document.getElementById("gguf-conv-hf-path")?.value.trim();
+  if (!hfPath) {
+    showToast("请指定源 HuggingFace 模型权重目录", "warning");
+    return;
+  }
+
+  const name = document.getElementById("gguf-conv-name")?.value.trim() || null;
+  const outtype = document.getElementById("gguf-conv-outtype")?.value || "bf16";
+  const isMultimodal = document.getElementById("gguf-conv-mmproj-enable")?.checked ?? true;
+  const mmprojOuttype = document.getElementById("gguf-conv-mmproj-outtype")?.value || "f16";
+  const quantize = document.getElementById("gguf-conv-quant")?.value || null;
+  const llamaCppDir = document.getElementById("gguf-conv-llamacpp-dir")?.value.trim() || null;
+  const cleanIntermediate = document.getElementById("gguf-conv-clean-intermediate")?.checked ?? false;
+
+  const payload = {
+    hf_path: hfPath,
+    name: name,
+    outtype: outtype,
+    is_multimodal: isMultimodal,
+    mmproj_outtype: mmprojOuttype,
+    quantize: quantize,
+    clean_intermediate: cleanIntermediate,
+    llama_cpp_dir: llamaCppDir,
+  };
+
+  try {
+    const res = await fetch("/api/tools/convert-gguf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const job = await res.json();
+    closeGGUFConvertModal();
+    showToast(`GGUF 转换任务已成功提交入队: ${job.id}`, "success");
+    await loadJobs();
+    openTerminal(job.id);
+  } catch (err) {
+    showToast(`提交转换任务失败: ${err.message}`, "error");
+  }
+}
+
+// --------------------------------------------------------------------------
 // 页面初始化
 // --------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
@@ -3156,6 +3496,18 @@ window.onJobModalModelSelectChange = onJobModalModelSelectChange;
 window.onJobModalBackendChange = onJobModalBackendChange;
 window.onJobModalTargetsChange = onJobModalTargetsChange;
 window.onJobModalEvalTargetsChange = onJobModalEvalTargetsChange;
+window.onLlamaCppModeChange = onLlamaCppModeChange;
+window.onLlamaCppModelSelectChange = onLlamaCppModelSelectChange;
+
+// GGUF 转换工坊
+window.openGGUFConvertModal = openGGUFConvertModal;
+window.closeGGUFConvertModal = closeGGUFConvertModal;
+window.updateGGUFConvertHfOptions = updateGGUFConvertHfOptions;
+window.onGGUFConvertHfSelect = onGGUFConvertHfSelect;
+window.onGGUFConvertHfInput = onGGUFConvertHfInput;
+window.toggleGGUFConvertMMProj = toggleGGUFConvertMMProj;
+window.updateGGUFConvertPreview = updateGGUFConvertPreview;
+window.submitGGUFConvertTask = submitGGUFConvertTask;
 
 // 重跑与 HTML 报告
 window.rerunCurrentRun = rerunCurrentRun;

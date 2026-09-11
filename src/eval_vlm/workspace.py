@@ -20,7 +20,7 @@ import yaml
 # 全局配置的机器级顶层键(及默认值)。
 _TOP_KEYS = ("workspace", "media_root", "image_strip_prefix",
              "train_out_dir", "val_out_dir", "test_out_dir",
-             "hf_models_dir", "mnn_models_dir")
+             "hf_models_dir", "mnn_models_dir", "llamacpp_models_dir")
 _GLOBAL_DEFAULTS = {
     "workspace": "~/eval_vlm_workspace",
     "media_root": ".",
@@ -33,11 +33,13 @@ _GLOBAL_DEFAULTS = {
     "test_out_dir": None,
     "hf_models_dir": None,
     "mnn_models_dir": None,
+    "llamacpp_models_dir": None,
 }
 
 # 允许显式设为 null 的顶层键(其余顶层键不能为空)。
 _TOP_NULLABLE = frozenset(
-    {"image_strip_prefix", "train_out_dir", "val_out_dir", "test_out_dir", "hf_models_dir", "mnn_models_dir"}
+    {"image_strip_prefix", "train_out_dir", "val_out_dir", "test_out_dir",
+     "hf_models_dir", "mnn_models_dir", "llamacpp_models_dir"}
 )
 
 # split 默认值(嵌套在全局配置 split: 块下;不传 --train/--test 等时使用)。
@@ -69,6 +71,8 @@ _KEY_SPECS: tuple[tuple[str, str, Any, str], ...] = (
      "HuggingFace/vLLM/OpenAI 模型权重存储目录(WebUI 模型浏览器)"),
     ("mnn_models_dir", "路径|null", _GLOBAL_DEFAULTS["mnn_models_dir"],
      "MNN 模型存储根目录(WebUI 模型浏览器)"),
+    ("llamacpp_models_dir", "路径|null", _GLOBAL_DEFAULTS["llamacpp_models_dir"],
+     "llama.cpp GGUF 模型存储根目录(含多模态成对模型文件夹)"),
     ("split.train", "float", _SPLIT_DEFAULTS["train"],
      "默认训练集比例(不传 --train 时用)"),
     ("split.test", "float", _SPLIT_DEFAULTS["test"],
@@ -697,22 +701,35 @@ def _check_and_add_mnn(
 def scan_local_models(
     hf_dir: Optional[Any] = None,
     mnn_dir: Optional[Any] = None,
+    llamacpp_dir: Optional[Any] = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """探测并枚举本地存储的 HF/vLLM 模型与 MNN 模型。
+    """探测并枚举本地存储的 HF/vLLM 模型、MNN 模型与 llama.cpp GGUF 模型。
 
-    支持配置多个目录(列表或换行/分号/逗号分隔的字符串，如同时配置基座权重与 GPTQ 量化权重目录)。
-    支持 1~2 层子目录扫描(如 /models/Qwen2-VL-7B 或 /models/Qwen/Qwen2-VL-7B)。
-    多目录时自动加目录前缀区分，并自动对绝对路径做去重。
+    支持配置多个目录(列表或换行/分号/逗号分隔的字符串)。
+    llama.cpp 模型按照模型子文件夹组织(例如 <llamacpp_models_dir>/<A>/):
+      内部包含 A_Q4_K_M.gguf / A_bf16_mmproj.gguf 等,系统自动提取父文件夹名 A 作为模型名,
+      并智能成对匹配主模型与 mmproj 投影器。
     返回:
       {
         "hf_models": [{"name": "...", "path": "...", "type": "hf"}],
-        "mnn_models": [{"name": "...", "path": "...", "type": "mnn"}]
+        "mnn_models": [{"name": "...", "path": "...", "type": "mnn"}],
+        "llamacpp_models": [
+            {
+                "name": "A (A_Q4_K_M.gguf + A_bf16_mmproj.gguf)",
+                "model_name": "A",
+                "path": ".../A/A_Q4_K_M.gguf",
+                "mmproj_path": ".../A/A_bf16_mmproj.gguf",
+                "type": "llamacpp"
+            }
+        ]
       }
     """
     hf_models: list[dict[str, Any]] = []
     mnn_models: list[dict[str, Any]] = []
+    llamacpp_models: list[dict[str, Any]] = []
     seen_hf_paths: set[str] = set()
     seen_mnn_paths: set[str] = set()
+    seen_llamacpp_pairs: set[str] = set()
 
     # 1. 扫描 HF / vLLM / transformers 模型
     hf_roots = _normalize_dirs(hf_dir)
@@ -751,6 +768,7 @@ def scan_local_models(
                                     "name": disp_name,
                                     "path": str(p1),
                                     "type": "mnn",
+                                    "model_name": p1.stem,
                                 })
                         elif p1.is_dir():
                             if _check_and_add_mnn(p1, mp, mnn_models, seen_mnn_paths, prefix):
@@ -765,14 +783,110 @@ def scan_local_models(
                                             "name": disp_name,
                                             "path": str(p2),
                                             "type": "mnn",
+                                            "model_name": p1.name,
                                         })
                                 elif p2.is_dir():
                                     _check_and_add_mnn(p2, mp, mnn_models, seen_mnn_paths, prefix)
         except Exception:
             pass
 
+    # 3. 扫描 llama.cpp GGUF 模型 (子文件夹成对识别)
+    llamacpp_roots = _normalize_dirs(llamacpp_dir)
+    llamacpp_multi = len(llamacpp_roots) > 1
+    for lp in llamacpp_roots:
+        try:
+            if not lp.is_dir():
+                continue
+            prefix = f"[{lp.name}] " if llamacpp_multi else ""
+
+            # 收集每个包含 gguf 的子文件夹
+            # 扫描深度: 支持 lp 目录直接包含模型子文件夹(如 lp/A/*.gguf)
+            # 以及两层(如 lp/group/A/*.gguf)
+            candidate_dirs: list[Path] = []
+            for child in sorted(lp.iterdir()):
+                if child.is_dir():
+                    candidate_dirs.append(child)
+                    for subchild in sorted(child.iterdir()):
+                        if subchild.is_dir():
+                            candidate_dirs.append(subchild)
+
+            # 遍历候选模型文件夹
+            for mdir in candidate_dirs:
+                try:
+                    gguf_files = [f for f in mdir.iterdir() if f.is_file() and f.suffix.lower() == ".gguf"]
+                    if not gguf_files:
+                        continue
+
+                    # 分离 mmproj 投影器与语言主干模型
+                    mmproj_files = [f for f in gguf_files if "mmproj" in f.name.lower()]
+                    main_files = [f for f in gguf_files if "mmproj" not in f.name.lower()]
+
+                    # 模型标识 A 取自文件夹名
+                    model_id = mdir.name
+                    rel_dir = mdir.relative_to(lp).as_posix()
+                    display_folder = f"{prefix}{rel_dir}" if prefix else rel_dir
+
+                    # 选出最匹配的 mmproj (若有多个优先取非中间临时文件或第一个)
+                    default_mmproj = str(mmproj_files[0].resolve()) if mmproj_files else None
+                    default_mmproj_name = mmproj_files[0].name if mmproj_files else None
+
+                    if main_files:
+                        for mf in main_files:
+                            m_key = f"{str(mf.resolve())}::{default_mmproj or ''}".lower()
+                            if m_key in seen_llamacpp_pairs:
+                                continue
+                            seen_llamacpp_pairs.add(m_key)
+
+                            if default_mmproj_name:
+                                disp_name = f"{display_folder} ({mf.name} + {default_mmproj_name})"
+                            else:
+                                disp_name = f"{display_folder} ({mf.name})"
+
+                            llamacpp_models.append({
+                                "name": disp_name,
+                                "model_name": model_id,
+                                "path": str(mf.resolve()),
+                                "mmproj_path": default_mmproj,
+                                "type": "llamacpp",
+                            })
+                    elif mmproj_files:
+                        # 仅有 mmproj 没有独立语言模型的情况
+                        for mpf in mmproj_files:
+                            m_key = f"::{str(mpf.resolve())}".lower()
+                            if m_key in seen_llamacpp_pairs:
+                                continue
+                            seen_llamacpp_pairs.add(m_key)
+                            llamacpp_models.append({
+                                "name": f"{display_folder} ({mpf.name}) [仅投影器]",
+                                "model_name": model_id,
+                                "path": "",
+                                "mmproj_path": str(mpf.resolve()),
+                                "type": "llamacpp",
+                            })
+                except Exception:
+                    pass
+
+            # 也支持根目录平铺的单个 .gguf
+            for root_f in lp.iterdir():
+                if root_f.is_file() and root_f.suffix.lower() == ".gguf":
+                    is_mm = "mmproj" in root_f.name.lower()
+                    m_key = f"{str(root_f.resolve())}::".lower() if not is_mm else f"::{str(root_f.resolve())}".lower()
+                    if m_key not in seen_llamacpp_pairs:
+                        seen_llamacpp_pairs.add(m_key)
+                        disp_name = f"{prefix}{root_f.name}" if prefix else root_f.name
+                        llamacpp_models.append({
+                            "name": disp_name,
+                            "model_name": root_f.stem,
+                            "path": str(root_f.resolve()) if not is_mm else "",
+                            "mmproj_path": str(root_f.resolve()) if is_mm else None,
+                            "type": "llamacpp",
+                        })
+        except Exception:
+            pass
+
     return {
         "hf_models": hf_models,
         "mnn_models": mnn_models,
+        "llamacpp_models": llamacpp_models,
     }
 

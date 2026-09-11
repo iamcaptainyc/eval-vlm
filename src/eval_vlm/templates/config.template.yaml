@@ -176,13 +176,13 @@ inference:
   #   1. server: 推荐,由 `llama-server -m <model.gguf> --mmproj <mmproj.gguf>` 启动,接口完全兼容 OpenAI 多模态格式,支持并发与连续批处理;
   #   2. cli: 直接调用本地编译好的 mtmd-cli 可执行文件,串行单样本推理。
   llamacpp:
-    mode: server              # server | cli
+    mode: cli              # server | cli
     base_url: http://127.0.0.1:8080/v1  # llama-server 的 OpenAI 兼容地址
     api_key: EMPTY            # llama-server 的鉴权密钥(默认 EMPTY)
     model: default            # 逻辑模型名或别名
     model_path: null          # GGUF 语言模型路径(CLI 模式必需;server 模式用作产物子目录名)
     mmproj_path: null         # GGUF 多模态投影器路径(CLI 模式必需)
-    cli_binary: null          # mtmd-cli 可执行文件路径(缺省自动在 PATH 寻找)
+    cli_binary: /root/autodl-tmp/capt/llama.cpp/build/bin/llama-mtmd-cli          # mtmd-cli 可执行文件路径(缺省自动在 PATH 寻找)
     request_timeout: 120.0    # 请求超时(秒)
     max_retries: 3            # 重试次数
     max_concurrency: 4        # server 模式最大并发数(cli 模式强制为 1)

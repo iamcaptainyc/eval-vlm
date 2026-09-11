@@ -748,6 +748,86 @@
             <textarea id="cfg-form-hf-sysprompt" class="textarea" rows="2" placeholder="（可选）设定 System 角色全局提示词，应与训练一致" oninput="markConfigDirty()"></textarea>
           </div>
         </div>
+
+        <!-- llama.cpp 后端参数卡片 -->
+        <div id="cfg-group-llamacpp" class="config-group-card" style="display: none;">
+          <div class="config-group-title"><span>🦙</span><span>llama.cpp 多模态推理参数 (inference.llamacpp.*)</span></div>
+          <div class="config-group-desc">支持 Server 模式(llama-server 连续批处理)与 CLI 模式(mtmd-cli 单样本离线)，多模态由主模型与 mmproj 成对驱动</div>
+
+          <div class="config-grid-2">
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>运行模式 (mode)</span><span class="config-key-badge">inference.llamacpp.mode</span></label>
+              <select id="cfg-form-llamacpp-mode" class="select" onchange="onLlamaCppModeChange(); markConfigDirty();">
+                <option value="server">server (推荐: 启动 llama-server 服务, 支持连续批处理与多并发)</option>
+                <option value="cli">cli (离线调用本地 mtmd-cli 可执行文件, 串行推理)</option>
+              </select>
+            </div>
+
+            <div class="config-field" id="cfg-field-llamacpp-baseurl" style="grid-column: 1 / -1;">
+              <label><span>llama-server API 地址 (base_url)</span><span class="config-key-badge">inference.llamacpp.base_url</span></label>
+              <input type="text" id="cfg-form-llamacpp-baseurl" class="input" placeholder="如 http://127.0.0.1:8080/v1" oninput="markConfigDirty()">
+              <span class="config-field-desc">由 llama-server -m &lt;model.gguf&gt; --mmproj &lt;mmproj.gguf&gt; 启动的服务端口</span>
+            </div>
+
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>本地 GGUF 主模型路径 (model_path)</span><span class="config-key-badge">inference.llamacpp.model_path</span></label>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="cfg-form-llamacpp-model-select" class="select" style="width: 40%;" onchange="onLlamaCppModelSelectChange(this.value)">
+                  <option value="">(从已探测 llamacpp 成对模型中选择)</option>
+                </select>
+                <input type="text" id="cfg-form-llamacpp-modelpath" class="input" style="flex: 1;" placeholder="如 /root/autodl-tmp/capt/model_gguf/A/A_Q4_K_M.gguf" oninput="markConfigDirty()">
+              </div>
+              <span class="config-field-desc">CLI 模式必需；server 模式亦可作为产物子目录名；所在父文件夹名 (如 A) 自动作为模型名</span>
+            </div>
+
+            <div class="config-field" style="grid-column: 1 / -1;">
+              <label><span>多模态视觉投影器路径 (mmproj_path)</span><span class="config-key-badge">inference.llamacpp.mmproj_path</span></label>
+              <input type="text" id="cfg-form-llamacpp-mmprojpath" class="input" placeholder="如 /root/autodl-tmp/capt/model_gguf/A/A_bf16_mmproj.gguf" oninput="markConfigDirty()">
+              <span class="config-field-desc">CLI 模式必需；配合主模型进行视觉特征编码</span>
+            </div>
+
+            <div class="config-field" id="cfg-field-llamacpp-clibinary" style="grid-column: 1 / -1; display: none;">
+              <label><span>mtmd-cli 可执行文件路径 (cli_binary)</span><span class="config-key-badge">inference.llamacpp.cli_binary</span></label>
+              <input type="text" id="cfg-form-llamacpp-clibinary" class="input" placeholder="如 /root/autodl-tmp/capt/llama.cpp/build/bin/llama-mtmd-cli" oninput="markConfigDirty()">
+              <span class="config-field-desc">留空自动在系统 PATH 中寻找 mtmd-cli 或 llama-mtmd-cli</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>生成最大 Token (max_tokens)</span><span class="config-key-badge">inference.llamacpp.max_tokens</span></label>
+              <input type="number" id="cfg-form-llamacpp-maxtokens" class="input" min="16" max="8192" placeholder="默认 512" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>采样温度 (temperature)</span><span class="config-key-badge">inference.llamacpp.temperature</span></label>
+              <input type="number" id="cfg-form-llamacpp-temp" class="input" min="0" max="2" step="0.05" placeholder="默认 0.0 (确定性贪心解码)" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>采样 Top-P</span><span class="config-key-badge">inference.llamacpp.top_p</span></label>
+              <input type="number" id="cfg-form-llamacpp-topp" class="input" min="0" max="1" step="0.05" placeholder="默认 1.0" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>重复惩罚 (repetition_penalty)</span><span class="config-key-badge">repetition_penalty</span></label>
+              <input type="number" id="cfg-form-llamacpp-reppenalty" class="input" min="1.0" max="2.0" step="0.05" placeholder="默认 1.0" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>最大并发数 (max_concurrency)</span><span class="config-key-badge">max_concurrency</span></label>
+              <input type="number" id="cfg-form-llamacpp-concurrency" class="input" min="1" max="64" placeholder="server 模式默认 4 (cli 强制为 1)" oninput="markConfigDirty()">
+            </div>
+
+            <div class="config-field">
+              <label><span>图片最长边限制 (image_max_side)</span><span class="config-key-badge">image_max_side</span></label>
+              <input type="number" id="cfg-form-llamacpp-maxside" class="input" placeholder="默认 2048 (0 表示关闭)" oninput="markConfigDirty()">
+            </div>
+          </div>
+
+          <div class="config-field" style="margin-top: 1rem;">
+            <label><span>系统提示词设定</span><span class="config-key-badge">inference.llamacpp.system_prompt</span></label>
+            <textarea id="cfg-form-llamacpp-sysprompt" class="textarea" rows="2" placeholder="（可选）注入 System 角色系统提示" oninput="markConfigDirty()"></textarea>
+          </div>
+        </div>
       </div>
 
       <!-- 子面板 2: 评测与打分策略 (Eval & Scoring) -->
@@ -1380,13 +1460,17 @@
                 <span>本地模型探测总览</span>
                 <span id="settings-scan-badge-hf" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">HF/vLLM: 0 个</span>
                 <span id="settings-scan-badge-mnn" class="role-badge" style="background: rgba(6,182,212,0.2); color: var(--cyan-500);">MNN: 0 个</span>
+                <span id="settings-scan-badge-llamacpp" class="role-badge" style="background: rgba(245,158,11,0.2); color: var(--amber-500);">llama.cpp(GGUF): 0 个</span>
               </div>
               <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.25rem; line-height: 1.5;">
                 💡 <strong>执行时快捷选择</strong>：所有已探测的模型均可直接在<strong>【任务队列】</strong>与<strong>【可视化配置】</strong>的模型下拉框中一键选择，无需在此手动复制！
               </div>
             </div>
           </div>
-          <button class="btn btn-sm" onclick="loadModels()" style="font-size: 0.8rem; font-weight: 600;">🔄 重新扫描模型目录</button>
+          <div style="display: flex; gap: 0.6rem; align-items: center;">
+            <button class="btn btn-sm btn-primary" onclick="openGGUFConvertModal()" style="font-size: 0.8rem; font-weight: 600; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b;">📦 GGUF 转换工坊</button>
+            <button class="btn btn-sm" onclick="loadModels()" style="font-size: 0.8rem; font-weight: 600;">🔄 重新扫描模型目录</button>
+          </div>
         </div>
       </div>
 
@@ -1398,7 +1482,7 @@
           </h3>
 
           <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5;">
-            💡 <strong>多目录支持</strong>：hf 格式的权重目录（例如未量化的全精度权重与 GPTQ / AWQ 量化后的权重不在同个目录）均支持同时配置。每行填一个目录路径，或用英文分号 <code>;</code> 隔开即可！
+            💡 <strong>多目录支持</strong>：权重目录（例如未量化的全精度权重与量化后的权重不在同个目录）均支持同时配置。每行填一个目录路径，或用英文分号 <code>;</code> 隔开即可！
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 1.15rem;">
@@ -1424,6 +1508,12 @@
               <label><span>MNN 离线模型存储目录 (mnn_models_dir)</span><span class="config-key-badge">mnn_models_dir</span></label>
               <textarea id="settings-mnn-dir" class="textarea" rows="2" style="font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.4; resize: vertical;" placeholder="如 D:/models/mnn_models&#10;（支持多个目录，每行一个或以分号分隔）"></textarea>
               <span class="config-field-desc">支持配置多个目录。系统递归扫描该目录下的 .mnn 模型文件与包含 config.json 的 MNN 模型文件夹</span>
+            </div>
+
+            <div class="config-field">
+              <label><span>llama.cpp (GGUF) 模型存储目录 (llamacpp_models_dir)</span><span class="config-key-badge">llamacpp_models_dir</span></label>
+              <textarea id="settings-llamacpp-dir" class="textarea" rows="2" style="font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.4; resize: vertical;" placeholder="如 /root/autodl-tmp/capt/model_gguf&#10;（支持多个目录，每行一个或以分号分隔）"></textarea>
+              <span class="config-field-desc">支持配置多个目录。系统递归探测该目录下的各个模型子文件夹（如 /A/），自动成对提取主模型（A_Q4_K_M.gguf）与多模态投影器（A_bf16_mmproj.gguf）并以 A 作为模型名</span>
             </div>
 
             <div class="config-field">
@@ -1750,6 +1840,132 @@
 
     <div class="modal-footer">
       <button class="btn" onclick="closeDatasetHtmlModal()">关闭</button>
+    </div>
+  </dialog>
+
+  <!-- GGUF 模型转换工坊弹窗 -->
+  <dialog id="gguf-convert-modal" class="modal-card" style="max-width: 680px; width: 92%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 0.65rem;">
+        <span style="font-size: 1.4rem;">📦</span>
+        <div>
+          <h3 style="margin: 0; color: #fff; font-size: 1.05rem;">HuggingFace 转 GGUF 可视化工坊</h3>
+          <p style="margin: 0; font-size: 0.76rem; color: var(--text-dim);">支持多模态两阶段导出(主骨干 + mmproj)及 llama-quantize 低比特量化</p>
+        </div>
+      </div>
+      <button class="btn-close" onclick="closeGGUFConvertModal()">&times;</button>
+    </div>
+
+    <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem; max-height: 75vh; overflow-y: auto; padding-right: 0.25rem;">
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; line-height: 1.5;">
+        💡 <strong>模型文件夹自动组织规范</strong>：<br>
+        转换产物将统一收录在全局目录 <code>&lt;llamacpp_models_dir&gt;/&lt;模型名 A&gt;/</code> 下。<br>
+        内部规范命名为 <code>A_&lt;QUANT&gt;.gguf</code> 与 <code>A_&lt;DTYPE&gt;_mmproj.gguf</code>，评测时系统自动识别 <code>A</code> 为模型名并成对绑定！
+      </div>
+
+      <!-- 源模型选择 -->
+      <div class="config-field">
+        <label><span>源 HuggingFace 模型路径 (--hf-path)</span><span class="config-key-badge">必需</span></label>
+        <div style="display: flex; gap: 0.5rem;">
+          <select id="gguf-conv-hf-select" class="select" style="width: 45%;" onchange="onGGUFConvertHfSelect(this.value)">
+            <option value="">(从已探测 HF 模型中快速选择)</option>
+          </select>
+          <input type="text" id="gguf-conv-hf-path" class="input" style="flex: 1;" placeholder="如 /root/autodl-tmp/Qwen2.5-VL-7B-Instruct" oninput="onGGUFConvertHfInput()">
+        </div>
+        <span class="config-field-desc">包含 config.json 与 safetensors 权重的本地 HuggingFace 文件夹路径</span>
+      </div>
+
+      <!-- 目标模型名与输出目录 -->
+      <div class="config-grid-2">
+        <div class="config-field">
+          <label><span>目标模型名 A (--name)</span><span class="config-key-badge">推荐</span></label>
+          <input type="text" id="gguf-conv-name" class="input" placeholder="如 Qwen2.5-VL-7B-Instruct" oninput="updateGGUFConvertPreview()">
+          <span class="config-field-desc">产物模型文件夹名与评测模型标识名</span>
+        </div>
+
+        <div class="config-field">
+          <label><span>主模型导出精度 (--outtype)</span><span class="config-key-badge">outtype</span></label>
+          <select id="gguf-conv-outtype" class="select" onchange="updateGGUFConvertPreview()">
+            <option value="bf16">bf16 (推荐, 动态范围大, 与训练对齐)</option>
+            <option value="f16">f16 (半精度浮点)</option>
+            <option value="f32">f32 (单精度全量)</option>
+          </select>
+          <span class="config-field-desc">未量化时的主语言骨干数据类型</span>
+        </div>
+      </div>
+
+      <!-- 多模态专项设置 -->
+      <div class="dataset-card" style="background: rgba(255, 255, 255, 0.02); border: 1px dashed rgba(245, 158, 11, 0.35); padding: 0.85rem 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+          <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: #fff; font-weight: 600; font-size: 0.86rem;">
+            <input type="checkbox" id="gguf-conv-mmproj-enable" checked onchange="toggleGGUFConvertMMProj(this.checked)">
+            <span>👁️ 导出多模态视觉投影器 (--mmproj)</span>
+          </label>
+          <span class="role-badge" style="background: rgba(245,158,11,0.15); color: var(--amber-500);">多模态两阶段专属</span>
+        </div>
+
+        <div id="gguf-conv-mmproj-panel" class="config-grid-2" style="margin-top: 0.5rem;">
+          <div class="config-field">
+            <label><span>mmproj 导出精度 (--mmproj-outtype)</span></label>
+            <select id="gguf-conv-mmproj-outtype" class="select" onchange="updateGGUFConvertPreview()">
+              <option value="f16">f16 (推荐, 高保真视觉特征)</option>
+              <option value="bf16">bf16 (bfloat16)</option>
+              <option value="f32">f32 (float32)</option>
+            </select>
+            <span class="config-field-desc">投影器通常建议保持高精度，不进行低比特量化</span>
+          </div>
+
+          <div class="config-field">
+            <label><span>投影器产物文件名</span></label>
+            <input type="text" id="gguf-conv-mmproj-filename" class="input" readonly style="color: var(--text-dim); background: rgba(0,0,0,0.25);" value="<A>_f16_mmproj.gguf">
+          </div>
+        </div>
+      </div>
+
+      <!-- 量化与高级设置 -->
+      <div class="config-grid-2">
+        <div class="config-field">
+          <label><span>目标量化规格 (--quantize)</span><span class="config-key-badge">可选</span></label>
+          <select id="gguf-conv-quant" class="select" onchange="updateGGUFConvertPreview()">
+            <option value="">(不量化 - 保持 bf16/f16 基座精度)</option>
+            <option value="Q4_K_M">Q4_K_M (中等推荐: 权重高质量中等体积)</option>
+            <option value="Q4_K_S">Q4_K_S (小型: 极致节省显存)</option>
+            <option value="Q5_K_M">Q5_K_M (高质量: 接近全精度保真度)</option>
+            <option value="Q5_K_S">Q5_K_S (高质微缩)</option>
+            <option value="Q8_0">Q8_0 (8位高精度: 极低精度损耗)</option>
+            <option value="Q6_K">Q6_K (6位平衡档)</option>
+            <option value="Q3_K_M">Q3_K_M (3位超极限)</option>
+          </select>
+          <span class="config-field-desc">调用 llama-quantize 仅对语言主干量化，mmproj 始终保持全精度</span>
+        </div>
+
+        <div class="config-field">
+          <label><span>llama.cpp 源码/编译目录</span><span class="config-key-badge">可选</span></label>
+          <input type="text" id="gguf-conv-llamacpp-dir" class="input" placeholder="留空自动在系统 PATH 与常见路径检索" oninput="updateGGUFConvertPreview()">
+          <span class="config-field-desc">需包含 convert_hf_to_gguf.py 或 build/bin/llama-quantize</span>
+        </div>
+      </div>
+
+      <div class="config-field">
+        <label style="display: flex; align-items: center; gap: 0.45rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
+          <input type="checkbox" id="gguf-conv-clean-intermediate" onchange="updateGGUFConvertPreview()">
+          <span>量化完成后自动删除未量化的中间基座 gguf 文件 (--clean-intermediate)</span>
+        </label>
+      </div>
+
+      <!-- 命令预览与落地提示 -->
+      <div class="code-preview-box" style="margin-top: 0.25rem;">
+        <div class="code-preview-title">
+          <span>🖥️ 即将异步执行的任务指令</span>
+          <span id="gguf-conv-dest-hint" style="font-size: 0.72rem; color: var(--amber-500);">落地: &lt;llamacpp_models_dir&gt;/&lt;A&gt;/</span>
+        </div>
+        <div id="gguf-conv-cmd-preview" class="code-preview-content" style="white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.78rem;">python -m eval_vlm convert-gguf ...</div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="closeGGUFConvertModal()">取消</button>
+      <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b;" onclick="submitGGUFConvertTask()">🚀 开始执行转换</button>
     </div>
   </dialog>
 

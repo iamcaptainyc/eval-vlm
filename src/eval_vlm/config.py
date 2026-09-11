@@ -299,6 +299,10 @@ class InferenceConfig:
         if self.backend in ("llamacpp", "llama.cpp", "llama_cpp"):
             if self.llamacpp.model_path:
                 p = Path(self.llamacpp.model_path).expanduser()
+                # 优先提取模型所在父文件夹名(例如 .../A/A_Q4_K_M.gguf -> A)
+                parent_name = p.parent.name
+                if parent_name and parent_name not in ("", ".", "/", "\\"):
+                    return parent_name
                 return p.stem if p.suffix.lower() == ".gguf" else p.name
             if self.llamacpp.model and self.llamacpp.model != "default":
                 return self.llamacpp.model

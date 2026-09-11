@@ -585,6 +585,32 @@ def _cmd_infer(args: argparse.Namespace) -> int:
     return pred
 
 
+def _cmd_convert_gguf(args: argparse.Namespace) -> int:
+    """HF 转 GGUF 命令:调用 llama.cpp 执行多模态/单模态转换并可选量化。"""
+    from .gguf_convert import run_gguf_conversion
+
+    try:
+        res = run_gguf_conversion(
+            hf_path=args.hf_path,
+            name=args.name,
+            out_dir=args.out_dir,
+            outtype=args.outtype,
+            is_multimodal=True if args.mmproj else (False if args.no_mmproj else None),
+            mmproj_outtype=args.mmproj_outtype,
+            quantize=args.quantize,
+            clean_intermediate=args.clean_intermediate,
+            llama_cpp_dir=args.llama_cpp_dir,
+        )
+        print(f"\n[convert-gguf] 转换成功: 模型 {res['model_name']} 落在 {res['out_dir']}")
+        return 0
+    except Exception as e:
+        if getattr(args, "fail_fast", False):
+            raise
+        print(f"[convert-gguf] 转换失败: {e}", file=sys.stderr)
+        return 1
+
+
+
 # ---------------------------------------------------------------------------
 # 参数
 # ---------------------------------------------------------------------------
@@ -654,6 +680,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.add_argument("value", nargs="?", default=None, help="set 时的值(null 表示清空)")
     p_config.add_argument("--force", action="store_true", help="init 时覆盖已有全局配置")
     p_config.set_defaults(func=_cmd_config)
+
+    # convert-gguf(HF 转 GGUF)
+    p_conv = sub.add_parser("convert-gguf", help="将 HuggingFace 格式模型转换为 GGUF 格式(支持多模态两阶段导出与量化)")
+    p_conv.add_argument("--hf-path", required=True, help="源 HuggingFace 模型文件夹路径")
+    p_conv.add_argument("--name", "-n", default=None,
+                        help="目标模型名 A(产物落地 <llamacpp_models_dir>/<A>/;缺省从 hf-path 提取)")
+    p_conv.add_argument("--out-dir", default=None,
+                        help="明确指定输出目录(缺省自动取 <llamacpp_models_dir>/<A>/)")
+    p_conv.add_argument("--outtype", default="bf16", choices=["bf16", "f16", "f32"],
+                        help="主模型权重导出精度(默认 bf16)")
+    p_conv.add_argument("--mmproj", action="store_true", default=False,
+                        help="强制导出多模态投影器(默认对含视觉配置的 HF 目录自动开启)")
+    p_conv.add_argument("--no-mmproj", action="store_true", default=False,
+                        help="强制禁用多模态投影器导出(纯文本语言模型)")
+    p_conv.add_argument("--mmproj-outtype", default="f16", choices=["f16", "bf16", "f32"],
+                        help="多模态投影器导出精度(默认 f16)")
+    p_conv.add_argument("--quantize", "-q", default=None,
+                        help="llama-quantize 量化格式(如 Q4_K_M, Q8_0, Q5_K_M 等;投影器保持不量化)")
+    p_conv.add_argument("--clean-intermediate", action="store_true", default=False,
+                        help="量化后删除未量化的基座 gguf 临时文件")
+    p_conv.add_argument("--llama-cpp-dir", default=None,
+                        help="llama.cpp 源码/编译根目录(缺省自动查找系统 PATH 或常见位置)")
+    _add_workspace_arg(p_conv)
+    p_conv.set_defaults(func=_cmd_convert_gguf)
 
     # split(初始化)
     p_split = sub.add_parser("split", help="初始化数据集文件夹并分割(--dataset=源JSON)")

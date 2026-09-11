@@ -123,6 +123,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             image_strip_prefix=st.image_strip_prefix,
             hf_models_dir=st.hf_models_dir,
             mnn_models_dir=st.mnn_models_dir,
+            llamacpp_models_dir=st.llamacpp_models_dir,
             train_out_dir=st.train_out_dir,
             val_out_dir=st.val_out_dir,
             test_out_dir=st.test_out_dir,
@@ -142,6 +143,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "image_strip_prefix": body.image_strip_prefix,
             "hf_models_dir": body.hf_models_dir,
             "mnn_models_dir": body.mnn_models_dir,
+            "llamacpp_models_dir": body.llamacpp_models_dir,
             "train_out_dir": body.train_out_dir,
             "val_out_dir": body.val_out_dir,
             "test_out_dir": body.test_out_dir,
@@ -190,6 +192,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             image_strip_prefix=st.image_strip_prefix,
             hf_models_dir=st.hf_models_dir,
             mnn_models_dir=st.mnn_models_dir,
+            llamacpp_models_dir=st.llamacpp_models_dir,
             train_out_dir=st.train_out_dir,
             val_out_dir=st.val_out_dir,
             test_out_dir=st.test_out_dir,
@@ -204,13 +207,55 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         st: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
         st.reload_global_config()
-        result = scan_local_models(hf_dir=st.hf_models_dir, mnn_dir=st.mnn_models_dir)
+        result = scan_local_models(
+            hf_dir=st.hf_models_dir,
+            mnn_dir=st.mnn_models_dir,
+            llamacpp_dir=st.llamacpp_models_dir,
+        )
         return {
             "hf_dir": st.hf_models_dir,
             "mnn_dir": st.mnn_models_dir,
+            "llamacpp_dir": st.llamacpp_models_dir,
             "hf_models": result.get("hf_models", []),
             "mnn_models": result.get("mnn_models", []),
+            "llamacpp_models": result.get("llamacpp_models", []),
         }
+
+    @app.post("/api/tools/convert-gguf")
+    async def api_convert_gguf(
+        body: GGUFConvertRequest,
+        user: User = Depends(require_editor),
+    ) -> JobSummary:
+        """提交一个异步 HF 转 GGUF 任务。"""
+        job_manager.start_worker(asyncio.get_running_loop())
+        params = {
+            "hf_path": body.hf_path,
+        }
+        if body.name:
+            params["name"] = body.name
+        if body.out_dir:
+            params["out_dir"] = body.out_dir
+        if body.outtype:
+            params["outtype"] = body.outtype
+        if body.is_multimodal:
+            params["mmproj"] = True
+        else:
+            params["no_mmproj"] = True
+        if body.mmproj_outtype:
+            params["mmproj_outtype"] = body.mmproj_outtype
+        if body.quantize:
+            params["quantize"] = body.quantize
+        if body.clean_intermediate:
+            params["clean_intermediate"] = True
+        if body.llama_cpp_dir:
+            params["llama_cpp_dir"] = body.llama_cpp_dir
+
+        return job_manager.submit_job(
+            job_type="convert-gguf",
+            dataset=None,
+            params=params,
+            user=user.username,
+        )
 
     # -----------------------------------------------------------------------
     # 数据集

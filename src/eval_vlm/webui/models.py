@@ -146,6 +146,7 @@ class SettingsResponse(BaseModel):
     image_strip_prefix: Optional[str] = None
     hf_models_dir: Optional[Union[str, list[str]]] = None
     mnn_models_dir: Optional[Union[str, list[str]]] = None
+    llamacpp_models_dir: Optional[Union[str, list[str]]] = None
     train_out_dir: Optional[str] = None
     val_out_dir: Optional[str] = None
     test_out_dir: Optional[str] = None
@@ -160,9 +161,23 @@ class SettingsUpdateRequest(BaseModel):
     image_strip_prefix: Optional[str] = None
     hf_models_dir: Optional[Union[str, list[str]]] = None
     mnn_models_dir: Optional[Union[str, list[str]]] = None
+    llamacpp_models_dir: Optional[Union[str, list[str]]] = None
     train_out_dir: Optional[str] = None
     val_out_dir: Optional[str] = None
     test_out_dir: Optional[str] = None
     split: Optional[dict[str, Any]] = None
+
+
+class GGUFConvertRequest(BaseModel):
+    hf_path: str
+    name: Optional[str] = None
+    out_dir: Optional[str] = None
+    outtype: str = "bf16"
+    is_multimodal: bool = True
+    mmproj_outtype: str = "f16"
+    quantize: Optional[str] = None
+    clean_intermediate: bool = False
+    llama_cpp_dir: Optional[str] = None
+
 
 
