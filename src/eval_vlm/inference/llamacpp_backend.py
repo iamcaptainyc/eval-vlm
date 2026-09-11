@@ -29,6 +29,7 @@ import json
 import math
 import mimetypes
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -37,6 +38,7 @@ from typing import Any, Optional
 from ..config import Config
 from ..data.loader import resolve_image_path
 from ..data.schema import Prediction, Turn
+from ..infer_stats import generate_inference_report, parse_metrics_line
 from .base import InferenceBackend
 
 # 识别为常见图片的扩展名与 MIME 映射
@@ -229,12 +231,79 @@ class LlamaCppBackend(InferenceBackend):
                 latency = time.time() - start_time
                 ans = ""
                 if resp.choices and len(resp.choices) > 0:
-                    ans = resp.choices[0].message.content or ""
+                    choice = resp.choices[0]
+                    msg = getattr(choice, "message", None)
+                    if msg is not None:
+                        ans = getattr(msg, "content", "") or ""
+                    elif isinstance(choice, dict):
+                        ans = choice.get("message", {}).get("content", "") or choice.get("text", "") or ""
 
-                tokens_used = 0
-                raw_info = {"model": self.lc.model}
-                if getattr(resp, "usage", None):
-                    raw_info["completion_tokens"] = getattr(resp.usage, "completion_tokens", 0) or 0
+
+                raw_info: dict[str, Any] = {"model": self.lc.model, "backend": "llamacpp"}
+                usage = getattr(resp, "usage", None)
+                if usage:
+                    c_tokens = getattr(usage, "completion_tokens", None)
+                    p_tokens = getattr(usage, "prompt_tokens", None)
+                    t_tokens = getattr(usage, "total_tokens", None)
+                    try:
+                        if c_tokens is not None:
+                            val = int(c_tokens)
+                            raw_info["completion_tokens"] = val
+                            raw_info["gen_seq_len"] = val
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        if p_tokens is not None:
+                            val = int(p_tokens)
+                            raw_info["prompt_tokens"] = val
+                            raw_info["prompt_len"] = val
+                            raw_info["prompt_token_count"] = val
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        if t_tokens is not None:
+                            raw_info["total_tokens"] = int(t_tokens)
+                    except (TypeError, ValueError):
+                        pass
+
+                # 提取 llama-server 的 timings 对象 (支持 OpenAI 响应体顶层额外字段 / model_extra)
+                timings = getattr(resp, "timings", None)
+                if timings is None and hasattr(resp, "model_extra") and isinstance(resp.model_extra, dict):
+                    timings = resp.model_extra.get("timings")
+                if timings is None and isinstance(resp, dict):
+                    timings = resp.get("timings")
+
+                if isinstance(timings, dict):
+                    raw_info["timings"] = timings
+                    prompt_n = timings.get("prompt_n")
+                    prompt_ms = timings.get("prompt_ms")
+                    predicted_n = timings.get("predicted_n")
+                    predicted_ms = timings.get("predicted_ms")
+
+                    try:
+                        if prompt_n is not None:
+                            p_val = int(prompt_n)
+                            raw_info["prompt_len"] = p_val
+                            raw_info["prompt_token_count"] = p_val
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        if predicted_n is not None:
+                            raw_info["gen_seq_len"] = int(predicted_n)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        if prompt_ms is not None:
+                            raw_info["prefill_us"] = int(float(prompt_ms) * 1000)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        if predicted_ms is not None:
+                            raw_info["decode_us"] = int(float(predicted_ms) * 1000)
+                    except (TypeError, ValueError):
+                        pass
+
+                    self._add_perf_metrics(raw_info)
 
                 return Prediction(
                     id=sample_id,
@@ -323,10 +392,34 @@ class LlamaCppBackend(InferenceBackend):
                     latency=round(latency, 4),
                 )
             output = res.stdout.strip()
+            raw_info: dict[str, Any] = {"backend": "llamacpp", "mode": "cli"}
+
+            # 解析 stderr 中打印的 perf 耗时 (来自 llama_perf_context_print)
+            # prompt eval time = 45.20 ms / 120 tokens ...
+            #        eval time = 120.50 ms / 35 runs ...
+            stderr_text = res.stderr or ""
+            p_match = re.search(r"prompt eval time\s*=\s*([\d\.]+)\s*ms\s*/\s*(\d+)\s*tokens", stderr_text)
+            if p_match:
+                p_ms = float(p_match.group(1))
+                p_tok = int(p_match.group(2))
+                raw_info["prompt_len"] = p_tok
+                raw_info["prompt_token_count"] = p_tok
+                raw_info["prefill_us"] = int(p_ms * 1000)
+
+            e_match = re.search(r"(?<!prompt )eval time\s*=\s*([\d\.]+)\s*ms\s*/\s*(\d+)\s*(?:runs|tokens)", stderr_text)
+            if e_match:
+                e_ms = float(e_match.group(1))
+                e_tok = int(e_match.group(2))
+                raw_info["gen_seq_len"] = e_tok
+                raw_info["decode_us"] = int(e_ms * 1000)
+
+            self._add_perf_metrics(raw_info)
+
             return Prediction(
                 id=sample_id,
                 prediction=output,
                 latency=round(latency, 4),
+                raw=raw_info,
             )
         except Exception as e:
             self._raise_if_fail_fast()
@@ -335,6 +428,29 @@ class LlamaCppBackend(InferenceBackend):
                 error=f"CLI 调用异常: {e}",
                 latency=round(time.time() - start_time, 4),
             )
+
+    @staticmethod
+    def _add_perf_metrics(raw: dict) -> None:
+        """从引擎计时(prefill_us/decode_us + token 数)计算吞吐与时延指标,
+        并入 raw,随 predictions.jsonl 每条落盘。"""
+        prefill_us = raw.get("prefill_us") or 0
+        decode_us = raw.get("decode_us") or 0
+        prompt_len = raw.get("prompt_len") or 0
+        decode_len = raw.get("gen_seq_len") or 0
+
+        if prefill_us > 0:
+            raw["ttft_ms"] = round(prefill_us / 1000.0, 3)
+        if decode_us > 0 and decode_len > 0:
+            raw["tpot_ms"] = round(decode_us / 1000.0 / decode_len, 3)
+        e2e_us = prefill_us + decode_us
+        if e2e_us > 0:
+            raw["e2e_ms"] = round(e2e_us / 1000.0, 3)
+        if prefill_us > 0 and prompt_len > 0:
+            raw["prefill_toks_per_s"] = round(prompt_len / (prefill_us / 1e6), 2)
+        if decode_us > 0 and decode_len > 0:
+            raw["decode_toks_per_s"] = round(decode_len / (decode_us / 1e6), 2)
+        if e2e_us > 0 and (prompt_len + decode_len) > 0:
+            raw["total_toks_per_s"] = round((prompt_len + decode_len) / (e2e_us / 1e6), 2)
 
     # ------------------------------------------------------------------
     # 统一接口: complete
@@ -355,3 +471,7 @@ class LlamaCppBackend(InferenceBackend):
             return self._complete_server(messages, sample_id)
 
         return self._complete_cli(context, images, sample_id)
+
+    generate_inference_report = staticmethod(lambda *a, **k: generate_inference_report(*a, **k))
+    parse_metrics_line = staticmethod(lambda *a, **k: parse_metrics_line(*a, **k))
+

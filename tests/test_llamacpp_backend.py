@@ -360,3 +360,125 @@ def test_llamacpp_rollout_integration(tworound_config, monkeypatch):
     for m in round2_msgs:
         asst_turns = [turn for turn in m if turn["role"] == "assistant"]
         assert asst_turns[0]["content"] == "画面是一名成年男性的面部特写"
+
+
+# ---------------------------------------------------------------------------
+# 6. 推理指标统计测试 (timings -> infer_stats.txt / infer_stats.json)
+# ---------------------------------------------------------------------------
+def test_server_timings_extraction(tmp_path):
+    img = tmp_path / "sample.jpg"
+    img.write_bytes(b"abc")
+
+    cfg = Config()
+    cfg.inference.backend = "llamacpp"
+    cfg.data.media_root = str(tmp_path)
+
+    backend = LlamaCppBackend(cfg)
+
+    mock_resp = MagicMock()
+    mock_choice = MagicMock()
+    mock_choice.message.content = "测试输出内容"
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage.prompt_tokens = 150
+    mock_resp.usage.completion_tokens = 25
+    mock_resp.usage.total_tokens = 175
+    # 模拟 llama-server 返回的 timings 字典
+    mock_resp.timings = {
+        "prompt_n": 150,
+        "prompt_ms": 60.0,
+        "predicted_n": 25,
+        "predicted_ms": 100.0,
+    }
+
+    with patch.object(backend.client.chat.completions, "create", return_value=mock_resp):
+        context = [Turn(role="user", content="<image>请描述")]
+        pred = backend.complete(context, ["sample.jpg"], "timing-1")
+
+        assert pred.prediction == "测试输出内容"
+        assert pred.raw["backend"] == "llamacpp"
+        assert pred.raw["prompt_len"] == 150
+        assert pred.raw["gen_seq_len"] == 25
+        assert pred.raw["prefill_us"] == 60000
+        assert pred.raw["decode_us"] == 100000
+        assert pred.raw["ttft_ms"] == 60.0
+        assert pred.raw["tpot_ms"] == 4.0  # 100ms / 25 tok
+
+
+def test_cli_timings_extraction(tmp_path):
+    img = tmp_path / "sample.png"
+    img.write_bytes(b"img")
+
+    cfg = Config()
+    cfg.inference.backend = "llamacpp"
+    cfg.data.media_root = str(tmp_path)
+    cfg.inference.llamacpp.mode = "cli"
+    cfg.inference.llamacpp.model_path = "/models/vlm.gguf"
+    cfg.inference.llamacpp.mmproj_path = "/models/mmproj.gguf"
+
+    backend = LlamaCppBackend(cfg)
+
+    mock_res = MagicMock()
+    mock_res.returncode = 0
+    mock_res.stdout = "这是输出文本"
+    mock_res.stderr = (
+        "prompt eval time =      50.00 ms /   100 tokens (    0.50 ms per token,  2000.00 tokens per second)\n"
+        "       eval time =     200.00 ms /    20 runs   (   10.00 ms per token,   100.00 tokens per second)\n"
+    )
+
+    with patch("subprocess.run", return_value=mock_res):
+        context = [Turn(role="user", content="<image>描述")]
+        pred = backend.complete(context, ["sample.png"], "cli-timing")
+
+        assert pred.prediction == "这是输出文本"
+        assert pred.raw["prompt_len"] == 100
+        assert pred.raw["gen_seq_len"] == 20
+        assert pred.raw["prefill_us"] == 50000
+        assert pred.raw["decode_us"] == 200000
+        assert pred.raw["ttft_ms"] == 50.0
+
+
+def test_llamacpp_infer_stats_generation(tmp_path):
+    import json
+    from eval_vlm.cli import _maybe_generate_mnn_report
+    from eval_vlm.infer_stats import generate_inference_report
+
+    cfg = Config()
+    cfg.run_dir_path = tmp_path
+    cfg.inference.backend = "llamacpp"
+    cfg.inference.llamacpp.model = "qwen2-vl"
+    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        json.dumps({
+            "id": "s1", "latency": 1.2, "error": None,
+            "raw": {
+                "backend": "llamacpp", "prompt_len": 120, "gen_seq_len": 20,
+                "prefill_us": 60000, "decode_us": 140000,
+            }
+        }),
+        json.dumps({
+            "id": "s2", "latency": 0.8, "error": None,
+            "raw": {
+                "backend": "llamacpp", "prompt_len": 80, "gen_seq_len": 15,
+                "prefill_us": 40000, "decode_us": 105000,
+            }
+        }),
+    ]
+    cfg.predictions_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    summary, report = generate_inference_report(cfg.predictions_path, out_dir=cfg.run_dir, print_report=False)
+    assert summary["samples"]["analyzed"] == 2
+    assert "ttft_s" in summary["metrics"]
+    assert "tpot_ms" in summary["metrics"]
+    assert "decode_tps" in summary["metrics"]
+    assert (cfg.run_dir / "infer_stats.txt").exists()
+    assert (cfg.run_dir / "infer_stats.json").exists()
+
+    # 验证 CLI 钩子自动触发
+    report_res = _maybe_generate_mnn_report(cfg)
+    assert report_res is not None
+    assert report_res["samples"]["analyzed"] == 2
+    assert cfg.infer_stats_txt_path.exists()
+    assert cfg.infer_stats_json_path.exists()
+
+

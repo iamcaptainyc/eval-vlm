@@ -246,11 +246,11 @@ def _do_score(cfg: Config, scorer: Optional[str], limit: Optional[int] = None) -
 
 
 def _maybe_generate_mnn_report(cfg: Config) -> Optional[dict]:
-    """若存在 predictions.jsonl 且为 mnn 后端(或含 mnn 计时)，自动生成推理性能报告。"""
+    """若存在 predictions.jsonl 且为 mnn / llamacpp 后端(或含推理性能计时)，自动生成推理性能报告。"""
     if not cfg.predictions_path.exists():
         return None
-    is_mnn = (cfg.inference.backend == "mnn")
-    if not is_mnn:
+    should_gen = cfg.inference.backend in ("mnn", "llamacpp")
+    if not should_gen:
         try:
             with open(cfg.predictions_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -258,20 +258,21 @@ def _maybe_generate_mnn_report(cfg: Config) -> Optional[dict]:
                     if line:
                         obj = json.loads(line)
                         raw = obj.get("raw") or {}
-                        if raw.get("backend") == "mnn" or "vision_us" in raw:
-                            is_mnn = True
+                        if raw.get("backend") in ("mnn", "llamacpp") or "vision_us" in raw or "prefill_us" in raw or "timings" in raw:
+                            should_gen = True
                         break
         except Exception:
             pass
-    if not is_mnn:
+    if not should_gen:
         return None
-    from .inference.mnn_backend import generate_mnn_inference_report
+    from .infer_stats import generate_inference_report
     try:
-        summary, _ = generate_mnn_inference_report(cfg.predictions_path, out_dir=cfg.run_dir, print_report=True)
+        summary, _ = generate_inference_report(cfg.predictions_path, out_dir=cfg.run_dir, print_report=True)
         return summary
     except Exception as e:
         print(f"[infer_stats] 性能分析跳过: {e}", file=sys.stderr)
         return None
+
 
 
 def _pred_dataset(args: argparse.Namespace) -> int:

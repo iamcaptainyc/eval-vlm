@@ -365,9 +365,15 @@ inference:
 - **精准消费队列**: 样本中的 `images` 与上下文中的 `<image>` 占位符按序绑定,转换为经过尺寸保护 (等比缩放防 OOM) 的 Base64 Data URI;
 - **健壮性与排错**: 若服务端缺少 `--mmproj`,自动捕获并友好提示;支持 `--fail-fast` 异常直接抛出。
 
-##### 3. 常用使用示例
+##### 3. 推理速度统计指标继承 (对齐 MNN `infer_stats`)
+后端无论在 `server` 还是 `cli` 模式下均深度继承了推理速度统计指标，并在 `pred` / `eval` / `field-eval` 运行完毕后自动生成 `infer_stats.txt` 和 `infer_stats.json`：
+- **`server` 模式**: 自动解析 llama-server 在响应体顶层返回的 `timings` 数据，提取 `prompt_ms` (转 `prefill_us`)、`predicted_ms` (转 `decode_us`)、`prompt_n` 与 `predicted_n`；
+- **`cli` 模式**: 自动捕获 `mtmd-cli` 打印在 stderr 中的 `llama_perf_context_print` 日志 (`prompt eval time` / `eval time`)；
+- **统计报告包含**: Prefill 耗时、首 Token 延迟 (TTFT)、每 Token 生成耗时 (TPOT)、Decode 吞吐 (tok/s)、Prefill 吞吐 (tok/s) 以及端到端耗时与分位数 (P90, P99)。
+
+##### 4. 常用使用示例
 ```bash
-# 1. 配合 llama-server 进行数据集全量评测
+# 1. 配合 llama-server 进行数据集全量评测 (自动生成 infer_stats)
 eval-vlm eval --dataset my_dataset \
   --backend llamacpp \
   --llamacpp-base-url http://localhost:8080/v1 \
@@ -393,6 +399,7 @@ eval-vlm pred --dataset my_dataset \
   --llamacpp-mmproj /models/mmproj.gguf
 ```
 详细编译命令与多卡部署说明参见 [docs/llamacpp_deployment_guide.md](docs/llamacpp_deployment_guide.md)。
+
 
 ### 测量 MNN 转换精度误差(`precision`)
 
