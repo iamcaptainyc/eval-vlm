@@ -211,6 +211,38 @@ class VLLMOfflineBackendConfig:
 
 
 @dataclass
+class LlamaCppBackendConfig:
+    """llama.cpp 推理后端设置。
+
+    支持两种运行模式:
+      1. server: 远程/本地启动的 llama-server (推荐,支持连续批处理与高并发)
+      2. cli: 直接调用 mtmd-cli 可执行文件
+    """
+    mode: str = "server"                       # server | cli
+    base_url: str = "http://127.0.0.1:8080/v1"  # llama-server 的 OpenAI 兼容接口
+    api_key: str = "EMPTY"                     # llama-server 通常不校验或设为 EMPTY
+    model: str = "default"                     # 逻辑模型名(或 llama-server --alias 指定名)
+    model_path: Optional[str] = None           # 本地 GGUF 模型文件路径 (如 /models/qwen2.5-vl-7b.gguf)
+    mmproj_path: Optional[str] = None          # 本地 GGUF 多模态投影器路径 (如 /models/mmproj.gguf)
+    cli_binary: Optional[str] = None           # mtmd-cli 或 llama-mtmd-cli 可执行文件路径
+    request_timeout: float = 120.0             # 请求超时(秒,视觉编码较重建议偏大)
+    max_retries: int = 3                       # 失败重试次数
+    retry_backoff: float = 2.0                 # 指数退避基数
+    max_concurrency: int = 4                   # 并发数 (server 模式可并发, cli 模式强制为 1)
+    # 图片预处理限制(防止超大图引起端侧 OOM)
+    image_max_pixels: int = 768 * 768          # 像素上限保护 (超过按 sqrt 因子等比缩小; <=0 关闭)
+    image_min_pixels: int = 32 * 32            # 像素下限保护 (<=0 关闭)
+    image_max_side: int = 2048                 # 最长边像素上限 (超过纯等比缩小; <=0 关闭)
+    # 生成与采样参数
+    max_tokens: int = 512                      # 生成 token 限制
+    temperature: float = 0.0                   # 0.0 代表贪心解码(确定性复现)
+    top_p: float = 1.0
+    top_k: int = 40
+    repetition_penalty: float = 1.0            # 重复惩罚 (llama.cpp repeat_penalty)
+    system_prompt: Optional[str] = None        # 系统提示词 (若设置则注入 system 轮)
+
+
+@dataclass
 class InferenceConfig:
     """推理设置:顶层只选 backend,各后端的参数归入各自的子块。
 
@@ -226,10 +258,11 @@ class InferenceConfig:
     mnn: MNNBackendConfig = field(default_factory=MNNBackendConfig)
     hf: HFBackendConfig = field(default_factory=HFBackendConfig)
     vllm_offline: VLLMOfflineBackendConfig = field(default_factory=VLLMOfflineBackendConfig)
+    llamacpp: LlamaCppBackendConfig = field(default_factory=LlamaCppBackendConfig)
 
     @property
     def active(self) -> Any:
-        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;hf -> hf;vllm_offline -> vllm_offline)。"""
+        """当前 backend 对应的设置块(openai/vllm/fake -> openai;mnn -> mnn;hf -> hf;vllm_offline -> vllm_offline;llamacpp -> llamacpp)。"""
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai
         if self.backend == "mnn":
@@ -238,8 +271,10 @@ class InferenceConfig:
             return self.hf
         if self.backend == "vllm_offline":
             return self.vllm_offline
+        if self.backend in ("llamacpp", "llama.cpp", "llama_cpp"):
+            return self.llamacpp
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, llamacpp, fake)"
         )
 
     @property
@@ -249,7 +284,8 @@ class InferenceConfig:
         openai/vllm/fake -> openai.model;mnn -> config_path 所在目录名
         (如 /x/qwen2-vl-mnn/config.json -> qwen2-vl-mnn),缺省回落 'mnn-model';
         hf -> model_path 目录名,缺省回落 'hf-model';
-        vllm_offline -> model_path 目录名,缺省回落 'vllm-offline-model'。
+        vllm_offline -> model_path 目录名,缺省回落 'vllm-offline-model';
+        llamacpp -> model_path 文件名(去除 .gguf)或 model 名,缺省回落 'llamacpp-model'。
         """
         if self.backend == "mnn":
             cp = self.mnn.config_path
@@ -260,11 +296,18 @@ class InferenceConfig:
         if self.backend == "vllm_offline":
             mp = self.vllm_offline.model_path
             return Path(mp).expanduser().name if mp else "vllm-offline-model"
+        if self.backend in ("llamacpp", "llama.cpp", "llama_cpp"):
+            if self.llamacpp.model_path:
+                p = Path(self.llamacpp.model_path).expanduser()
+                return p.stem if p.suffix.lower() == ".gguf" else p.name
+            if self.llamacpp.model and self.llamacpp.model != "default":
+                return self.llamacpp.model
+            return "llamacpp-model"
         if self.backend in ("openai", "vllm", "fake"):
             return self.openai.model
         # 未知后端:与 active 一致地报错,而不是伪装成 openai 给出一个看似正常的目录名。
         raise ValueError(
-            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, fake)"
+            f"未知推理后端: {self.backend!r}(可选: openai, vllm, mnn, hf, vllm_offline, llamacpp, fake)"
         )
 
     @property
@@ -677,7 +720,8 @@ def _build(cls: type, data: dict[str, Any]) -> Any:
               "quant_precision": QuantPrecisionConfig,
               "mapping": Mapping, "tags": Tags,
               "openai": OpenAIBackendConfig, "mnn": MNNBackendConfig,
-              "hf": HFBackendConfig, "vllm_offline": VLLMOfflineBackendConfig}
+              "hf": HFBackendConfig, "vllm_offline": VLLMOfflineBackendConfig,
+              "llamacpp": LlamaCppBackendConfig}
     for key, value in (data or {}).items():
         if key not in type_hints:
             continue

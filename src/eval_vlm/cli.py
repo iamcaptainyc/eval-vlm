@@ -152,6 +152,11 @@ _PERSIST_MAP: tuple[tuple[str, str], ...] = (
     ("vllm_gpu_util", "inference.vllm_offline.gpu_memory_utilization"),
     ("vllm_max_model_len", "inference.vllm_offline.max_model_len"),
     ("vllm_image_max_pixels", "inference.vllm_offline.image_max_pixels"),
+    ("llamacpp_base_url", "inference.llamacpp.base_url"),
+    ("llamacpp_model", "inference.llamacpp.model"),
+    ("llamacpp_model_path", "inference.llamacpp.model_path"),
+    ("llamacpp_mmproj", "inference.llamacpp.mmproj_path"),
+    ("llamacpp_mode", "inference.llamacpp.mode"),
     ("scorer", "scoring.scorer"),
     ("prompt", "pred.prompt"),
     ("system_prompt", "pred.system_prompt"),
@@ -616,6 +621,21 @@ def _add_vllm_offline_args(p: argparse.ArgumentParser) -> None:
                         "(临时覆盖 inference.vllm_offline.image_max_pixels)")
 
 
+def _add_llamacpp_args(p: argparse.ArgumentParser) -> None:
+    """backend=llamacpp(llama.cpp HTTP 服务或本地 mtmd-cli)的参数。"""
+    p.add_argument("--llamacpp-base-url", dest="llamacpp_base_url", default=None,
+                   help="backend=llamacpp 时:llama-server 服务地址(如 http://127.0.0.1:8080/v1;"
+                        "临时覆盖 inference.llamacpp.base_url)")
+    p.add_argument("--llamacpp-model", dest="llamacpp_model", default=None,
+                   help="backend=llamacpp 时:模型逻辑名称或别名(临时覆盖 inference.llamacpp.model)")
+    p.add_argument("--llamacpp-model-path", dest="llamacpp_model_path", default=None,
+                   help="backend=llamacpp 时:本地 GGUF 语言模型文件路径(临时覆盖 inference.llamacpp.model_path)")
+    p.add_argument("--llamacpp-mmproj", dest="llamacpp_mmproj", default=None,
+                   help="backend=llamacpp 时:本地 GGUF 多模态投影器路径(临时覆盖 inference.llamacpp.mmproj_path)")
+    p.add_argument("--llamacpp-mode", dest="llamacpp_mode", default=None, choices=["server", "cli"],
+                   help="backend=llamacpp 时:运行模式 server(连 HTTP 服务)或 cli(调 mtmd-cli 可执行文件)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="eval_vlm",
@@ -669,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
                          help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)")
     p_score.add_argument("--backend", default=None,
-                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "llamacpp", "fake"],
                          help="临时覆盖推理后端(写回 inference.backend);定位对应后端的 predictions.jsonl")
     p_score.add_argument("--mnn-config", dest="mnn_config", default=None,
                          help="backend=mnn 时:转换产物目录里 config.json 路径(写回 inference.mnn.config_path)")
@@ -700,7 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     # field-eval 自给自足:没预测就用当前 backend 先跑 pred。下面这些 flag 指定/覆盖该 backend
     # 及其模型(与 pred/eval 一致,持久化到 config.yaml),既决定 run_dir 也决定自动 pred 用哪个后端。
     p_fe.add_argument("--backend", default=None,
-                      choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                      choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "llamacpp", "fake"],
                       help="临时覆盖推理后端(写回 inference.backend);决定 run_dir 与自动 pred 用哪个后端")
     p_fe.add_argument("--hf-model", dest="hf_model", default=None,
                       help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path)")
@@ -708,6 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help="backend=mnn 时:转换产物 config.json 路径(写回 inference.mnn.config_path)")
     _add_inference_args(p_fe)          # --base-url / --model / --fail-fast
     _add_vllm_offline_args(p_fe)       # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
+    _add_llamacpp_args(p_fe)           # --llamacpp-base-url / --llamacpp-model / --llamacpp-model-path / --llamacpp-mmproj / --llamacpp-mode
     _add_workspace_arg(p_fe)
     p_fe.set_defaults(func=_cmd_field_eval)
 
@@ -720,8 +741,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--scorer", default=None, help="临时覆盖评分器")
     # 后端 / 权重 flag(与 pred 一致,永久写回 config.yaml):让每个格式一条 eval 即可跑完 pred+score
     p_eval.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
-                        help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/vllm_offline/fake")
+                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "llamacpp", "fake"],
+                        help="临时覆盖推理后端(写回 inference.backend);openai/vllm/mnn/hf/vllm_offline/llamacpp/fake")
     p_eval.add_argument("--hf-model", dest="hf_model", default=None,
                         help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path;也用作产物子目录名)")
     p_eval.add_argument("--hf-image-max-side", dest="hf_image_max_side", type=int, default=None,
@@ -735,6 +756,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--mnn-quant", dest="mnn_quant", default=None,
                         help="backend=mnn 时:量化配方标签(如 hqq-4bit/hqq-8bit),供 report 标注(写回 inference.mnn.quant)")
     _add_vllm_offline_args(p_eval)
+    _add_llamacpp_args(p_eval)
     _add_workspace_arg(p_eval)
     p_eval.set_defaults(func=_cmd_eval)
 
@@ -767,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sweep.add_argument("--targets", dest="targets", default=None, type=_parse_targets,
                          help="批量覆盖每个数据集的 eval.targets(all/last/first/数字如 2=第2轮)并永久写回")
     p_sweep.add_argument("--backend", default=None,
-                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                         choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "llamacpp", "fake"],
                          help="临时覆盖推理后端(写回 inference.backend);决定 run_dir 与自动 pred 用哪个后端")
     p_sweep.add_argument("--hf-model", dest="hf_model", default=None,
                          help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path)")
@@ -775,6 +797,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="backend=mnn 时:转换产物 config.json 路径(写回 inference.mnn.config_path)")
     _add_inference_args(p_sweep)       # --base-url / --model / --fail-fast
     _add_vllm_offline_args(p_sweep)    # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
+    _add_llamacpp_args(p_sweep)
     _add_workspace_arg(p_sweep)
     p_sweep.set_defaults(func=_cmd_sweep)
 
@@ -845,11 +868,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_pred.add_argument("--system-prompt", dest="system_prompt", default=None,
                         help="[--datadir] 临时覆盖系统提示(不传则用 config.yaml 的 pred.system_prompt)")
     p_pred.add_argument("--backend", default=None,
-                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "fake"],
+                        choices=["openai", "vllm", "mnn", "hf", "vllm_offline", "llamacpp", "fake"],
                         help="临时覆盖推理后端:openai/vllm(调 OpenAI 兼容 API,vllm 为别名)| "
                              "mnn(本地 pymnn 推理转换后的 mnn 模型,需 --mnn-config)| "
                              "hf(本地 transformers 推理,作转换前参考基准,需 --hf-model)| "
                              "vllm_offline(本地离线 vLLM 进程内加载合并权重,需 --vllm-model)| "
+                             "llamacpp(本地或远端 llama.cpp/llama-server 多模态推理)| "
                              "fake(回显,不联网,自检用)")
     p_pred.add_argument("--mnn-config", dest="mnn_config", default=None,
                         help="backend=mnn 时:转换产物目录里 config.json 的路径"
@@ -885,6 +909,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="评哪个 assistant 轮:all/last/first,或数字(如 2=第2轮,1 起始)")
     _add_inference_args(p_pred)
     _add_vllm_offline_args(p_pred)
+    _add_llamacpp_args(p_pred)
     _add_workspace_arg(p_pred)
     p_pred.set_defaults(func=_cmd_pred)
 

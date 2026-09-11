@@ -28,10 +28,13 @@ def build_backend(cfg: Config) -> InferenceBackend:
     if name == "vllm_offline":
         from .vllm_offline_backend import VLLMOfflineBackend
         return VLLMOfflineBackend(cfg)
+    if name in ("llamacpp", "llama.cpp", "llama_cpp"):
+        from .llamacpp_backend import LlamaCppBackend
+        return LlamaCppBackend(cfg)
     if name == "fake":
         from .fake_backend import FakeBackend
         return FakeBackend(cfg)
-    raise ValueError(f"未知推理后端: {name!r}(可选: openai, vllm, mnn, hf, vllm_offline, fake)")
+    raise ValueError(f"未知推理后端: {name!r}(可选: openai, vllm, mnn, hf, vllm_offline, llamacpp, fake)")
 
 
 def worker_count(backend: InferenceBackend, max_concurrency: int) -> int:

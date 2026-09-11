@@ -1407,6 +1407,7 @@ async function saveAllConfigChanges() {
   let activeBackend = "openai";
   if (document.getElementById("cfg-card-backend-mnn")?.classList.contains("active")) activeBackend = "mnn";
   if (document.getElementById("cfg-card-backend-vllm_offline")?.classList.contains("active")) activeBackend = "vllm_offline";
+  if (document.getElementById("cfg-card-backend-llamacpp")?.classList.contains("active")) activeBackend = "llamacpp";
   if (document.getElementById("cfg-card-backend-hf")?.classList.contains("active")) activeBackend = "hf";
 
   const updates = [

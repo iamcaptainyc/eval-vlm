@@ -156,7 +156,12 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `--train-out / --val-out / --test-out` | split | 把对应产物直接写到任意目录(如 LlamaFactory `data/`) |
 | `--base-url / --model` | pred / eval | **写回** `inference.openai.base_url / model`;`model` 同时决定 openai 后端产物子目录名 |
 | `--scorer` | score / eval | **写回** `scoring.scorer` |
-| `--backend openai\|vllm\|mnn\|hf\|fake` | pred / eval | **写回** `inference.backend`(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;hf=本地 transformers 推理,作转换前参考;fake=回显不联网,自检用) |
+| `--backend openai|vllm|mnn|hf|vllm_offline|llamacpp|fake` | pred / eval / field-eval / sweep | **写回** `inference.backend`(openai/vllm=调 OpenAI 兼容 API;mnn=本地 pymnn 推理;hf=本地 transformers 推理;vllm_offline=本地离线 vLLM;llamacpp=llama.cpp/llama-server 多模态;fake=回显自检) |
+| `--llamacpp-base-url URL` | pred / eval / field-eval | `--backend llamacpp` 时:llama-server 服务地址(**写回** `inference.llamacpp.base_url`) |
+| `--llamacpp-model NAME` | pred / eval / field-eval | `--backend llamacpp` 时:模型逻辑名称或别名(**写回** `inference.llamacpp.model`) |
+| `--llamacpp-model-path FILE` | pred / eval / field-eval | `--backend llamacpp` 时:本地 GGUF 模型文件路径(**写回** `inference.llamacpp.model_path`;也据其文件名定产物子目录) |
+| `--llamacpp-mmproj FILE` | pred / eval / field-eval | `--backend llamacpp` 时:本地 GGUF 多模态投影器路径(**写回** `inference.llamacpp.mmproj_path`) |
+| `--llamacpp-mode server\|cli` | pred / eval / field-eval | `--backend llamacpp` 时:运行模式 server(连 HTTP 服务)或 cli(调 mtmd-cli 可执行文件)(**写回** `inference.llamacpp.mode`) |
 | `--mnn-config FILE` | pred / eval | `--backend mnn` 时:转换产物目录里 `config.json` 的路径(**写回** `inference.mnn.config_path`;也据其所在目录名定产物子目录) |
 | `--mnn-image-max-side N` | pred / eval | mnn 后端图片最长边像素上限(超大图等比缩放防 native segfault;设 0 关闭)(**写回** `inference.mnn.image_max_side`) |
 | `--mnn-quant TEXT` | pred / eval | `--backend mnn` 时:量化配方标签(如 `hqq-4bit`/`hqq-8bit`),**纯记录**不参与推理;落进 run_meta/pred_meta 供 `report` 标注该变体(**写回** `inference.mnn.quant`) |
@@ -342,6 +347,52 @@ inference:
 
 > 仍满屏换行?多半是**转换层的 EOS / chat template 不匹配**(模型不发结束符),先调高 `repetition_penalty`/`frequency_penalty`
 > 兜住症状,再回头核对转换时的对话模板是否与训练一致。采样惩罚只治标,治不了「模型根本不发结束符」。
+
+#### 本地 / 远端 llama.cpp 多模态后端(`--backend llamacpp`)
+
+全面支持利用最新 **llama.cpp** 对 GGUF 格式的视觉语言模型 (如 Qwen2-VL, Qwen2.5-VL, MiniCPM-V, Gemma-3 等) 进行推理评测。
+适配 llama.cpp 核心的多模态架构 **`libmtmd`** 与两文件体系 (主模型 `model.gguf` + 视觉投影器 `mmproj.gguf`):
+
+##### 1. 两种运行模式 (`mode`)
+- **`mode: server` (推荐, 默认)**:
+  通过 HTTP 调用由 `llama-server -m <model.gguf> --mmproj <mmproj.gguf>` 启动的服务。
+  其 `/v1/chat/completions` 原生兼容多模态格式,利用服务端的 continuous batching 实现高吞吐并发 (`thread_safe=True`,并发度由 `max_concurrency` 决定)。
+- **`mode: cli`**:
+  直接通过子进程调用本地编译的 `mtmd-cli` 工具单样本串行推理 (`thread_safe=False`)。
+
+##### 2. 深度适配多轮对话与多图输入
+- **多轮 Rollout 自动对齐**: 在 `eval` 或 `runner.py` 的多轮对话中,历史 assistant 预测自动保留,多轮跨轮传入的新图片严格按顺序消费;
+- **精准消费队列**: 样本中的 `images` 与上下文中的 `<image>` 占位符按序绑定,转换为经过尺寸保护 (等比缩放防 OOM) 的 Base64 Data URI;
+- **健壮性与排错**: 若服务端缺少 `--mmproj`,自动捕获并友好提示;支持 `--fail-fast` 异常直接抛出。
+
+##### 3. 常用使用示例
+```bash
+# 1. 配合 llama-server 进行数据集全量评测
+eval-vlm eval --dataset my_dataset \
+  --backend llamacpp \
+  --llamacpp-base-url http://localhost:8080/v1 \
+  --llamacpp-model qwen2.5-vl-7b
+
+# 2. 字段级精准评估 (field-eval 自动补跑 pred 并抽字段比对)
+eval-vlm field-eval --dataset my_dataset \
+  --backend llamacpp \
+  --llamacpp-base-url http://localhost:8080/v1 \
+  --llamacpp-model qwen2.5-vl-7b
+
+# 3. 无标注图片文件夹描述 (pred --datadir)
+eval-vlm pred --datadir ./photos \
+  --backend llamacpp \
+  --llamacpp-base-url http://localhost:8080/v1 \
+  --llamacpp-model qwen2.5-vl-7b
+
+# 4. 离线 CLI 模式调用本地 mtmd-cli
+eval-vlm pred --dataset my_dataset \
+  --backend llamacpp \
+  --llamacpp-mode cli \
+  --llamacpp-model-path /models/vlm.gguf \
+  --llamacpp-mmproj /models/mmproj.gguf
+```
+详细编译命令与多卡部署说明参见 [docs/llamacpp_deployment_guide.md](docs/llamacpp_deployment_guide.md)。
 
 ### 测量 MNN 转换精度误差(`precision`)
 
@@ -702,6 +753,8 @@ src/eval_vlm/
 │   ├── openai_backend.py# OpenAI 兼容调用(图片 base64、并发、重试;vllm 为其别名)
 │   ├── mnn_backend.py   # 本地 MNN(pymnn)推理(转换后的 mnn 模型,无需服务)
 │   ├── hf_backend.py    # 本地 HF(transformers)推理(转换前参考基准,precision 用)
+│   ├── vllm_offline_backend.py # 本地离线 vLLM(进程内加载合并权重)推理
+│   ├── llamacpp_backend.py     # 本地/远端 llama.cpp(llama-server / mtmd-cli)多模态推理
 │   └── fake_backend.py  # 离线回显后端(测试/演示)
 ├── scoring/
 │   ├── base.py / registry.py / exact_match.py / token_f1.py   # 可插拔评分

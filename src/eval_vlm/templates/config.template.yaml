@@ -73,12 +73,14 @@ split:
 #   backend=mnn              -> 读 mnn 块;产物 <模型名>=mnn.config_path 所在目录名
 #   backend=hf               -> 读 hf 块;产物 <模型名>=hf.model_path 目录名
 #   backend=vllm_offline     -> 读 vllm_offline 块(离线 vLLM,进程内加载合并权重);产物 <模型名>=vllm_offline.model_path 目录名
+#   backend=llamacpp         -> 读 llamacpp 块(本地/远端 llama.cpp 多模态推理);产物 <模型名>=llamacpp.model_path 根名或 model
 # 最终产物落 <数据集>/<模型名>/<后端类型>/。
 # CLI 覆盖永久写回:--base-url/--model -> openai.*;--mnn-config/--mnn-image-max-side -> mnn.*;
-#   --hf-model -> hf.*;--vllm-model/--vllm-gpu-util/--vllm-max-model-len/--vllm-image-max-pixels -> vllm_offline.*
+#   --hf-model -> hf.*;--vllm-model/--vllm-gpu-util/--vllm-max-model-len/--vllm-image-max-pixels -> vllm_offline.*;
+#   --llamacpp-base-url/--llamacpp-model/--llamacpp-model-path/--llamacpp-mmproj/--llamacpp-mode -> llamacpp.*
 # ---------------------------------------------------------------------------
 inference:
-  backend: openai             # openai/vllm(在线 OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn) | hf(本地 transformers) | vllm_offline(本地离线 vLLM,加载合并权重) | fake(回显,自检用)
+  backend: openai             # openai/vllm(在线 OpenAI 兼容 API,vllm 为别名) | mnn(本地 pymnn) | hf(本地 transformers) | vllm_offline(本地离线 vLLM) | llamacpp(llama.cpp/llama-server 多模态) | fake(回显,自检用)
   # openai/vllm 后端(也是 fake 自检走的块):
   openai:
     base_url: http://localhost:8000/v1   # 部署地址(--base-url 永久写回)
@@ -168,6 +170,31 @@ inference:
     top_k: -1                 # top-k 截断;-1=关闭(仅 temperature>0 有意义)
     repetition_penalty: 1.0   # >1 惩罚已出现 token;1.0=关闭
     system_prompt: null       # 系统提示(应与训练一致);null/空=不加
+    max_images_per_prompt: 4  # 单 prompt 最大图片数(多轮多图需>=实际图片数)
+  # llamacpp 本地/远端 llama.cpp 多模态后端:
+  # 支持两种模式:
+  #   1. server: 推荐,由 `llama-server -m <model.gguf> --mmproj <mmproj.gguf>` 启动,接口完全兼容 OpenAI 多模态格式,支持并发与连续批处理;
+  #   2. cli: 直接调用本地编译好的 mtmd-cli 可执行文件,串行单样本推理。
+  llamacpp:
+    mode: server              # server | cli
+    base_url: http://127.0.0.1:8080/v1  # llama-server 的 OpenAI 兼容地址
+    api_key: EMPTY            # llama-server 的鉴权密钥(默认 EMPTY)
+    model: default            # 逻辑模型名或别名
+    model_path: null          # GGUF 语言模型路径(CLI 模式必需;server 模式用作产物子目录名)
+    mmproj_path: null         # GGUF 多模态投影器路径(CLI 模式必需)
+    cli_binary: null          # mtmd-cli 可执行文件路径(缺省自动在 PATH 寻找)
+    request_timeout: 120.0    # 请求超时(秒)
+    max_retries: 3            # 重试次数
+    max_concurrency: 4        # server 模式最大并发数(cli 模式强制为 1)
+    image_max_pixels: 589824  # 像素上限保护 (768*768);<=0 关闭
+    image_min_pixels: 1024    # 像素下限保护 (32*32);<=0 关闭
+    image_max_side: 2048      # 最长边像素上限;<=0 关闭
+    max_tokens: 512           # 生成上限
+    temperature: 0.0          # 0.0 => 确定性贪心解码
+    top_p: 1.0
+    top_k: 40
+    repetition_penalty: 1.0   # 重复惩罚
+    system_prompt: null       # 系统提示词(应与训练一致;null=不加)
 
 # ---------------------------------------------------------------------------
 # 多轮评测策略(仅 pred --dataset·score·eval;pred --datadir 忽略本段)
