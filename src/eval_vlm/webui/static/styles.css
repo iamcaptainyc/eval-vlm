@@ -802,15 +802,30 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(15, 23, 42, 0.7);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 0.75rem;
   font-size: 0.82rem;
+}
+
+.sample-card-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.sample-card-id-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .sample-index-badge {
   color: var(--text-dim);
   font-weight: 700;
-  margin-right: 0.4rem;
 }
 
 .sample-id-code {
@@ -818,9 +833,106 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   color: #cbd5e1;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 样本ID下方的图片路径列表（直接可见，无需放大） */
+.sample-head-images-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.1rem;
+}
+
+.sample-head-image-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-subtle);
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-sm);
+  max-width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: fit-content;
+}
+
+.sample-head-image-row:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #fff;
+}
+
+.sample-head-image-row.is-missing {
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.08);
+}
+
+.sample-head-image-row.is-empty {
+  cursor: default;
+  border-style: dashed;
+}
+
+.sample-head-image-icon {
+  opacity: 0.75;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sample-head-image-index {
+  font-size: 0.68rem;
+  color: var(--indigo-400);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.sample-head-image-path {
+  word-break: break-all;
+  user-select: all;
+  color: #e2e8f0;
+}
+
+.sample-head-image-missing {
+  color: var(--rose-500);
+  font-weight: 700;
+  font-size: 0.7rem;
+  margin-left: 4px;
+}
+
+[data-theme="light"] .sample-card-head {
+  background: #f8fafc;
+}
+
+[data-theme="light"] .sample-id-code {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] .sample-head-image-row {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+[data-theme="light"] .sample-head-image-path {
+  color: #1e293b;
+}
+
+[data-theme="light"] .sample-head-image-row:hover {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #312e81;
 }
 
 /* 图片水平滚动区域 */

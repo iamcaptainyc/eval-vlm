@@ -519,7 +519,6 @@ function renderGallery() {
 
       // 渲染图片栏
       let imagesHtml = "";
-      let pathsHtml = "";
       if (!s.images.length) {
         imagesHtml = `<div style="font-size: 0.8rem; color: var(--text-dim); padding: 1.5rem;">无关联图片 (纯文本样本)</div>`;
       } else {
@@ -556,19 +555,31 @@ function renderGallery() {
             </div>`;
           })
           .join("");
+      }
 
-        pathsHtml = `
-        <div class="sample-images-bar">
+      // 渲染样本ID下方的图片路径列表（直接可见，无需放大）
+      let headImagesHtml = "";
+      if (s.images && s.images.length) {
+        headImagesHtml = `
+        <div class="sample-head-images-list">
           ${s.images
             .map(
               (img, idx) => `
-              <div class="sample-image-path-tag" title="点击复制路径" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(img.ref)}').then(() => showToast('已复制图片路径: ${escapeHtml(img.ref)}', 'info'))">
-                <span style="opacity: 0.6;">🖼️ ${s.images.length > 1 ? `[${idx + 1}]` : ""}</span>
-                <span style="word-break: break-all;">${escapeHtml(img.ref)}</span>
-                ${!img.exists ? '<span style="color: var(--rose-500); font-weight: bold; margin-left: 4px;">(丢失)</span>' : ""}
+              <div class="sample-head-image-row ${!img.exists ? "is-missing" : ""}" title="点击复制路径" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(img.ref)}').then(() => showToast('已复制图片路径: ${escapeHtml(img.ref)}', 'info'))">
+                <span class="sample-head-image-icon">🖼️${s.images.length > 1 ? ` <span class="sample-head-image-index">[${idx + 1}]</span>` : ""}</span>
+                <span class="sample-head-image-path">${escapeHtml(img.ref)}</span>
+                ${!img.exists ? '<span class="sample-head-image-missing">(丢失)</span>' : ""}
               </div>`
             )
             .join("")}
+        </div>`;
+      } else {
+        headImagesHtml = `
+        <div class="sample-head-images-list">
+          <div class="sample-head-image-row is-empty">
+            <span class="sample-head-image-icon">📝</span>
+            <span class="sample-head-image-path" style="opacity: 0.65;">无关联图片 (纯文本样本)</span>
+          </div>
         </div>`;
       }
 
@@ -590,11 +601,14 @@ function renderGallery() {
       return `
       <div class="sample-card ${hasMissing ? "has-missing-img" : ""}">
         <div class="sample-card-head">
-          <div>
-            <span class="sample-index-badge">#${s.position}</span>
-            <span class="sample-id-code">${escapeHtml(s.id)}</span>
+          <div class="sample-card-head-main">
+            <div class="sample-card-id-row">
+              <span class="sample-index-badge">#${s.position}</span>
+              <span class="sample-id-code">${escapeHtml(s.id)}</span>
+            </div>
+            ${headImagesHtml}
           </div>
-          <button class="btn btn-sm btn-outline-danger" onclick="promptDelete('${escapeHtml(s.id)}', 'record')">
+          <button class="btn btn-sm btn-outline-danger" style="align-self: flex-start; margin-top: 2px;" onclick="promptDelete('${escapeHtml(s.id)}', 'record')">
             🗑️ 删除样本
           </button>
         </div>
@@ -602,8 +616,6 @@ function renderGallery() {
         <div class="sample-images-shelf">
           ${imagesHtml}
         </div>
-
-        ${pathsHtml}
 
         <div class="sample-dialogue-flow">
           ${turnsHtml}
