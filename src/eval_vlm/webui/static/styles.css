@@ -578,16 +578,22 @@ main.app-main {
   color: var(--text-dim);
 }
 
-/* 下拉菜单定制暗黑箭头与选项 */
+/* 下拉菜单定制暗黑箭头与选项 (重置系统原生外观，避免多重箭头重叠) */
 .select {
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  background-color: var(--bg-input);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 14px 14px;
-  padding-right: 2.2rem;
+  background-repeat: no-repeat !important;
+  background-position: right 0.75rem center !important;
+  background-size: 14px 14px !important;
+  padding-right: 2.2rem !important;
+}
+
+.select::-ms-expand {
+  display: none;
 }
 
 .select option, .select optgroup {
@@ -2517,7 +2523,7 @@ table.ui-table tr:hover {
 [data-theme="light"] .input,
 [data-theme="light"] .select,
 [data-theme="light"] .textarea {
-  background: #ffffff;
+  background-color: #ffffff !important;
   border-color: #cbd5e1;
   color: #0f172a;
 }
@@ -2752,6 +2758,201 @@ table.ui-table tr:hover {
   color: #0f172a;
   box-shadow: var(--shadow-lg);
 }
+}
+
+[data-theme="light"] .dataset-metric-cell {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+[data-theme="light"] .dataset-metric-val {
+  color: #0f172a;
+}
+
+[data-theme="light"] .empty-state-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .empty-state-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .config-group-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .config-group-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .config-group-desc {
+  color: #64748b;
+}
+
+[data-theme="light"] .config-field label {
+  color: #1e293b;
+}
+
+[data-theme="light"] .config-key-badge {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+[data-theme="light"] .config-field-desc {
+  color: #64748b;
+}
+
+[data-theme="light"] .config-backend-btn {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] .config-backend-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+[data-theme="light"] .config-backend-btn.active {
+  background: #eef2ff;
+  border-color: var(--primary-500);
+  color: #4f46e5;
+  box-shadow: 0 0 0 1px var(--primary-500);
+}
+
+[data-theme="light"] .btn {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+[data-theme="light"] .btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+[data-theme="light"] .btn-primary {
+  background: var(--primary-gradient);
+  border-color: var(--primary-600);
+  color: #ffffff;
+}
+
+[data-theme="light"] .btn-primary:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #ffffff;
+}
+
+[data-theme="light"] .job-launcher-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .job-launcher-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .job-field label {
+  color: #334155;
+}
+
+[data-theme="light"] .job-type-segmented {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .job-type-btn {
+  color: #475569;
+}
+
+[data-theme="light"] .job-type-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .jobs-history-drawer {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .job-item-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .job-item-id {
+  color: #0f172a;
+}
+
+[data-theme="light"] dialog.custom-modal,
+[data-theme="light"] dialog.modal-card,
+[data-theme="light"] .modal-card {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-lg);
+  color: #0f172a;
+}
+
+[data-theme="light"] .modal-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .btn-close,
+[data-theme="light"] .modal-close {
+  color: #64748b;
+}
+
+[data-theme="light"] .btn-close:hover,
+[data-theme="light"] .modal-close:hover {
+  color: #0f172a;
+}
+
+[data-theme="light"] .code-preview-box {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .code-preview-title {
+  color: #475569;
+}
+
+[data-theme="light"] .code-preview-box code,
+[data-theme="light"] .code-preview-content {
+  color: #0284c7;
+}
+
+[data-theme="light"] .log-path-notice {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+[data-theme="light"] .log-path-notice code {
+  color: #334155;
+}
+
+[data-theme="light"] .terminal-drawer {
+  background: #0f172a;
+  border-top-color: var(--primary-500);
+}
+
+[data-theme="light"] .terminal-header {
+  background: #1e293b;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="light"] .toast-pill {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: #cbd5e1;
+  color: #0f172a;
+  box-shadow: var(--shadow-lg);
+}
 
 [data-theme="light"] ::-webkit-scrollbar-track {
   background: #f1f5f9;
@@ -2763,4 +2964,264 @@ table.ui-table tr:hover {
 
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* ==========================================================================
+   全局浅色模式深度适配 (全面消除文字倒置与未适配暗色块)
+   ========================================================================== */
+
+/* 1. 下拉框全局消除重叠箭头与系统默认样式 */
+[data-theme="light"] .select,
+[data-theme="light"] select {
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  background-color: #ffffff !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0.75rem center !important;
+  background-size: 14px 14px !important;
+  padding-right: 2.2rem !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .select::-ms-expand,
+[data-theme="light"] select::-ms-expand {
+  display: none !important;
+}
+
+[data-theme="light"] .select:focus,
+[data-theme="light"] select:focus {
+  background-color: #ffffff !important;
+  border-color: var(--border-focus) !important;
+}
+
+[data-theme="light"] .select option,
+[data-theme="light"] select option,
+[data-theme="light"] .select optgroup,
+[data-theme="light"] select optgroup {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* 2. 覆盖卡片与容器内的所有硬编码高亮白字 */
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3,
+[data-theme="light"] h4,
+[data-theme="light"] h5,
+[data-theme="light"] h6 {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .dataset-card h3,
+[data-theme="light"] .dataset-card h4,
+[data-theme="light"] .config-group-card h3,
+[data-theme="light"] .job-launcher-card h3,
+[data-theme="light"] .dataset-card-name,
+[data-theme="light"] .metric-number,
+[data-theme="light"] .field-name-title,
+[data-theme="light"] .sweep-ds-title,
+[data-theme="light"] .model-name-text,
+[data-theme="light"] .stat-card-val,
+[data-theme="light"] #del-target-id,
+[data-theme="light"] #dataset-html-preview-title {
+  color: #0f172a !important;
+}
+
+/* 3. 浅色模式下的次级文字与标签颜色 */
+[data-theme="light"] .config-field label,
+[data-theme="light"] .job-field label,
+[data-theme="light"] label {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .config-field-desc,
+[data-theme="light"] .config-scope-desc,
+[data-theme="light"] .sweep-ds-meta,
+[data-theme="light"] .field-metric-footer {
+  color: #64748b !important;
+}
+
+/* 4. 数据表格 (ui-table) 深度浅色适配 */
+[data-theme="light"] .data-table-container {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] table.ui-table th {
+  background: #f8fafc !important;
+  color: #475569 !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] table.ui-table td {
+  border-bottom: 1px solid #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] table.ui-table tr:hover {
+  background: #f1f5f9 !important;
+}
+
+/* 5. 分段选择器 (Segmented Control) 浅色适配 */
+[data-theme="light"] .segmented-control {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .segmented-btn {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .segmented-btn:hover {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .segmented-btn.active {
+  background: #ffffff !important;
+  color: #4f46e5 !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 6. 指标卡与进度条浅色适配 */
+[data-theme="light"] .dataset-metrics-row {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .field-metric-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .field-progress-track {
+  background: #e2e8f0 !important;
+}
+
+/* 7. 画廊与样本查看区浅色适配 */
+[data-theme="light"] .sample-images-shelf {
+  background: #f8fafc !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .image-tile {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .turn-bubble {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .turn-text {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .sample-id-code {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+/* 8. 对话与字段失配清单 (Diff tags) 浅色适配 */
+[data-theme="light"] .diff-tag-row .diff-field-name {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .diff-tag-row.match {
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+[data-theme="light"] .diff-tag-row.mismatch {
+  background: rgba(244, 63, 94, 0.08) !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+}
+
+/* 9. HTML 报告与预览中心卡片浅色适配 */
+[data-theme="light"] .html-report-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .html-report-card:hover {
+  background: #f8fafc !important;
+  border-color: var(--primary-500) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
+}
+
+[data-theme="light"] .html-preview-container {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .html-preview-toolbar {
+  background: #f8fafc !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+/* 10. 全局配置与模型扫描区块浅色适配 */
+[data-theme="light"] #settings-model-scan-status {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(6, 182, 212, 0.05) 100%) !important;
+  border-color: rgba(99, 102, 241, 0.2) !important;
+}
+
+[data-theme="light"] .model-item-card {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .model-item-card:hover {
+  background: #ffffff !important;
+  border-color: var(--cyan-500) !important;
+}
+
+[data-theme="light"] .model-item-path {
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] .config-scope-banner {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .config-scope-btn {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] .config-subnav-btn {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .config-subnav-btn:hover {
+  color: #0f172a !important;
+  background: #f1f5f9 !important;
+}
+
+[data-theme="light"] .config-subnav-btn.active {
+  color: #4f46e5 !important;
+  background: #eef2ff !important;
+  border-color: var(--primary-500) !important;
+}
+
+/* 11. GGUF 转换弹窗及内嵌区块浅色适配 */
+[data-theme="light"] #gguf-conv-dest-hint {
+  color: #d97706 !important;
+}
+
+[data-theme="light"] #gguf-conv-mmproj-panel .dataset-card {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .role-badge {
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
