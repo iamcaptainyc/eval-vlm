@@ -1222,7 +1222,7 @@
       </div>
 
       <div class="data-table-container">
-        <table class="ui-table">
+        <table class="ui-table jobs-table">
           <thead>
             <tr>
               <th>任务 ID</th>
@@ -2007,12 +2007,12 @@
   <!-- 实时终端日志抽屉 -->
   <div id="terminal-drawer" class="terminal-drawer hidden">
     <div class="terminal-header">
-      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+      <div class="terminal-header-main" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
         <span style="font-weight: 700; color: #fff; font-size: 0.88rem;">🖥️ 任务终端</span>
         <span id="terminal-job-label" class="user-tag" style="background: rgba(99,102,241,0.25); color: #a5b4fc; font-family: var(--font-mono); font-size: 0.75rem;"></span>
         <span id="terminal-dataset-label" class="dataset-active-pill" style="font-size: 0.75rem; padding: 2px 8px;"></span>
       </div>
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <div class="terminal-header-actions" style="display: flex; align-items: center; gap: 0.75rem;">
         <label style="font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem;">
           <input type="checkbox" checked onchange="state.autoScrollLogs=this.checked;"> 自动滚屏
         </label>
@@ -2022,9 +2022,9 @@
     </div>
 
     <!-- 终端顶部元数据指示栏 -->
-    <div id="terminal-meta-bar" style="background: #060a12; border-bottom: 1px solid var(--border-subtle); padding: 0.4rem 1.35rem; font-size: 0.75rem; display: flex; gap: 1.5rem; color: var(--text-dim); flex-wrap: wrap;">
-      <div><span>执行命令: </span><code id="terminal-cmd-display" style="color: #cbd5e1; font-family: var(--font-mono);"></code></div>
-      <div><span>日志文件: </span><code id="terminal-log-display" style="color: var(--cyan-500); font-family: var(--font-mono);"></code></div>
+    <div id="terminal-meta-bar" class="terminal-meta-bar" style="background: #060a12; border-bottom: 1px solid var(--border-subtle); padding: 0.4rem 1.35rem; font-size: 0.75rem; display: flex; gap: 1.5rem; color: var(--text-dim); flex-wrap: wrap;">
+      <div class="terminal-meta-item"><span>执行命令: </span><code id="terminal-cmd-display" style="color: #cbd5e1; font-family: var(--font-mono);"></code></div>
+      <div class="terminal-meta-item"><span>日志文件: </span><code id="terminal-log-display" style="color: var(--cyan-500); font-family: var(--font-mono);"></code></div>
     </div>
 
     <pre id="terminal-pre" class="terminal-stream-log"></pre>

@@ -2373,17 +2373,17 @@ function renderJobs() {
 
       return `
       <tr>
-        <td style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;">${escapeHtml(j.id)}</td>
+        <td class="job-id-cell" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;" title="${escapeHtml(j.id)}"><div class="job-id-text">${escapeHtml(j.id)}</div></td>
         <td><span class="role-badge" style="background:rgba(6,182,212,0.15); color:var(--cyan-500);">${escapeHtml(j.type)}</span></td>
         <td><strong style="color: var(--text-main);">${escapeHtml(j.dataset || "—")}</strong></td>
-        <td style="max-width: 320px; font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-dim); word-break: break-all;" title="${escapeHtml(cmdText)}">
-          ${escapeHtml(cmdText)}
+        <td class="job-command-cell" style="max-width: 320px; font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-dim); word-break: break-all;" title="${escapeHtml(cmdText)}">
+          <div class="job-command-text">${escapeHtml(cmdText)}</div>
         </td>
         <td>${escapeHtml(j.user)}</td>
         <td>${statusBadge}</td>
         <td style="font-size: 0.78rem; color: var(--text-dim);">${new Date(j.created_at).toLocaleString()}</td>
         <td>
-          <div style="display: flex; gap: 0.35rem;">
+          <div class="job-actions" style="display: flex; gap: 0.35rem;">
             <button class="btn btn-sm btn-primary" onclick="openTerminal('${escapeHtml(j.id)}')">🖥️ 实时日志</button>
             ${
               j.status === "running" || j.status === "queued"

@@ -1210,6 +1210,52 @@ table.ui-table {
   font-size: 0.85rem;
 }
 
+/* 任务队列表格：长命令只在命令列内折行，不撑大页面。 */
+table.jobs-table {
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+table.jobs-table th:nth-child(1), table.jobs-table td:nth-child(1) { width: 10%; }
+table.jobs-table th:nth-child(2), table.jobs-table td:nth-child(2) { width: 8%; }
+table.jobs-table th:nth-child(3), table.jobs-table td:nth-child(3) { width: 12%; }
+table.jobs-table th:nth-child(4), table.jobs-table td:nth-child(4) { width: 27%; }
+table.jobs-table th:nth-child(5), table.jobs-table td:nth-child(5) { width: 8%; }
+table.jobs-table th:nth-child(6), table.jobs-table td:nth-child(6) { width: 8%; }
+table.jobs-table th:nth-child(7), table.jobs-table td:nth-child(7) { width: 12%; }
+table.jobs-table th:nth-child(8), table.jobs-table td:nth-child(8) { width: 15%; }
+
+table.jobs-table td {
+  min-width: 0;
+  overflow: hidden;
+}
+
+table.jobs-table .job-command-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  max-height: 4.1em;
+}
+
+table.jobs-table .job-id-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  max-height: 2.7em;
+}
+
+table.jobs-table td:nth-child(8) > div {
+  flex-wrap: wrap;
+}
+
 table.ui-table th {
   background: rgba(0, 0, 0, 0.25);
   color: var(--text-muted);
@@ -1321,7 +1367,9 @@ table.ui-table tr:hover {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 450px;
+  height: clamp(280px, 52dvh, 560px);
+  min-height: 0;
+  max-height: calc(100dvh - 1rem);
   background: #020617;
   border-top: 2px solid var(--primary-500);
   box-shadow: 0 -15px 40px rgba(0, 0, 0, 0.7);
@@ -1340,12 +1388,48 @@ table.ui-table tr:hover {
   background: #090d16;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
+  min-height: 0;
+  gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
 }
 
+.terminal-header-main,
+.terminal-header-actions {
+  min-width: 0;
+}
+
+.terminal-header-main {
+  flex: 1 1 auto;
+}
+
+.terminal-header-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.terminal-meta-bar {
+  min-width: 0;
+  max-height: min(7rem, 20dvh);
+  overflow: auto;
+}
+
+.terminal-meta-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.terminal-meta-item code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .terminal-stream-log {
   flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
   padding: 1.1rem 1.35rem;
   overflow-y: auto;
   font-family: var(--font-mono);
@@ -2306,7 +2390,24 @@ table.ui-table tr:hover {
   }
 
   .terminal-drawer {
-    height: 60vh;
+    height: min(68dvh, 560px);
+    max-height: calc(100dvh - 0.5rem);
+  }
+
+  .terminal-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .terminal-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .terminal-meta-bar {
+    padding: 0.4rem 0.8rem !important;
+    gap: 0.45rem 1rem !important;
   }
 
   dialog.custom-modal, dialog.modal-card, .modal-card {
