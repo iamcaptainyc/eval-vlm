@@ -50,15 +50,15 @@ def test_llamacpp_active_and_result_name():
     cfg.inference.llamacpp.model = "qwen2.5-vl-7b"
     assert cfg.inference.result_name == "qwen2.5-vl-7b"
 
-    # 指定 model_path 时优先取 GGUF 文件名 (去后缀)
-    cfg.inference.llamacpp.model_path = "/path/to/my-vlm-model.Q4_K_M.gguf"
-    assert cfg.inference.result_name == "my-vlm-model.Q4_K_M"
+    # 指定 model_path 时，若在子文件夹内优先取父文件夹名作为模型名标识 A
+    cfg.inference.llamacpp.model_path = "/path/to/my-vlm-model/model.Q4_K_M.gguf"
+    assert cfg.inference.result_name == "my-vlm-model"
 
     # 别名 llama.cpp 和 llama_cpp 同样支持
     cfg.inference.backend = "llama.cpp"
-    assert cfg.inference.result_name == "my-vlm-model.Q4_K_M"
+    assert cfg.inference.result_name == "my-vlm-model"
     cfg.inference.backend = "llama_cpp"
-    assert cfg.inference.result_name == "my-vlm-model.Q4_K_M"
+    assert cfg.inference.result_name == "my-vlm-model"
 
 
 # ---------------------------------------------------------------------------

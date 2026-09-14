@@ -890,3 +890,102 @@ def scan_local_models(
         "llamacpp_models": llamacpp_models,
     }
 
+
+def resolve_model_for_backend(
+    backend: Optional[str],
+    model_val: Any,
+) -> dict[str, Any]:
+    """智能解析用户提供的统一 --model (权重文件夹、模型文件或逻辑名)，转换为对应后端的具体配置项。
+
+    规则:
+    1. mnn:
+       - 若 model_val 为文件夹，优先在其内部查找 config.json (拼接 folder / "config.json")；
+         若无 config.json 则尝试查找该目录下首个 .mnn 文件；
+       - 若 model_val 为文件 (.json 或 .mnn)，直接作为 inference.mnn.config_path；
+       - 否则原样写入 inference.mnn.config_path。
+    2. vllm_offline:
+       - 映射为 inference.vllm_offline.model_path = str(model_val)
+    3. hf:
+       - 映射为 inference.hf.model_path = str(model_val)
+    4. llamacpp:
+       - 若 model_val 为文件夹，扫描该目录下 *.gguf：
+         主模型 (非 mmproj) 设为 inference.llamacpp.model_path，
+         多模态投影器 (*mmproj*.gguf) 设为 inference.llamacpp.mmproj_path，
+         模型名 inference.llamacpp.model 设为文件夹名；
+       - 若 model_val 为 gguf 文件：
+         若文件名含 mmproj，设为 mmproj_path；
+         否则设为 model_path，并尝试在同级目录下寻找同名/同伴 *mmproj*.gguf 自动配对；
+         模型名设为去除 .gguf 后的文件名；
+       - 若为纯逻辑名或服务别名，设 inference.llamacpp.model 与 inference.openai.model。
+    5. openai / vllm / fake 或未显式指定:
+       - 映射为 inference.openai.model = str(model_val)
+    """
+    if not model_val:
+        return {}
+
+    val_str = str(model_val).strip()
+    b = (backend or "").lower().strip()
+    path_obj = Path(val_str).expanduser()
+
+    # 1. MNN 后端
+    if b == "mnn":
+        if path_obj.is_dir():
+            cfg_file = path_obj / "config.json"
+            if cfg_file.is_file():
+                return {"inference.mnn.config_path": str(cfg_file.resolve())}
+            mnn_files = [f for f in path_obj.iterdir() if f.is_file() and f.suffix.lower() == ".mnn"]
+            if mnn_files:
+                return {"inference.mnn.config_path": str(mnn_files[0].resolve())}
+            # 即使不存在具体文件，也优先拼接为 config.json
+            return {"inference.mnn.config_path": str((path_obj / "config.json").resolve())}
+        if path_obj.is_file():
+            return {"inference.mnn.config_path": str(path_obj.resolve())}
+        return {"inference.mnn.config_path": val_str}
+
+    # 2. 离线 vLLM
+    if b == "vllm_offline":
+        resolved = str(path_obj.resolve()) if path_obj.exists() else val_str
+        return {"inference.vllm_offline.model_path": resolved}
+
+    # 3. HuggingFace
+    if b == "hf":
+        resolved = str(path_obj.resolve()) if path_obj.exists() else val_str
+        return {"inference.hf.model_path": resolved}
+
+    # 4. llama.cpp
+    if b in ("llamacpp", "llama.cpp", "llama_cpp"):
+        res: dict[str, Any] = {}
+        if path_obj.is_dir():
+            ggufs = [f for f in path_obj.iterdir() if f.is_file() and f.suffix.lower() == ".gguf"]
+            mmproj_files = [f for f in ggufs if "mmproj" in f.name.lower()]
+            main_files = [f for f in ggufs if "mmproj" not in f.name.lower()]
+            if main_files:
+                res["inference.llamacpp.model_path"] = str(main_files[0].resolve())
+            if mmproj_files:
+                res["inference.llamacpp.mmproj_path"] = str(mmproj_files[0].resolve())
+            res["inference.llamacpp.model"] = path_obj.name
+            return res
+        if path_obj.is_file() and path_obj.suffix.lower() == ".gguf":
+            if "mmproj" in path_obj.name.lower():
+                res["inference.llamacpp.mmproj_path"] = str(path_obj.resolve())
+                res["inference.llamacpp.model"] = path_obj.parent.name
+            else:
+                res["inference.llamacpp.model_path"] = str(path_obj.resolve())
+                res["inference.llamacpp.model"] = path_obj.stem
+                # 尝试在同目录下寻找同伴投影器
+                companion_mmproj = [
+                    f for f in path_obj.parent.iterdir()
+                    if f.is_file() and f.suffix.lower() == ".gguf" and "mmproj" in f.name.lower()
+                ]
+                if companion_mmproj:
+                    res["inference.llamacpp.mmproj_path"] = str(companion_mmproj[0].resolve())
+            return res
+        # 纯模型名称
+        return {
+            "inference.llamacpp.model": val_str,
+            "inference.openai.model": val_str,
+        }
+
+    # 5. 默认走 OpenAI 兼容 / vLLM API
+    return {"inference.openai.model": val_str}
+

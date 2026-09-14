@@ -1122,12 +1122,6 @@ function updateSweepCmdPreview() {
   }
   if (backend) parts.push("--backend", backend);
   if (model) parts.push("--model", model.includes(" ") ? `"${model}"` : model);
-  if (backend === "llamacpp") {
-    const mp = modelInput?.getAttribute("data-modelpath");
-    const mm = modelInput?.getAttribute("data-mmproj");
-    if (mp) parts.push("--llamacpp-model-path", mp.includes(" ") ? `"${mp}"` : mp);
-    if (mm) parts.push("--llamacpp-mmproj", mm.includes(" ") ? `"${mm}"` : mm);
-  }
   if (baseUrl) parts.push("--base-url", baseUrl);
   if (method) parts.push("--method", method);
   if (limit) parts.push("--limit", limit);
@@ -1191,8 +1185,9 @@ async function submitSweepJob() {
 
     const job = await res.json();
     showToast(`Sweep 批量扫描任务已成功提交入队 (ID: ${job.id})`, "success");
+    await loadJobs();
     switchTab("jobs");
-    openTerminal(job.id, "sweep", datasetParam);
+    openTerminal(job.id);
   } catch (err) {
     showToast(`提交 Sweep 任务失败: ${err.message}`, "error");
   }
@@ -1942,32 +1937,8 @@ function buildJobModalArgs() {
     parts.push("--backend", backend);
   }
   if (model) {
-    if (backend === "hf") {
-      params.hf_model = model;
-      parts.push("--hf-model", model);
-    } else if (backend === "vllm_offline") {
-      params.vllm_model = model;
-      parts.push("--vllm-model", model);
-    } else if (backend === "mnn") {
-      params.mnn_config = model;
-      parts.push("--mnn-config", model);
-    } else if (backend === "llamacpp") {
-      const modelPath = modelInput?.getAttribute("data-modelpath") || model;
-      const mmprojPath = modelInput?.getAttribute("data-mmproj") || "";
-      params.model = model;
-      parts.push("--model", model);
-      if (modelPath) {
-        params.llamacpp_model_path = modelPath;
-        parts.push("--llamacpp-model-path", modelPath);
-      }
-      if (mmprojPath) {
-        params.llamacpp_mmproj = mmprojPath;
-        parts.push("--llamacpp-mmproj", mmprojPath);
-      }
-    } else {
-      params.model = model;
-      parts.push("--model", model);
-    }
+    params.model = model;
+    parts.push("--model", model.includes(" ") ? `"${model}"` : model);
   }
   if (limit) {
     const limInt = parseInt(limit, 10);
@@ -2069,7 +2040,7 @@ function onJobModalModelSelectChange() {
   const mmprojPath = opt?.getAttribute("data-mmproj");
 
   if (modelType === "llamacpp") {
-    input.value = modelName || val;
+    input.value = val;
     input.setAttribute("data-modelpath", val);
     if (mmprojPath) input.setAttribute("data-mmproj", mmprojPath);
     else input.removeAttribute("data-mmproj");
@@ -2095,19 +2066,15 @@ function onJobModalBackendChange() {
   const labelEl = document.getElementById("job-modal-model-label");
   const badgeEl = document.getElementById("job-modal-model-badge");
   let flagText = "--model";
-  let descText = "模型覆盖 (--model)";
+  let descText = "目标模型 / 权重目录 (--model)";
   if (backend === "hf") {
-    flagText = "--hf-model";
-    descText = "HF 权重 (--hf-model)";
+    descText = "HF 权重目录 / 模型名 (--model)";
   } else if (backend === "vllm_offline") {
-    flagText = "--vllm-model";
-    descText = "vLLM 权重 (--vllm-model)";
+    descText = "vLLM 离线权重目录 (--model)";
   } else if (backend === "mnn") {
-    flagText = "--mnn-config";
-    descText = "MNN 配置 (--mnn-config)";
+    descText = "MNN 权重目录 / 配置 (--model)";
   } else if (backend === "llamacpp") {
-    flagText = "--model";
-    descText = "GGUF 模型名 A (--model)";
+    descText = "GGUF 模型文件 / 权重目录 (--model)";
   }
   if (labelEl) labelEl.textContent = descText;
   if (badgeEl) badgeEl.textContent = flagText;
@@ -2121,20 +2088,16 @@ let inlineJobType = "field-eval";
 function initInlineJobConsole() {
   const dsSelect = document.getElementById("job-inline-dataset");
   if (dsSelect) {
-    if (inlineJobType === "sweep") {
-      dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
-    } else {
-      dsSelect.innerHTML = (state.datasets || [])
-        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
-        .join("");
-    }
+    dsSelect.innerHTML = (state.datasets || [])
+      .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+      .join("");
   }
   updateInlineJobPreview();
 }
 
 function switchInlineJobType(type) {
   inlineJobType = type;
-  const types = ["field-eval", "eval", "pred", "score", "sweep"];
+  const types = ["field-eval", "eval", "pred", "score"];
   types.forEach((t) => {
     const btn = document.getElementById(`btn-type-${t}`);
     if (btn) btn.classList.toggle("active", t === type);
@@ -2147,13 +2110,9 @@ function switchInlineJobType(type) {
 
   const dsSelect = document.getElementById("job-inline-dataset");
   if (dsSelect) {
-    if (type === "sweep") {
-      dsSelect.innerHTML = `<option value="">(扫描当前工作区全部数据集)</option>`;
-    } else {
-      dsSelect.innerHTML = (state.datasets || [])
-        .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
-        .join("");
-    }
+    dsSelect.innerHTML = (state.datasets || [])
+      .map((d) => `<option value="${escapeHtml(d.name)}" ${d.name === state.currentDataset ? "selected" : ""}>${escapeHtml(d.name)}</option>`)
+      .join("");
   }
 
   updateInlineJobPreview();
@@ -2181,7 +2140,7 @@ function onJobInlineModelSelectChange() {
   const mmprojPath = opt?.getAttribute("data-mmproj");
 
   if (modelType === "llamacpp") {
-    input.value = modelName || val;
+    input.value = val;
     input.setAttribute("data-modelpath", val);
     if (mmprojPath) input.setAttribute("data-mmproj", mmprojPath);
     else input.removeAttribute("data-mmproj");
@@ -2207,19 +2166,15 @@ function onJobInlineBackendChange() {
   const labelEl = document.getElementById("job-inline-model-label");
   const badgeEl = document.getElementById("job-inline-model-badge");
   let flagText = "--model";
-  let descText = "模型覆盖 (--model)";
+  let descText = "目标模型 / 权重目录 (--model)";
   if (backend === "hf") {
-    flagText = "--hf-model";
-    descText = "HF 权重 (--hf-model)";
+    descText = "HF 权重目录 / 模型名 (--model)";
   } else if (backend === "vllm_offline") {
-    flagText = "--vllm-model";
-    descText = "vLLM 权重 (--vllm-model)";
+    descText = "vLLM 离线权重目录 (--model)";
   } else if (backend === "mnn") {
-    flagText = "--mnn-config";
-    descText = "MNN 配置 (--mnn-config)";
+    descText = "MNN 权重目录 / 配置 (--model)";
   } else if (backend === "llamacpp") {
-    flagText = "--model";
-    descText = "GGUF 模型名 A (--model)";
+    descText = "GGUF 模型文件 / 权重目录 (--model)";
   }
   if (labelEl) labelEl.textContent = descText;
   if (badgeEl) badgeEl.textContent = flagText;
@@ -2289,32 +2244,8 @@ function buildInlineJobArgs() {
     parts.push("--backend", backend);
   }
   if (model) {
-    if (backend === "hf") {
-      params.hf_model = model;
-      parts.push("--hf-model", model);
-    } else if (backend === "vllm_offline") {
-      params.vllm_model = model;
-      parts.push("--vllm-model", model);
-    } else if (backend === "mnn") {
-      params.mnn_config = model;
-      parts.push("--mnn-config", model);
-    } else if (backend === "llamacpp") {
-      const modelPath = modelInput?.getAttribute("data-modelpath") || model;
-      const mmprojPath = modelInput?.getAttribute("data-mmproj") || "";
-      params.model = model;
-      parts.push("--model", model);
-      if (modelPath) {
-        params.llamacpp_model_path = modelPath;
-        parts.push("--llamacpp-model-path", modelPath);
-      }
-      if (mmprojPath) {
-        params.llamacpp_mmproj = mmprojPath;
-        parts.push("--llamacpp-mmproj", mmprojPath);
-      }
-    } else {
-      params.model = model;
-      parts.push("--model", model);
-    }
+    params.model = model;
+    parts.push("--model", model.includes(" ") ? `"${model}"` : model);
   }
   if (limit) {
     const limInt = parseInt(limit, 10);

@@ -183,10 +183,37 @@ def _persist_overrides(folder: Path, args: argparse.Namespace) -> list[str]:
     """把用户显式提供的 CLI 覆盖永久写回该数据集 config.yaml,返回写回的键列表。
 
     只写回非 None 的 flag;某命令没有的 flag 自动跳过(getattr 兜底)。
+    特别地，如果提供了 --model，调用 resolve_model_for_backend 根据当前 backend
+    (CLI 指定优先，否则读取数据集已配置的 backend) 自动解析为对应后端的具体配置项。
     写回后由调用方 load_dataset_config 读回,实现「用户参数优先 + 持久化」。
     """
     persisted: list[str] = []
+
+    # 1. 首先确定当前有效 backend 并处理 --backend
+    backend_val = getattr(args, "backend", None)
+    if backend_val is not None:
+        workspace.set_dataset_value(folder, "inference.backend", backend_val)
+        persisted.append("inference.backend")
+    else:
+        # 从该数据集已有的 config.yaml 窥探 backend (若有)
+        try:
+            cfg_existing = load_dataset_config(folder)
+            backend_val = cfg_existing.inference.backend
+        except Exception:
+            backend_val = "openai"
+
+    # 2. 如果提供了统一的 --model，智能分派到具体后端的配置项中
+    model_val = getattr(args, "model", None)
+    if model_val is not None:
+        resolved = workspace.resolve_model_for_backend(backend_val, model_val)
+        for d_key, d_val in resolved.items():
+            workspace.set_dataset_value(folder, d_key, d_val)
+            persisted.append(d_key)
+
+    # 3. 处理其他常规或显式指定的参数 (若显式传了 --mnn-config 等，仍保持更高优先级的显式覆盖)
     for attr, dotted in _PERSIST_MAP:
+        if attr in ("backend", "model"):
+            continue
         val = getattr(args, attr, None)
         if val is not None:
             workspace.set_dataset_value(folder, dotted, val)
@@ -624,7 +651,7 @@ def _add_inference_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-url", default=None,
                    help="临时覆盖 inference.openai.base_url(部署地址,如 http://localhost:8000/v1)")
     p.add_argument("--model", default=None,
-                   help="临时覆盖 inference.openai.model(部署时注册的模型名)")
+                   help="统一模型参数(权重文件夹/模型文件/模型名，底层自动根据当前后端解析为对应设置)")
     p.add_argument("--limit", type=int, default=None,
                    help="评测样本数量上限(截取前 N 条;<=0 表示不限制,缺省评全部)")
     # 调试用:任一条推理出错立即抛出原始异常(带完整 traceback)并中断整批,不再默默记
@@ -736,6 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
     # score
     p_score = sub.add_parser("score", help="对已有数据集的预测评分(--dataset=名|路径)")
     p_score.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_score.add_argument("--model", default=None,
+                         help="统一模型参数(权重文件夹/模型文件/模型名，定位对应后端的 predictions.jsonl)")
     p_score.add_argument("--scorer", default=None,
                          help=f"临时覆盖评分器。可用: {', '.join(available_scorers())}")
     p_score.add_argument("--limit", type=int, default=None,
