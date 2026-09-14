@@ -1364,23 +1364,33 @@ table.ui-table tr:hover {
 /* 实时终端抽屉 (Terminal Drawer) */
 .terminal-drawer {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: clamp(280px, 52dvh, 560px);
+  inset: clamp(8px, 3vh, 28px) clamp(8px, 2vw, 28px);
+  height: auto;
   min-height: 0;
-  max-height: calc(100dvh - 1rem);
   background: #020617;
   border-top: 2px solid var(--primary-500);
   box-shadow: 0 -15px 40px rgba(0, 0, 0, 0.7);
   z-index: 500;
   display: flex;
   flex-direction: column;
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, visibility 0s linear 0s;
 }
 
 .terminal-drawer.hidden {
   transform: translateY(100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition-delay: 0s, 0s, 0.25s;
+}
+
+.terminal-drawer.terminal-fullscreen {
+  inset: 0;
+  border-radius: 0;
 }
 
 .terminal-header {
@@ -1392,6 +1402,7 @@ table.ui-table tr:hover {
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
+  flex: 0 0 auto;
 }
 
 .terminal-header-main,
@@ -1410,6 +1421,9 @@ table.ui-table tr:hover {
 }
 
 .terminal-meta-bar {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  flex: 0 0 auto;
   min-width: 0;
   max-height: min(7rem, 20dvh);
   overflow: auto;
@@ -2390,8 +2404,7 @@ table.ui-table tr:hover {
   }
 
   .terminal-drawer {
-    height: min(68dvh, 560px);
-    max-height: calc(100dvh - 0.5rem);
+    inset: 0.35rem;
   }
 
   .terminal-header {
@@ -2406,6 +2419,7 @@ table.ui-table tr:hover {
   }
 
   .terminal-meta-bar {
+    grid-template-columns: 1fr;
     padding: 0.4rem 0.8rem !important;
     gap: 0.45rem 1rem !important;
   }

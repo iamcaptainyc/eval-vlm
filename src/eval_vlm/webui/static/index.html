@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260914settingsfix">
+  <link rel="stylesheet" href="styles.css?v=20260914terminalfix2">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260914targetsfix" defer></script>
+  <script src="app.js?v=20260914terminalfix2" defer></script>
 </head>
 <body>
 
@@ -2005,7 +2005,7 @@
   </dialog>
 
   <!-- 实时终端日志抽屉 -->
-  <div id="terminal-drawer" class="terminal-drawer hidden">
+  <div id="terminal-drawer" class="terminal-drawer hidden" aria-expanded="false">
     <div class="terminal-header">
       <div class="terminal-header-main" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
         <span style="font-weight: 700; color: #fff; font-size: 0.88rem;">🖥️ 任务终端</span>
@@ -2017,6 +2017,7 @@
           <input type="checkbox" checked onchange="state.autoScrollLogs=this.checked;"> 自动滚屏
         </label>
         <button class="btn btn-sm" onclick="state.terminalLogs=''; document.getElementById('terminal-pre').textContent='';">清屏</button>
+        <button class="btn btn-sm" id="terminal-fullscreen-btn" onclick="toggleTerminalFullscreen()" aria-label="终端全屏">⛶ 全屏</button>
         <button class="btn btn-sm btn-outline-danger" onclick="closeTerminal()">&times; 关闭</button>
       </div>
     </div>

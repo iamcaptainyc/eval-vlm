@@ -2420,7 +2420,10 @@ function openTerminal(jobId) {
   const logDisplay = document.getElementById("terminal-log-display");
   const pre = document.getElementById("terminal-pre");
 
-  if (drawer) drawer.classList.remove("hidden");
+  if (drawer) {
+    drawer.classList.remove("hidden");
+    drawer.setAttribute("aria-expanded", "true");
+  }
   if (jobLabel) jobLabel.textContent = `任务: ${jobId}`;
   if (pre) pre.textContent = "正在连接进程日志输出流...\n";
 
@@ -2479,10 +2482,30 @@ function openTerminal(jobId) {
 function closeTerminal() {
   state.logDrawerOpen = false;
   const drawer = document.getElementById("terminal-drawer");
-  if (drawer) drawer.classList.add("hidden");
+  if (drawer) {
+    drawer.classList.add("hidden");
+    drawer.classList.remove("terminal-fullscreen");
+    drawer.setAttribute("aria-expanded", "false");
+    const fullscreenButton = document.getElementById("terminal-fullscreen-btn");
+    if (fullscreenButton) {
+      fullscreenButton.textContent = "⛶ 全屏";
+      fullscreenButton.setAttribute("aria-label", "终端全屏");
+    }
+  }
   if (state.eventSource) {
     state.eventSource.close();
     state.eventSource = null;
+  }
+}
+
+function toggleTerminalFullscreen() {
+  const drawer = document.getElementById("terminal-drawer");
+  if (!drawer) return;
+  const fullscreen = drawer.classList.toggle("terminal-fullscreen");
+  const button = document.getElementById("terminal-fullscreen-btn");
+  if (button) {
+    button.textContent = fullscreen ? "⛶ 还原" : "⛶ 全屏";
+    button.setAttribute("aria-label", fullscreen ? "还原终端大小" : "终端全屏");
   }
 }
 
