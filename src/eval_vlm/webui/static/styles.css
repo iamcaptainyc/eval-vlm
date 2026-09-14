@@ -2397,6 +2397,107 @@ table.ui-table tr:hover {
 }
 
 /* ==========================================================================
+   全局配置视图组件样式 (Global Settings Components)
+   ========================================================================== */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.65rem;
+}
+
+.settings-file-badge {
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--cyan-500);
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-subtle);
+}
+
+.settings-scan-title {
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.settings-scan-tip {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  margin-top: 0.25rem;
+  line-height: 1.5;
+}
+
+.settings-tip-box {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.config-raw-details {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.config-raw-summary {
+  cursor: pointer;
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all var(--transition-fast);
+}
+
+.config-raw-summary:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.config-raw-content {
+  border-top: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#settings-raw-yaml {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 0;
+  line-height: 1.5;
+}
+
+
+/* ==========================================================================
    浅色主题系统 (Light Theme: Clean, Minimal, Premium)
    ========================================================================== */
 [data-theme="light"] {
@@ -2758,202 +2859,6 @@ table.ui-table tr:hover {
   color: #0f172a;
   box-shadow: var(--shadow-lg);
 }
-}
-
-[data-theme="light"] .dataset-metric-cell {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-}
-
-[data-theme="light"] .dataset-metric-val {
-  color: #0f172a;
-}
-
-[data-theme="light"] .empty-state-card {
-  background: #ffffff;
-  border-color: #cbd5e1;
-}
-
-[data-theme="light"] .empty-state-title {
-  color: #0f172a;
-}
-
-[data-theme="light"] .config-group-card {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: var(--shadow-card);
-}
-
-[data-theme="light"] .config-group-title {
-  color: #0f172a;
-}
-
-[data-theme="light"] .config-group-desc {
-  color: #64748b;
-}
-
-[data-theme="light"] .config-field label {
-  color: #1e293b;
-}
-
-[data-theme="light"] .config-key-badge {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #475569;
-}
-
-[data-theme="light"] .config-field-desc {
-  color: #64748b;
-}
-
-[data-theme="light"] .config-backend-btn {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-  color: #334155;
-}
-
-[data-theme="light"] .config-backend-btn:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-}
-
-[data-theme="light"] .config-backend-btn.active {
-  background: #eef2ff;
-  border-color: var(--primary-500);
-  color: #4f46e5;
-  box-shadow: 0 0 0 1px var(--primary-500);
-}
-
-[data-theme="light"] .btn {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-  color: #334155;
-}
-
-[data-theme="light"] .btn:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-  color: #0f172a;
-}
-
-[data-theme="light"] .btn-primary {
-  background: var(--primary-gradient);
-  border-color: var(--primary-600);
-  color: #ffffff;
-}
-
-[data-theme="light"] .btn-primary:hover {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-  color: #ffffff;
-}
-
-[data-theme="light"] .job-launcher-card {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: var(--shadow-card);
-}
-
-[data-theme="light"] .job-launcher-title {
-  color: #0f172a;
-}
-
-[data-theme="light"] .job-field label {
-  color: #334155;
-}
-
-[data-theme="light"] .job-type-segmented {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-}
-
-[data-theme="light"] .job-type-btn {
-  color: #475569;
-}
-
-[data-theme="light"] .job-type-btn.active {
-  background: #ffffff;
-  color: #0f172a;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme="light"] .jobs-history-drawer {
-  background: #ffffff;
-  border-color: #cbd5e1;
-}
-
-[data-theme="light"] .job-item-card {
-  background: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-[data-theme="light"] .job-item-id {
-  color: #0f172a;
-}
-
-[data-theme="light"] dialog.custom-modal,
-[data-theme="light"] dialog.modal-card,
-[data-theme="light"] .modal-card {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: var(--shadow-lg);
-  color: #0f172a;
-}
-
-[data-theme="light"] .modal-title {
-  color: #0f172a;
-}
-
-[data-theme="light"] .btn-close,
-[data-theme="light"] .modal-close {
-  color: #64748b;
-}
-
-[data-theme="light"] .btn-close:hover,
-[data-theme="light"] .modal-close:hover {
-  color: #0f172a;
-}
-
-[data-theme="light"] .code-preview-box {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-}
-
-[data-theme="light"] .code-preview-title {
-  color: #475569;
-}
-
-[data-theme="light"] .code-preview-box code,
-[data-theme="light"] .code-preview-content {
-  color: #0284c7;
-}
-
-[data-theme="light"] .log-path-notice {
-  background: #f8fafc;
-  border-color: #e2e8f0;
-  color: #475569;
-}
-
-[data-theme="light"] .log-path-notice code {
-  color: #334155;
-}
-
-[data-theme="light"] .terminal-drawer {
-  background: #0f172a;
-  border-top-color: var(--primary-500);
-}
-
-[data-theme="light"] .terminal-header {
-  background: #1e293b;
-  border-bottom-color: rgba(255, 255, 255, 0.1);
-}
-
-[data-theme="light"] .toast-pill {
-  background: rgba(255, 255, 255, 0.98);
-  border-color: #cbd5e1;
-  color: #0f172a;
-  box-shadow: var(--shadow-lg);
-}
-
 [data-theme="light"] ::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
@@ -3225,3 +3130,75 @@ table.ui-table tr:hover {
 [data-theme="light"] .role-badge {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
+
+/* 12. 全局配置与模型库视图 (Settings / Global Config) 浅色适配 */
+[data-theme="light"] .settings-card-title {
+  color: #0f172a !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .settings-file-badge {
+  background: #e0f2fe !important;
+  color: #0284c7 !important;
+  border-color: #bae6fd !important;
+}
+
+[data-theme="light"] .settings-scan-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .settings-scan-tip {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .settings-tip-box {
+  background: #eef2ff !important;
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  color: #3730a3 !important;
+}
+
+[data-theme="light"] #settings-model-scan-status {
+  background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%) !important;
+  border-color: #99f6e4 !important;
+}
+
+[data-theme="light"] #settings-scan-badge-hf {
+  background: #e0e7ff !important;
+  color: #4338ca !important;
+}
+
+[data-theme="light"] #settings-scan-badge-mnn {
+  background: #cffafe !important;
+  color: #0e7490 !important;
+}
+
+[data-theme="light"] #settings-scan-badge-llamacpp {
+  background: #fef3c7 !important;
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .config-raw-details {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .config-raw-summary {
+  color: #334155 !important;
+  background: #ffffff !important;
+}
+
+[data-theme="light"] .config-raw-summary:hover {
+  color: #0f172a !important;
+  background: #f1f5f9 !important;
+}
+
+[data-theme="light"] .config-raw-content {
+  background: #f8fafc !important;
+  border-top-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] #settings-raw-yaml {
+  background: #f8fafc !important;
+  color: #1e293b !important;
+}
+

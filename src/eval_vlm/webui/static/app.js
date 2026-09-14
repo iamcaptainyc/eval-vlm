@@ -2415,6 +2415,11 @@ function renderJobs() {
                 ? `<button class="btn btn-sm" onclick="resumeJob('${escapeHtml(j.id)}')">续跑</button>`
                 : ""
             }
+            ${
+              j.status !== "running" && j.status !== "queued"
+                ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteJob('${escapeHtml(j.id)}')">删除</button>`
+                : ""
+            }
           </div>
         </td>
       </tr>
@@ -2523,6 +2528,49 @@ async function resumeJob(jobId) {
     openTerminal(newJob.id);
   } catch (err) {
     showToast(`续跑失败: ${err.message}`, "error");
+  }
+}
+
+async function deleteJob(jobId) {
+  if (!confirm(`确认删除任务 ${jobId} 及其落盘日志吗？此操作不可逆。`)) return;
+  try {
+    const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    showToast(`任务 ${jobId} 已删除`, "success");
+    // 若当前正在查看该任务终端抽屉，则同步关闭
+    if (state.currentJobId === jobId) {
+      closeTerminal();
+    }
+    await loadJobs();
+  } catch (err) {
+    showToast(`删除失败: ${err.message}`, "error");
+  }
+}
+
+async function clearFinishedJobs() {
+  const finishedJobs = state.jobs.filter((j) => j.status !== "running" && j.status !== "queued");
+  if (!finishedJobs.length) {
+    showToast("当前没有可清理的已结束任务", "info");
+    return;
+  }
+  if (!confirm(`确认清理所有已结束的 ${finishedJobs.length} 个历史任务记录及日志吗？此操作不可逆。`)) return;
+  try {
+    const res = await fetch("/api/jobs", { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    showToast(`成功清理 ${data.deleted_count || finishedJobs.length} 个已结束任务`, "success");
+    if (finishedJobs.some((j) => j.id === state.currentJobId)) {
+      closeTerminal();
+    }
+    await loadJobs();
+  } catch (err) {
+    showToast(`清理失败: ${err.message}`, "error");
   }
 }
 

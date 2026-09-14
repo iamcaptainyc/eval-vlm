@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import subprocess
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -398,6 +399,39 @@ class JobManager:
         job.finished_at = datetime.now(timezone.utc).isoformat()
         job.save_meta()
         job.broadcast("status", {"status": "canceled"})
+        return True
+
+    def delete_job(self, job_id: str) -> bool:
+        """删除任务记录及其日志文件目录。正在运行的任务不可直接删除，需先取消。"""
+        job = self.jobs.get(job_id)
+        if not job:
+            # 尝试清理可能遗留的孤立磁盘目录
+            target_dir = self.settings.jobs_dir / job_id
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+                return True
+            return False
+
+        # 如果任务正在运行或排队，拒绝删除，要求先终止
+        if job.status in ("queued", "running"):
+            raise ValueError("正在运行或排队中的任务无法直接删除，请先点击停止")
+
+        # 广播关闭任何存留的 SSE 订阅
+        try:
+            job.broadcast("status", {"status": "deleted"})
+        except Exception:
+            pass
+
+        # 移除内存引用
+        self.jobs.pop(job_id, None)
+
+        # 清除磁盘文件及目录
+        if job.dir.exists():
+            try:
+                shutil.rmtree(job.dir, ignore_errors=True)
+            except Exception:
+                pass
+
         return True
 
     def list_jobs(self) -> list[JobSummary]:

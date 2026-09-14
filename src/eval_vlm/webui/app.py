@@ -602,6 +602,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         ok = job_manager.cancel_job(job_id)
         return {"success": ok, "job_id": job_id}
 
+    @app.delete("/api/jobs/{job_id}")
+    async def api_delete_job(
+        job_id: str,
+        _user: User = Depends(require_editor),
+    ) -> dict[str, Any]:
+        """删除指定任务记录及日志文件。"""
+        try:
+            ok = job_manager.delete_job(job_id)
+            if not ok:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在或已被删除")
+            return {"success": True, "job_id": job_id}
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    @app.delete("/api/jobs")
+    async def api_clear_finished_jobs(
+        _user: User = Depends(require_editor),
+    ) -> dict[str, Any]:
+        """批量清理所有已结束（非运行、非排队）的历史任务。"""
+        deleted_ids: list[str] = []
+        for job in list(job_manager.jobs.values()):
+            if job.status not in ("queued", "running"):
+                try:
+                    if job_manager.delete_job(job.id):
+                        deleted_ids.append(job.id)
+                except Exception:
+                    pass
+        return {"success": True, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
+
     @app.post("/api/jobs/{job_id}/resume")
     async def api_resume_job(
         job_id: str,

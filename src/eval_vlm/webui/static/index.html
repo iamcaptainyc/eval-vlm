@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260911lightfix">
-  <script src="app.js?v=20260911lightfix" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260914settingsfix">
+  <script src="app.js?v=20260914jobdelete" defer></script>
 </head>
 <body>
 
@@ -1039,6 +1039,7 @@
           <p class="section-subtitle">串行化异步调度，子进程执行 CLI，透明化命令与日志落盘</p>
         </div>
         <div class="control-bar-right">
+          <button class="btn btn-outline-danger" onclick="clearFinishedJobs()" title="清理所有已结束（非排队、非运行）的历史任务记录与日志">🗑️ 清理已结束任务</button>
           <button class="btn btn-primary" onclick="loadJobs()">🔄 刷新列表</button>
         </div>
       </div>
@@ -1445,7 +1446,7 @@
           <h2 class="section-title">🌐 全局配置与本地模型库 (Global Config)</h2>
           <p class="section-subtitle">管理本机机器级全局配置（写入 ~/.eval_vlm/config.yaml），所有数据集共享统一工作区、默认图片根、切分参数与模型目录</p>
           <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.25rem;">
-            配置文件位置: <code id="settings-file-path" style="color: var(--cyan-500); font-family: var(--font-mono); background: rgba(0,0,0,0.3); padding: 1px 6px; border-radius: 4px;">~/.eval_vlm/config.yaml</code>
+            配置文件位置: <code id="settings-file-path" class="settings-file-badge">~/.eval_vlm/config.yaml</code>
           </div>
         </div>
         <div class="control-bar-right">
@@ -1461,13 +1462,13 @@
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <span style="font-size: 1.5rem;">🎯</span>
             <div>
-              <div style="font-weight: 700; color: #fff; font-size: 0.95rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+              <div class="settings-scan-title">
                 <span>本地模型探测总览</span>
                 <span id="settings-scan-badge-hf" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">HF/vLLM: 0 个</span>
                 <span id="settings-scan-badge-mnn" class="role-badge" style="background: rgba(6,182,212,0.2); color: var(--cyan-500);">MNN: 0 个</span>
                 <span id="settings-scan-badge-llamacpp" class="role-badge" style="background: rgba(245,158,11,0.2); color: var(--amber-500);">llama.cpp(GGUF): 0 个</span>
               </div>
-              <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.25rem; line-height: 1.5;">
+              <div class="settings-scan-tip">
                 💡 <strong>执行时快捷选择</strong>：所有已探测的模型均可直接在<strong>【任务队列】</strong>与<strong>【可视化配置】</strong>的模型下拉框中一键选择，无需在此手动复制！
               </div>
             </div>
@@ -1482,11 +1483,11 @@
       <div class="settings-grid">
         <!-- 左栏: 核心路径 -->
         <div class="dataset-card" style="min-width: 0;">
-          <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+          <h3 class="settings-card-title">
             📁 机器级核心路径 (Paths)
           </h3>
 
-          <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.78rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5;">
+          <div class="settings-tip-box">
             💡 <strong>多目录支持</strong>：权重目录（例如未量化的全精度权重与量化后的权重不在同个目录）均支持同时配置。每行填一个目录路径，或用英文分号 <code>;</code> 隔开即可！
           </div>
 
@@ -1547,7 +1548,7 @@
         <!-- 右栏: 切分参数默认值 -->
         <div class="dataset-card" style="min-width: 0; display: flex; flex-direction: column; justify-content: space-between;">
           <div>
-            <h3 style="font-size: 1.05rem; color: #fff; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.65rem;">
+            <h3 class="settings-card-title">
               ✂️ 数据切分默认参数 (split.*)
             </h3>
             <div style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 1rem;">
@@ -1586,15 +1587,13 @@
             💾 保存全局配置到 ~/.eval_vlm/config.yaml
           </button>
         </div>
-      </div>
-
 
         <!-- 全局配置原始 YAML 查看器 -->
         <div style="grid-column: 1 / -1;">
           <details class="config-raw-details">
             <summary class="config-raw-summary">📄 查看 ~/.eval_vlm/config.yaml 全局原始 YAML 文件内容</summary>
             <div class="config-raw-content">
-              <pre id="settings-raw-yaml" style="font-family: var(--font-mono); font-size: 0.78rem; color: #cbd5e1; padding: 1rem; overflow-x: auto; margin: 0;"></pre>
+              <pre id="settings-raw-yaml"></pre>
             </div>
           </details>
         </div>
