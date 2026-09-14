@@ -519,6 +519,7 @@ function renderGallery() {
 
       // 渲染图片栏
       let imagesHtml = "";
+      let pathsHtml = "";
       if (!s.images.length) {
         imagesHtml = `<div style="font-size: 0.8rem; color: var(--text-dim); padding: 1.5rem;">无关联图片 (纯文本样本)</div>`;
       } else {
@@ -526,7 +527,7 @@ function renderGallery() {
           .map((img, imgIdx) => {
             if (!img.exists) {
               return `
-              <div class="image-tile">
+              <div class="image-tile" title="${escapeHtml(img.ref)}">
                 <div class="missing-image-box">
                   <span style="font-size: 1.1rem;">⚠️</span>
                   <span style="font-size: 0.72rem; font-weight: 700; margin-top: 2px;">图片丢失</span>
@@ -535,8 +536,11 @@ function renderGallery() {
               </div>`;
             }
             return `
-            <div class="image-tile">
+            <div class="image-tile" title="${escapeHtml(img.ref)}">
               <img src="${escapeHtml(img.url)}&thumb=1" loading="lazy" alt="${escapeHtml(img.ref)}" onclick="openLightbox('${escapeHtml(img.url)}', '${escapeHtml(img.ref)}')">
+              <div class="image-tile-caption" title="${escapeHtml(img.ref)}">
+                ${escapeHtml(img.ref)}
+              </div>
               <div class="image-hover-actions">
                 <button class="btn btn-sm" style="background: rgba(255,255,255,0.2); color: #fff; font-size: 0.7rem;" onclick="openLightbox('${escapeHtml(img.url)}', '${escapeHtml(img.ref)}')">
                   🔍 放大查看
@@ -552,6 +556,20 @@ function renderGallery() {
             </div>`;
           })
           .join("");
+
+        pathsHtml = `
+        <div class="sample-images-bar">
+          ${s.images
+            .map(
+              (img, idx) => `
+              <div class="sample-image-path-tag" title="点击复制路径" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(img.ref)}').then(() => showToast('已复制图片路径: ${escapeHtml(img.ref)}', 'info'))">
+                <span style="opacity: 0.6;">🖼️ ${s.images.length > 1 ? `[${idx + 1}]` : ""}</span>
+                <span style="word-break: break-all;">${escapeHtml(img.ref)}</span>
+                ${!img.exists ? '<span style="color: var(--rose-500); font-weight: bold; margin-left: 4px;">(丢失)</span>' : ""}
+              </div>`
+            )
+            .join("")}
+        </div>`;
       }
 
       // 渲染对话
@@ -584,6 +602,8 @@ function renderGallery() {
         <div class="sample-images-shelf">
           ${imagesHtml}
         </div>
+
+        ${pathsHtml}
 
         <div class="sample-dialogue-flow">
           ${turnsHtml}
