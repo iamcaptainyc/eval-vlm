@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
   <link rel="stylesheet" href="styles.css?v=20260914settingsfix">
-  <script src="app.js?v=20260914jobdelete" defer></script>
+  <script src="app.js?v=20260914targetsfix" defer></script>
 </head>
 <body>
 
@@ -865,12 +865,17 @@
 
             <div class="config-field">
               <label><span>评测目标轮次</span><span class="config-key-badge">eval.targets</span></label>
-              <select id="cfg-form-eval-targets" class="select" onchange="markConfigDirty()">
+              <select id="cfg-form-eval-targets" class="select" onchange="onConfigEvalTargetsChange()">
                 <option value="first">first (仅评测第一轮图像描述，结构化主流)</option>
                 <option value="all">all (全部 assistant 轮次)</option>
                 <option value="last">last (仅最后一轮总结)</option>
+                <option value="1">1 (指定第 1 轮)</option>
+                <option value="2">2 (指定第 2 轮)</option>
+                <option value="3">3 (指定第 3 轮)</option>
+                <option value="__custom__">✏️ 自定义指定轮次数字...</option>
               </select>
-              <span class="config-field-desc">指定评测样本中哪一轮模型输出</span>
+              <input type="number" id="cfg-form-eval-targets-custom" class="input" style="display: none; margin-top: 0.35rem; width: 100%;" placeholder="输入轮次数字，如 4" min="1" oninput="markConfigDirty()">
+              <span class="config-field-desc">指定评测样本中哪一轮模型输出 (支持 all / last / first 或数字如 1, 2, 3)</span>
             </div>
 
             <div class="config-field">

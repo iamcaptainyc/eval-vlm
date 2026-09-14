@@ -1234,6 +1234,20 @@ function markConfigDirty() {
   if (ind) ind.style.display = "inline-block";
 }
 
+function onConfigEvalTargetsChange() {
+  const sel = document.getElementById("cfg-form-eval-targets");
+  const customInput = document.getElementById("cfg-form-eval-targets-custom");
+  if (!sel || !customInput) return;
+  if (sel.value === "__custom__") {
+    customInput.style.display = "block";
+    customInput.focus();
+  } else {
+    customInput.style.display = "none";
+  }
+  markConfigDirty();
+}
+
+
 async function loadConfig() {
   if (!state.currentDataset) {
     if (state.datasets.length > 0) {
@@ -1434,7 +1448,23 @@ function renderConfig() {
 
   if (evMethod) evMethod.value = cfg.eval?.method || "field-eval";
   if (evScorer) evScorer.value = cfg.scoring?.scorer || "exact_match";
-  if (evTargets) evTargets.value = String(cfg.eval?.targets ?? "first");
+  const evTargetsCustom = document.getElementById("cfg-form-eval-targets-custom");
+  const rawTargetsVal = cfg.eval?.targets !== undefined && cfg.eval?.targets !== null ? String(cfg.eval.targets).trim() : "first";
+  if (evTargets) {
+    if (["first", "all", "last", "1", "2", "3"].includes(rawTargetsVal)) {
+      evTargets.value = rawTargetsVal;
+      if (evTargetsCustom) {
+        evTargetsCustom.value = "";
+        evTargetsCustom.style.display = "none";
+      }
+    } else {
+      evTargets.value = "__custom__";
+      if (evTargetsCustom) {
+        evTargetsCustom.value = rawTargetsVal;
+        evTargetsCustom.style.display = "block";
+      }
+    }
+  }
   if (evContext) evContext.value = cfg.eval?.context || "rollout";
 
   // 3. 字段抽取
@@ -1497,11 +1527,19 @@ async function saveAllConfigChanges() {
   if (document.getElementById("cfg-card-backend-llamacpp")?.classList.contains("active")) activeBackend = "llamacpp";
   if (document.getElementById("cfg-card-backend-hf")?.classList.contains("active")) activeBackend = "hf";
 
+  let evalTargetsVal = document.getElementById("cfg-form-eval-targets")?.value;
+  if (evalTargetsVal === "__custom__") {
+    evalTargetsVal = document.getElementById("cfg-form-eval-targets-custom")?.value?.trim() || "first";
+  }
+  if (typeof evalTargetsVal === "string" && /^\d+$/.test(evalTargetsVal.trim())) {
+    evalTargetsVal = parseInt(evalTargetsVal.trim(), 10);
+  }
+
   const updates = [
     { key: "inference.backend", value: activeBackend },
     { key: "eval.method", value: document.getElementById("cfg-form-eval-method")?.value },
     { key: "scoring.scorer", value: document.getElementById("cfg-form-scoring-scorer")?.value },
-    { key: "eval.targets", value: document.getElementById("cfg-form-eval-targets")?.value },
+    { key: "eval.targets", value: evalTargetsVal },
     { key: "eval.context", value: document.getElementById("cfg-form-eval-context")?.value },
   ];
 
@@ -3569,6 +3607,7 @@ window.loadModels = loadModels;
 window.switchConfigSubTab = switchConfigSubTab;
 window.setConfigBackend = setConfigBackend;
 window.markConfigDirty = markConfigDirty;
+window.onConfigEvalTargetsChange = onConfigEvalTargetsChange;
 window.saveAllConfigChanges = saveAllConfigChanges;
 window.onJobInlineModelSelectChange = onJobInlineModelSelectChange;
 window.onJobInlineBackendChange = onJobInlineBackendChange;
