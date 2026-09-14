@@ -252,6 +252,9 @@ def test_run_field_eval_end_to_end(tmp_path, monkeypatch):
     assert [r["id"] for r in payload["rows"]] == ["b"]
     html = cfg.field_mismatches_html_path.read_text(encoding="utf-8")
     assert "样本 <code>b</code>" in html and "样本 <code>a</code>" not in html
+    assert "--bg-base: #f8fafc" in html
+    assert "prefers-color-scheme" not in html
+    assert "data-theme" not in html
 
 
 def test_run_field_eval_resume_skips_done(tmp_path, monkeypatch):
@@ -716,5 +719,4 @@ def test_render_summary_shows_match_mode():
     }
     summary = field_eval._render_summary(metrics, cfg)
     assert "- 匹配模式: `contain`" in summary
-
 

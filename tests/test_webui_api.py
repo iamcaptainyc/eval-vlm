@@ -53,11 +53,10 @@ def api_client(tmp_path, monkeypatch):
     return client, ds_dir.name, cfg, settings
 
 
-def test_api_whoami(api_client):
+def test_api_whoami_is_not_exposed(api_client):
     client, _, _, _ = api_client
     resp = client.get("/api/whoami")
-    assert resp.status_code == 200
-    assert "role" in resp.json()
+    assert resp.status_code == 404
 
 
 def test_api_datasets_and_detail(api_client):
@@ -73,6 +72,22 @@ def test_api_datasets_and_detail(api_client):
     detail_resp = client.get(f"/api/datasets/{ds_name}")
     assert detail_resp.status_code == 200
     assert detail_resp.json()["name"] == ds_name
+
+
+def test_api_dataset_list_cache_invalidates_for_new_run(api_client):
+    client, ds_name, cfg, _ = api_client
+    first = client.get("/api/datasets")
+    assert first.status_code == 200
+    original_count = next(item for item in first.json() if item["name"] == ds_name)["run_count"]
+
+    run_dir = cfg.dataset_dir / "new-model" / "openai"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_text("{}", encoding="utf-8")
+
+    second = client.get("/api/datasets")
+    assert second.status_code == 200
+    refreshed_count = next(item for item in second.json() if item["name"] == ds_name)["run_count"]
+    assert refreshed_count == original_count + 1
 
 
 def test_api_samples_and_image_stream(api_client):
@@ -95,6 +110,47 @@ def test_api_samples_and_image_stream(api_client):
     thumb_resp = client.get(f"{img_url}&thumb=1")
     assert thumb_resp.status_code == 200
     assert thumb_resp.headers["content-type"] == "image/jpeg"
+
+
+def test_api_samples_uses_offset_limit_and_filter_total(api_client):
+    """The samples endpoint reports the complete match count but returns one page."""
+    client, ds_name, cfg, _ = api_client
+    records = [
+        {
+            "messages": [
+                {"role": "user", "content": f"<image> sample-{index} {'needle' if index != 1 else 'other'}"},
+                {"role": "assistant", "content": "ok"},
+            ],
+            "images": ["sample.jpg"],
+        }
+        for index in range(4)
+    ]
+    cfg.test_path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+
+    page = client.get(f"/api/datasets/{ds_name}/samples?offset=1&limit=2")
+    assert page.status_code == 200
+    assert page.json()["total"] == 4
+    assert [sample["position"] for sample in page.json()["samples"]] == [1, 2]
+
+    filtered = client.get(f"/api/datasets/{ds_name}/samples?filter=needle&offset=1&limit=1")
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 3
+    assert [sample["position"] for sample in filtered.json()["samples"]] == [2]
+
+
+def test_static_entry_cache_and_gzip_headers(api_client):
+    """Entry HTML is revalidated while fingerprinted assets are immutable and compressed."""
+    client, _, _, _ = api_client
+    entry = client.get("/", headers={"Accept-Encoding": "gzip"})
+    assert entry.status_code == 200
+    assert "no-cache" in entry.headers["cache-control"]
+    assert entry.headers.get("content-encoding") == "gzip"
+
+    script = client.get("/app.js?v=test-version", headers={"Accept-Encoding": "gzip"})
+    assert script.status_code == 200
+    assert "immutable" in script.headers["cache-control"]
+    assert "max-age=31536000" in script.headers["cache-control"]
+    assert script.headers.get("content-encoding") == "gzip"
 
 
 def test_api_image_path_traversal_protection(api_client):
@@ -123,8 +179,8 @@ def test_api_config_read_and_update(api_client):
     assert updated_cfg.scoring.scorer == "contain"
 
 
-def test_api_auth_token_enforcement(tmp_path, monkeypatch):
-    """验证配置了 Token 时未认证请求被拦截为 401。"""
+def test_api_token_environment_does_not_enable_auth(tmp_path, monkeypatch):
+    """WebUI routes stay directly accessible even on non-loopback binds."""
     cfg_file = tmp_path / "global.yaml"
     monkeypatch.setenv("EVAL_VLM_CONFIG", str(cfg_file))
     monkeypatch.setenv("EVAL_VLM_WEBUI_TOKEN", "secret123")
@@ -134,40 +190,21 @@ def test_api_auth_token_enforcement(tmp_path, monkeypatch):
     app = create_app(settings)
     client = TestClient(app)
 
-    # 未附带 Token
     resp = client.get("/api/datasets")
-    assert resp.status_code == 401
-
-    # 附带正确 Bearer Token
-    ok_resp = client.get("/api/datasets", headers={"Authorization": "Bearer secret123"})
-    assert ok_resp.status_code == 200
+    assert resp.status_code == 200
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "webui.example.test"])
-def test_api_non_loopback_host_requires_auth(tmp_path, monkeypatch, host):
-    """LAN/public binds cannot fall back to the anonymous editor account."""
+def test_api_non_loopback_host_needs_no_credentials(tmp_path, monkeypatch, host):
+    """All WebUI deployments now have the same no-login access model."""
     cfg_file = tmp_path / "global.yaml"
     monkeypatch.setenv("EVAL_VLM_CONFIG", str(cfg_file))
     monkeypatch.delenv("EVAL_VLM_WEBUI_TOKEN", raising=False)
     ws = tmp_path / "ws"
     ws.mkdir()
     app = create_app(Settings(workspace_dir=ws, host=host))
-    response = TestClient(app).get("/api/whoami")
-    assert response.status_code == 401
-    assert "EVAL_VLM_WEBUI_TOKEN" in response.json()["detail"]
-
-
-@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
-def test_api_loopback_host_allows_local_anonymous_development(tmp_path, monkeypatch, host):
-    cfg_file = tmp_path / "global.yaml"
-    monkeypatch.setenv("EVAL_VLM_CONFIG", str(cfg_file))
-    monkeypatch.delenv("EVAL_VLM_WEBUI_TOKEN", raising=False)
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    app = create_app(Settings(workspace_dir=ws, host=host))
-    response = TestClient(app).get("/api/whoami")
+    response = TestClient(app).get("/api/datasets")
     assert response.status_code == 200
-    assert response.json() == {"username": "anonymous", "role": "editor"}
 
 
 def test_api_config_all_backends_full_parameters(api_client):

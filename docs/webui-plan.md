@@ -13,7 +13,7 @@
 1. **技术栈**:FastAPI 后端 + 免构建轻量前端(单页 HTML + CDN 引入 Alpine.js/htmx,无 npm 构建)。
 2. **能执行任务**:UI 以**子进程调用 `eval-vlm` CLI**(复用现有 GPU/conda 环境)跑 pred/eval/sweep,**SSE 实时日志/进度**,可取消、可续跑。
 3. **删除语义**:**删整条样本** + **自动时间戳备份 + 软删除(trash)可回滚**;多图样本可选"只删单图"(须同步移除一个 `<image>` 占位符)。
-4. **部署**:**共享服务器多用户**——需基础鉴权、并发控制、任务队列(GPU 重任务串行)、test.json 编辑加锁。
+4. **部署**:**受信任网络内使用**——任务队列(GPU 重任务串行)、test.json 编辑加锁。
 5. **删除后旧结果的处理**:**失效标记 + 提示重跑**(不改动 predictions/scored 文件,受影响 run 打 stale 标记,由用户显式重跑)。
 
 ## 关键约束(已核对源码,精确)
@@ -41,8 +41,8 @@ src/eval_vlm/webui/
   __init__.py
   __main__.py       # python -m eval_vlm.webui -> uvicorn.run(app)
   app.py            # FastAPI app factory:挂载路由 + StaticFiles(同源,无需 CORS)
-  settings.py       # host/port、users 文件、workspace 解析
-  auth.py           # Basic/token 依赖 -> 返回 username(审计);viewer/editor 角色
+  settings.py       # host/port、workspace 与运行目录解析
+  audit.py          # 本地 WebUI 写操作审计
   deps.py           # get_global_cfg / 解析数据集夹 / get_dataset_cfg(缓存)
   locks.py          # 每数据集 async 锁 + 磁盘锁文件 + 乐观 sha 校验
   jobs.py           # JobManager:串行队列、子进程、SSE 广播、落盘、重启对账
@@ -64,16 +64,15 @@ src/eval_vlm/webui/
 
 ```
 _webui/
-  users.yaml                    # username -> {password_hash, role};或用 env EVAL_VLM_WEBUI_TOKEN 单 token
   audit.log.jsonl               # 所有变更操作审计(who/what/when)
   locks/<dataset>.lock
   jobs/<job_id>/{meta.json, log.txt}
   trash/<dataset>/<ts>-<sampleid>/{record.json, manifest.json, test.json.bak}
 ```
 
-## 鉴权与并发(多用户)
+## 访问范围与并发
 
-- **鉴权**:HTTP Basic 或 bearer token(FastAPI 依赖),解析出 `username` 注入每个变更操作用于审计;两角色 `viewer`(只读)/`editor`(变更+任务),按路由用依赖强制。局域网从简,文档提示 Basic 须走 HTTPS(反代 TLS)。
+- **访问范围**: 当前 WebUI 不提供鉴权或用户角色；仅在可信本机或受保护内网使用。写操作统一以 `local` 写入审计日志。
 - **任务并发**:单一**全局串行队列**(GPU 重任务不能并行);多用户提交进同一队列,前端显示排队位。sweep 本身也串行跑多数据集,天然契合。
 - **编辑并发**:test.json 删除/恢复走 `editing.py`,**每数据集 async 锁 + 磁盘锁文件**,读改写原子(写 `.tmp` 再 `replace`,复用 `store.write_json` 模式);**乐观 sha 校验**做第二道防线(见删除机制)。默认**当该数据集有任务正在跑时禁止删除**(避免 run 中途 test.json 变化污染该 run)。
 - **只读**:样本浏览/图片流无锁,可并发。
@@ -143,7 +142,7 @@ _webui/
 
 ## 前端(免构建)
 
-单 `index.html` + CDN 的 **Alpine.js**/**htmx**;hash 路由(`#/datasets`、`#/datasets/{name}`、`#/datasets/{name}/samples`、`#/jobs`、`#/datasets/{name}/runs/...`);统一 `fetchJSON` 附鉴权头、处理 401/409。
+单 `index.html` + CDN 的 **Alpine.js**/**htmx**;hash 路由(`#/datasets`、`#/datasets/{name}`、`#/datasets/{name}/samples`、`#/jobs`、`#/datasets/{name}/runs/...`);统一请求错误和 409 处理。
 
 页面:
 1. **数据集浏览**:表格/卡片(test 数、#runs、健康徽章)。
@@ -201,10 +200,10 @@ eval-vlm-webui = "eval_vlm.webui.__main__:main"
 
 ## 分期(Phasing)
 
-- **Phase 0 — 骨架**:包 + app factory + auth 依赖 + `python -m eval_vlm.webui`;`GET /api/datasets`、`/{name}`;静态壳。冒烟:claudepy 下起服务、列出 fixture workspace。
+- **Phase 0 — 骨架**:包 + app factory + `python -m eval_vlm.webui`;`GET /api/datasets`、`/{name}`;静态壳。冒烟:claudepy 下起服务、列出 fixture workspace。
 - **Phase 1 — MVP(用户最看重)**:样本画廊(分页)+ 流式图片路由(缩略 + 缺图标记)+ **删除同步机制**(整条 + 单图)含 trash/恢复、split_meta 同步、失效标记、每数据集锁、乐观 sha 守卫。editing 全 pytest 覆盖。
 - **Phase 2 — 配置 + 任务**:config 读写(`set_dataset_value`)+ JobManager(串行队列/子进程/SSE 日志+进度/取消/续跑/重启对账)+ 任务面板 UI + 跑任务时禁删。
-- **Phase 3 — 结果 + 自动化**:runs/metrics/scored 查看、failures.html 透传、最低分审核、健康检查、run diff、预设、stale 横幅 + 鉴权加固。
+- **Phase 3 — 结果 + 自动化**:runs/metrics/scored 查看、failures.html 透传、最低分审核、健康检查、run diff、预设与 stale 横幅。
 
 ## 验证(端到端)
 

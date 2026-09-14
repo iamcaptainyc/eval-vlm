@@ -13,7 +13,7 @@ from ..config import Config, load_dataset_config
 from ..data.loader import _stable_id, load_raw_records
 from ..data.splitter import load_split_meta
 from ..results.store import discover_run_dirs, write_json
-from .auth import write_audit
+from .audit import write_audit
 from .locks import calc_file_sha256, dataset_lock, verify_test_sha
 from .models import DeleteSampleResponse, RestoreResponse
 from .settings import Settings
@@ -40,7 +40,7 @@ def delete_sample(
     settings: Settings,
     sample_id: str,
     expected_sha256: str,
-    user: str = "anonymous",
+    user: str = "local",
     reason: Optional[str] = None,
     mode: str = "record",
     image_index: Optional[int] = None,
@@ -248,7 +248,7 @@ def restore_sample(
     settings: Settings,
     trash_id: str,
     expected_sha256: str,
-    user: str = "anonymous",
+    user: str = "local",
 ) -> RestoreResponse:
     """从回收站恢复已删除的样本。"""
     trash_dir = settings.trash_dir / cfg.dataset_dir.name / trash_id

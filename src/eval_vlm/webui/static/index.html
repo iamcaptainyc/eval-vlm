@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260914terminalfix2">
+  <link rel="stylesheet" href="styles.css?v=20260914perf1">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260914terminalfix2" defer></script>
+  <script src="app.js?v=20260914perf1" defer></script>
 </head>
 <body>
 
@@ -112,8 +112,7 @@
         <span class="theme-icon theme-icon-dark">🌙</span>
         <span class="theme-icon theme-icon-light">☀️</span>
       </button>
-      <span id="header-username" class="user-tag">anonymous</span>
-      <span id="header-role" class="role-badge">editor</span>
+      <span class="user-tag">本地 WebUI</span>
     </div>
   </header>
 
@@ -128,7 +127,7 @@
           <p class="section-subtitle">管理、浏览各已分割的数据集与执行状态</p>
         </div>
         <div class="control-bar-right">
-          <button class="btn" onclick="loadDatasets()">
+          <button class="btn" onclick="loadDatasets(true)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
             <span>刷新</span>
           </button>
@@ -146,7 +145,7 @@
           <p class="section-subtitle">勾选指定的一批数据集，使用统一模型与评测参数执行自动化批量评测与横向比对汇总</p>
         </div>
         <div class="control-bar-right">
-          <button class="btn" onclick="loadSweepData()">🔄 刷新数据集与模型</button>
+          <button class="btn" onclick="Promise.all([loadDatasets(true), loadModels(true)]).then(loadSweepData)">🔄 刷新数据集与模型</button>
         </div>
       </div>
 
@@ -1463,7 +1462,7 @@
         </div>
         <div class="control-bar-right">
           <button class="btn" onclick="switchTab('config')" title="切换到数据集配置工坊">⚙️ 当前数据集配置</button>
-          <button class="btn" onclick="loadSettings()">🔄 重新载入</button>
+          <button class="btn" onclick="loadSettings(true)">🔄 重新载入</button>
           <button class="btn btn-primary" onclick="saveSettings()">💾 保存全局配置</button>
         </div>
       </div>
@@ -1487,7 +1486,7 @@
           </div>
           <div style="display: flex; gap: 0.6rem; align-items: center;">
             <button class="btn btn-sm btn-primary" onclick="openGGUFConvertModal()" style="font-size: 0.8rem; font-weight: 600; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b;">📦 GGUF 转换工坊</button>
-            <button class="btn btn-sm" onclick="loadModels()" style="font-size: 0.8rem; font-weight: 600;">🔄 重新扫描模型目录</button>
+            <button class="btn btn-sm" onclick="loadModels(true)" style="font-size: 0.8rem; font-weight: 600;">🔄 重新扫描模型目录</button>
           </div>
         </div>
       </div>

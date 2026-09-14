@@ -740,11 +740,9 @@ python -m eval_vlm.webui --host 127.0.0.1 --port 8080 --workspace ~/eval_vlm_wor
    - **全局设置页面**: 网页端直观修改 `media_root`、`hf_models_dir`、`mnn_models_dir` 并自动回写 `~/.eval_vlm/config.yaml`，即时罗列识别到的本地模型卡片并支持路径复制。
    - **一键健康体检**: 检出缺失图片、`<image>` 占位符失配、重复 ID 等潜在隐患。
 
-### 多用户与鉴权配置 (可选)
+### WebUI 访问范围
 
-- **免密模式 (默认)**: 本地单人开发时无需额外配置，自动以 `editor` 角色启动。
-- **Token 保护**: 设置环境变量 `EVAL_VLM_WEBUI_TOKEN=your_secret_token` 即可启用 Bearer / Basic 鉴权保护。
-- **多用户角色文件**: 在 `<workspace>/_webui/users.yaml` 中配置各用户与角色（`viewer` 只读浏览 / `editor` 编辑执行），所有操作记录审计日志到 `<workspace>/_webui/audit.log.jsonl`。
+WebUI 不包含登录、注册或角色系统；连接到服务地址的用户均可查看、修改配置和提交任务。仅应在可信的本机或受网络边界保护的内网中运行。变更操作仍记录到 `<workspace>/_webui/audit.log.jsonl`，操作者标记为 `local`。
 
 ## 目录结构
 

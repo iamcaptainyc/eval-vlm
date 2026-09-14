@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Config
 from ..workspace import global_config_path, scan_local_models, set_global_value
-from .auth import User, get_current_user, require_editor, require_viewer
 from .automation import check_dataset_health, compare_runs
 from .configio import read_config_info, update_dataset_config
 from .datasets import get_samples_page, list_datasets, serve_image
@@ -74,30 +74,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     )
     app.dependency_overrides[get_settings] = lambda: settings
 
-    # 禁用静态资源浏览器过激缓存，确保代码更新即刻生效
+    app.add_middleware(GZipMiddleware, minimum_size=800)
+
+    # HTML is the entry point and must be revalidated; fingerprinted assets
+    # can be retained indefinitely. API and streaming responses are untouched.
     @app.middleware("http")
-    async def no_cache_static_middleware(request: Request, call_next):
+    async def static_cache_middleware(request: Request, call_next):
         response = await call_next(request)
         path = request.url.path
-        if path in ("/", "/index.html", "/app.js", "/styles.css") or path.endswith((".js", ".css", ".html")):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
+        if path in ("/", "/index.html"):
+            response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        elif path in ("/app.js", "/styles.css") and request.query_params.get("v"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
-
-    # -----------------------------------------------------------------------
-    # 鉴权与当前用户
-    # -----------------------------------------------------------------------
-    @app.get("/api/whoami")
-    def whoami(user: User = Depends(get_current_user)) -> dict[str, Any]:
-        return {"username": user.username, "role": user.role}
 
     # -----------------------------------------------------------------------
     # 全局设置与模型管理
     # -----------------------------------------------------------------------
     @app.get("/api/settings")
     def api_get_settings(
-        _user: User = Depends(require_viewer),
         st: Settings = Depends(get_settings),
     ) -> SettingsResponse:
         st.reload_global_config()
@@ -129,7 +124,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.put("/api/settings")
     def api_update_settings(
         body: SettingsUpdateRequest,
-        _user: User = Depends(require_editor),
         st: Settings = Depends(get_settings),
     ) -> SettingsResponse:
         fields = {
@@ -197,7 +191,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/api/models")
     def api_get_models(
-        _user: User = Depends(require_viewer),
         st: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
         st.reload_global_config()
@@ -218,7 +211,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/tools/convert-gguf")
     async def api_convert_gguf(
         body: GGUFConvertRequest,
-        user: User = Depends(require_editor),
     ) -> JobSummary:
         """提交一个异步 HF 转 GGUF 任务。"""
         job_manager.start_worker(asyncio.get_running_loop())
@@ -250,7 +242,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             job_type="convert-gguf",
             dataset=None,
             params=params,
-            user=user.username,
+            user="local",
         )
 
     # -----------------------------------------------------------------------
@@ -258,7 +250,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # -----------------------------------------------------------------------
     @app.get("/api/datasets")
     def api_list_datasets(
-        _user: User = Depends(require_viewer),
         st: Settings = Depends(get_settings),
     ) -> list[dict[str, Any]]:
         return [ds.model_dump() for ds in list_datasets(st)]
@@ -266,7 +257,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}")
     def api_get_dataset(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         from .locks import calc_file_sha256
         from ..data.splitter import load_split_meta
@@ -287,7 +277,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         limit: int = 50,
         filter: Optional[str] = Query(None, description="搜索关键词"),
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> SamplesResponse:
         return get_samples_page(cfg, offset=offset, limit=limit, filter_text=filter)
 
@@ -296,7 +285,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         ref: str = Query(..., description="图片引用或路径"),
         thumb: int = Query(0, description="是否返回缩略图 (1=是)"),
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> Response:
         return serve_image(cfg, ref=ref, thumb=bool(thumb))
 
@@ -306,7 +294,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}/config")
     def api_get_config(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return read_config_info(cfg)
 
@@ -314,10 +301,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def api_put_config(
         body: ConfigUpdateRequest,
         cfg: Config = Depends(get_dataset_cfg),
-        user: User = Depends(require_editor),
         st: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
-        return await update_dataset_config(cfg, st, body.updates, user=user.username)
+        return await update_dataset_config(cfg, st, body.updates, user="local")
 
     # -----------------------------------------------------------------------
     # 样本删除与回收站 (核心)
@@ -328,7 +314,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         sample_id: str,
         body: DeleteSampleRequest,
         cfg: Config = Depends(get_dataset_cfg),
-        user: User = Depends(require_editor),
         st: Settings = Depends(get_settings),
     ) -> DeleteSampleResponse:
         if job_manager.is_dataset_busy(name):
@@ -342,7 +327,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 settings=st,
                 sample_id=sample_id,
                 expected_sha256=body.expected_sha256,
-                user=user.username,
+                user="local",
                 reason=body.reason,
                 mode=body.mode,
                 image_index=body.image_index,
@@ -351,7 +336,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}/trash")
     def api_list_trash(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
         st: Settings = Depends(get_settings),
     ) -> list[dict[str, Any]]:
         return list_trash(cfg, st)
@@ -362,7 +346,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         trash_id: str,
         body: RestoreRequest,
         cfg: Config = Depends(get_dataset_cfg),
-        user: User = Depends(require_editor),
         st: Settings = Depends(get_settings),
     ) -> RestoreResponse:
         if job_manager.is_dataset_busy(name):
@@ -376,7 +359,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 settings=st,
                 trash_id=trash_id,
                 expected_sha256=body.expected_sha256,
-                user=user.username,
+                user="local",
             )
 
     # -----------------------------------------------------------------------
@@ -385,7 +368,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}/runs")
     def api_get_runs(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> list[dict[str, Any]]:
         return [r.model_dump() for r in list_runs(cfg)]
 
@@ -394,7 +376,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         model: str,
         backend: str,
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return get_metrics_detail(cfg, model, backend)
 
@@ -408,7 +389,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         max_score: Optional[float] = None,
         order: str = "default",
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return get_scored_records(
             cfg,
@@ -427,14 +407,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         model: str,
         backend: str,
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> FileResponse:
         return serve_failures_html(cfg, model, backend)
 
     @app.get("/api/datasets/{name}/html-files")
     def api_list_dataset_html_files(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> list[dict[str, Any]]:
         return list_dataset_html_files(cfg)
 
@@ -442,7 +420,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def api_serve_dataset_html_view(
         path: str = Query(..., description="相对数据集目录的 HTML 报告路径"),
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> FileResponse:
         return serve_dataset_html(cfg, path)
 
@@ -450,7 +427,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}/failure.html")
     def api_serve_dataset_root_failures_html(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> FileResponse:
         return serve_dataset_html(cfg, "failures.html")
 
@@ -459,7 +435,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         model: str,
         backend: str,
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return get_field_metrics_detail(cfg, model, backend)
 
@@ -471,7 +446,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         limit: int = 50,
         filter_state: Optional[str] = None,
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return get_field_mismatches_records(
             cfg,
@@ -488,7 +462,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         model: str,
         backend: str,
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> FileResponse:
         return serve_field_mismatches_html(cfg, model, backend)
 
@@ -498,7 +471,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/datasets/{name}/health")
     def api_dataset_health(
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return check_dataset_health(cfg)
 
@@ -507,7 +479,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         a: str = Query(..., description="Run A, 如 'Qwen_Qwen2-VL/openai'"),
         b: str = Query(..., description="Run B, 如 'qwen-mnn/mnn'"),
         cfg: Config = Depends(get_dataset_cfg),
-        _user: User = Depends(require_viewer),
     ) -> dict[str, Any]:
         return compare_runs(cfg, a, b)
 
@@ -518,50 +489,46 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def api_create_dataset_job(
         name: str,
         body: JobCreateRequest,
-        user: User = Depends(require_editor),
     ) -> JobSummary:
         job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type=body.type,
             dataset=name,
             params=body.params or {},
-            user=user.username,
+            user="local",
         )
 
     @app.post("/api/sweep/jobs")
     async def api_create_sweep_job(
         body: JobCreateRequest,
-        user: User = Depends(require_editor),
     ) -> JobSummary:
         job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type="sweep",
             dataset=body.dataset,
             params=body.params or {},
-            user=user.username,
+            user="local",
         )
 
     @app.post("/api/jobs")
     async def api_create_job(
         body: JobCreateRequest,
-        user: User = Depends(require_editor),
     ) -> JobSummary:
         job_manager.start_worker(asyncio.get_running_loop())
         return job_manager.submit_job(
             job_type=body.type,
             dataset=body.dataset,
             params=body.params or {},
-            user=user.username,
+            user="local",
         )
 
     @app.get("/api/jobs")
-    async def api_list_jobs(_user: User = Depends(require_viewer)) -> list[JobSummary]:
+    async def api_list_jobs() -> list[JobSummary]:
         return job_manager.list_jobs()
 
     @app.get("/api/jobs/{job_id}")
     async def api_get_job(
         job_id: str,
-        _user: User = Depends(require_viewer),
     ) -> JobSummary:
         job = job_manager.get_job(job_id)
         if not job:
@@ -572,7 +539,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def api_job_stream(
         job_id: str,
         offset: int = 0,
-        _user: User = Depends(require_viewer),
     ) -> StreamingResponse:
         job = job_manager.get_job(job_id)
         if not job:
@@ -590,7 +556,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/cancel")
     async def api_cancel_job(
         job_id: str,
-        _user: User = Depends(require_editor),
     ) -> dict[str, Any]:
         ok = await job_manager.cancel_job(job_id)
         return {"success": ok, "job_id": job_id}
@@ -598,7 +563,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.delete("/api/jobs/{job_id}")
     async def api_delete_job(
         job_id: str,
-        _user: User = Depends(require_editor),
     ) -> dict[str, Any]:
         """删除指定任务记录及日志文件。"""
         try:
@@ -611,7 +575,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.delete("/api/jobs")
     async def api_clear_finished_jobs(
-        _user: User = Depends(require_editor),
     ) -> dict[str, Any]:
         """批量清理所有已结束（非运行、非排队）的历史任务。"""
         deleted_ids: list[str] = []
@@ -627,7 +590,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/resume")
     async def api_resume_job(
         job_id: str,
-        user: User = Depends(require_editor),
     ) -> JobSummary:
         job_manager.start_worker(asyncio.get_running_loop())
         old_job = job_manager.get_job(job_id)
@@ -637,7 +599,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             job_type=old_job.type,
             dataset=old_job.dataset,
             params=old_job.params,
-            user=user.username,
+            user="local",
         )
 
     # -----------------------------------------------------------------------

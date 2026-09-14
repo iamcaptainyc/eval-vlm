@@ -6,7 +6,7 @@ import yaml
 
 from ..config import Config, load_dataset_config
 from ..workspace import describe_settable_keys, set_dataset_value
-from .auth import write_audit
+from .audit import write_audit
 from .locks import dataset_lock
 from .models import ConfigUpdateItem
 from .settings import Settings
@@ -30,7 +30,7 @@ async def update_dataset_config(
     cfg: Config,
     settings: Settings,
     updates: list[ConfigUpdateItem],
-    user: str = "anonymous",
+    user: str = "local",
 ) -> dict[str, Any]:
     """批量更新配置项并保留注释。"""
     ds_name = cfg.dataset_dir.name

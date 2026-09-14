@@ -67,6 +67,14 @@ def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
     assert "comparison-grid" in html
     assert "lightbox" in html
     assert "flt-search" in html
+    assert "--bg-base: #f8fafc" in html
+    assert ".cm-table { border-collapse: separate; border-spacing: 2px; width: 100%; font-size: 13px; background: #ffffff; }" in html
+    assert ".cm-toolbar {" in html and "background: #f8fafc" in html
+    assert ".cm-report-table th { background: #f1f5f9" in html
+    assert ".cm-report-title {" in html and "color: #0f172a" in html
+    assert "background: #0b1120" not in html
+    assert "prefers-color-scheme" not in html
+    assert "data-theme" not in html
 
 
 def test_no_failures_when_all_correct(messages_config):
@@ -163,5 +171,3 @@ def test_turn_filter_in_failures_html(tworound_config, monkeypatch):
     assert "按出错轮次筛选:" in html
     assert "data-miss-turns=" in html
     assert 'class="flt-count-badge"' in html
-
-

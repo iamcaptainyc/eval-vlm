@@ -7,7 +7,6 @@
 // 全局应用状态
 const state = {
   activeTab: "datasets",
-  user: { username: "loading...", role: "viewer" },
   datasets: [],
   currentDataset: "",
   datasetDetail: null,
@@ -99,6 +98,8 @@ const state = {
 
   // 健康体检
   healthReport: null,
+  loaded: { datasets: false, settings: false, models: false },
+  requests: { datasets: null, settings: null, models: null },
 };
 
 // 辅助工具函数
@@ -138,9 +139,6 @@ async function getApiError(response) {
     detail = typeof body.detail === "string" ? body.detail : body.detail?.message || body.message || "";
   } catch (_) {
     detail = await response.text().catch(() => "");
-  }
-  if (response.status === 401 || response.status === 403) {
-    return "未获授权：请提供有效的 WebUI 访问凭据后重试。";
   }
   return detail || `请求失败 (HTTP ${response.status})`;
 }
@@ -322,7 +320,10 @@ document.addEventListener("click", (e) => {
 // --------------------------------------------------------------------------
 // 数据集 (Datasets)
 // --------------------------------------------------------------------------
-async function loadDatasets() {
+async function loadDatasets(force = false) {
+  if (!force && state.loaded.datasets) return state.datasets;
+  if (!force && state.requests.datasets) return state.requests.datasets;
+  state.requests.datasets = (async () => {
   try {
     const res = await apiFetch("/api/datasets");
     state.datasets = await res.json();
@@ -333,9 +334,13 @@ async function loadDatasets() {
     renderDatasetDropdown();
     renderDatasets();
     initInlineJobConsole();
+    state.loaded.datasets = true;
+    return state.datasets;
   } catch (err) {
     showToast(`获取数据集列表失败: ${err.message}`, "error");
   }
+  })();
+  try { return await state.requests.datasets; } finally { state.requests.datasets = null; }
 }
 
 function renderDatasets() {
@@ -763,10 +768,12 @@ async function restoreTrashItem(trashId) {
 // --------------------------------------------------------------------------
 // 本地模型管理 (Local Models Detection)
 // --------------------------------------------------------------------------
-async function loadModels() {
+async function loadModels(force = false) {
+  if (!force && state.loaded.models) return state.models;
+  if (!force && state.requests.models) return state.requests.models;
+  state.requests.models = (async () => {
   try {
-    const res = await fetch("/api/models");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/api/models");
     const data = await res.json();
     state.models = {
       hf_models: data.hf_models || [],
@@ -779,9 +786,13 @@ async function loadModels() {
     renderModelSelects();
     renderModelCards();
     updateGGUFConvertHfOptions();
+    state.loaded.models = true;
+    return state.models;
   } catch (err) {
     console.warn("加载本地模型失败:", err);
   }
+  })();
+  try { return await state.requests.models; } finally { state.requests.models = null; }
 }
 
 function renderModelSelects() {
@@ -892,10 +903,12 @@ function renderModelCards() {
 // --------------------------------------------------------------------------
 // 全局设置 (Global Settings)
 // --------------------------------------------------------------------------
-async function loadSettings() {
+async function loadSettings(force = false) {
+  if (!force && state.loaded.settings) return state.settings;
+  if (!force && state.requests.settings) return state.requests.settings;
+  state.requests.settings = (async () => {
   try {
-    const res = await fetch("/api/settings");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/api/settings");
     const cfg = await res.json();
     state.settings = cfg;
 
@@ -955,10 +968,13 @@ async function loadSettings() {
       if (spStratify) spStratify.value = cfg.split.stratify_by || "";
     }
 
-    await loadModels();
+    state.loaded.settings = true;
+    return state.settings;
   } catch (err) {
     showToast(`获取全局设置失败: ${err.message}`, "error");
   }
+  })();
+  try { return await state.requests.settings; } finally { state.requests.settings = null; }
 }
 
 async function saveSettings() {
@@ -993,7 +1009,9 @@ async function saveSettings() {
     const data = await res.json();
     state.settings = data;
     showToast("全局配置 (~/.eval_vlm/config.yaml) 保存成功并已生效！", "success");
-    await loadSettings();
+    state.loaded.settings = false;
+    state.loaded.models = false;
+    await Promise.all([loadSettings(true), loadModels(true)]);
   } catch (err) {
     showToast(`保存全局设置失败: ${err.message}`, "error");
   }
@@ -1003,8 +1021,7 @@ async function saveSettings() {
 // 批量扫描 (Sweep Studio)
 // --------------------------------------------------------------------------
 async function loadSweepData() {
-  await loadDatasets();
-  await loadModels();
+  await Promise.all([loadDatasets(), loadModels()]);
 
   if (state.sweep.selectedDatasets.size === 0 && state.datasets.length > 0) {
     // 默认全选工作区内所有数据集
@@ -3488,22 +3505,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 初始化主题
   initTheme();
 
-  // 检查鉴权
-  try {
-    const authRes = await apiFetch("/api/whoami");
-    state.user = await authRes.json();
-    const uEl = document.getElementById("header-username");
-    const rEl = document.getElementById("header-role");
-    if (uEl) uEl.textContent = state.user.username;
-    if (rEl) rEl.textContent = state.user.role;
-  } catch (err) {
-    showToast(`身份验证失败: ${err.message}`, "error");
-  }
-
   // 绑定路由与监听
   window.addEventListener("hashchange", handleHash);
-  await loadDatasets();
-  await loadSettings();
+  await Promise.all([loadDatasets(), loadSettings(), loadModels()]);
   handleHash();
 });
 
