@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -56,6 +57,20 @@ class Settings:
         self.locks_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.trash_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def is_loopback_host(self) -> bool:
+        """Whether binding this host keeps the WebUI local to this machine."""
+        host = self.host.strip().strip("[]")
+        if host.lower() == "localhost":
+            return True
+        # IPv6 zone identifiers (for example ``fe80::1%eth0``) are not
+        # accepted as loopback unless their address portion says so.
+        try:
+            return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+        except ValueError:
+            # An unrecognised hostname could resolve to a remote address.
+            return False
 
 
 _SETTINGS: Optional[Settings] = None

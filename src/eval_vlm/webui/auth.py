@@ -48,9 +48,20 @@ def get_current_user(
     users = _load_users(settings)
     configured_token = settings.token
 
-    # 如果既无 users.yaml 也无 EVAL_VLM_WEBUI_TOKEN，本地免密开发模式：默认 editor
+    # Local-only development may be passwordless.  A public/LAN bind must
+    # never silently become an anonymous editor service.
     if not users and not configured_token:
-        return User(username="anonymous", role="editor")
+        if settings.is_loopback_host:
+            return User(username="anonymous", role="editor")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "当前 WebUI 绑定到非本机地址，必须配置认证。请设置 "
+                "EVAL_VLM_WEBUI_TOKEN 或在 _webui/users.yaml 中创建用户；"
+                "仅 127.0.0.1/::1/localhost 可使用免密开发模式。"
+            ),
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
     # 1. Bearer Token 校验
     if bearer_creds and bearer_creds.credentials:

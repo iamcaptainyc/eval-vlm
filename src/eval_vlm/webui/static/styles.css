@@ -2,6 +2,7 @@
 :root {
   --bg-base: #090d16;
   --bg-surface: #0f172a;
+  --bg-surface-elevated: #18233d;
   --bg-card: #131d35;
   --bg-card-hover: #172342;
   --bg-input: #0b1120;
@@ -2503,6 +2504,7 @@ table.ui-table tr:hover {
 [data-theme="light"] {
   --bg-base: #f8fafc;
   --bg-surface: #ffffff;
+  --bg-surface-elevated: #f1f5f9;
   --bg-card: #ffffff;
   --bg-card-hover: #f1f5f9;
   --bg-input: #f8fafc;
@@ -3201,4 +3203,3 @@ table.ui-table tr:hover {
   background: #f8fafc !important;
   color: #1e293b !important;
 }
-

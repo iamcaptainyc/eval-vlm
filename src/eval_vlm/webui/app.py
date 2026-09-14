@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -62,7 +61,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         loop = asyncio.get_running_loop()
         job_manager.start_worker(loop=loop)
-        yield
+        try:
+            yield
+        finally:
+            await job_manager.shutdown()
 
     app = FastAPI(
         title="eval_vlm Web UI",
@@ -71,15 +73,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.dependency_overrides[get_settings] = lambda: settings
-
-    # 跨域配置 (本地同源亦保留兼容性)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     # 禁用静态资源浏览器过激缓存，确保代码更新即刻生效
     @app.middleware("http")
@@ -599,7 +592,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         job_id: str,
         _user: User = Depends(require_editor),
     ) -> dict[str, Any]:
-        ok = job_manager.cancel_job(job_id)
+        ok = await job_manager.cancel_job(job_id)
         return {"success": ok, "job_id": job_id}
 
     @app.delete("/api/jobs/{job_id}")

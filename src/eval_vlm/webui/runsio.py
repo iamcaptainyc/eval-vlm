@@ -297,7 +297,9 @@ def serve_dataset_html(cfg: Config, rel_path: str) -> FileResponse:
     clean_path = rel_path.strip().replace("\\", "/").lstrip("/")
     target = (cfg.dataset_dir / clean_path).resolve()
     ds_root = cfg.dataset_dir.resolve()
-    if not str(target).startswith(str(ds_root)):
+    try:
+        target.relative_to(ds_root)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="非法路径访问：禁止访问数据集目录之外的文件",
@@ -314,7 +316,15 @@ def serve_dataset_html(cfg: Config, rel_path: str) -> FileResponse:
         else:
             candidates = list(cfg.dataset_dir.rglob(Path(clean_path).name))
 
-        valid_candidates = [c for c in candidates if c.is_file() and not c.name.startswith(".")]
+        valid_candidates = []
+        for candidate in candidates:
+            resolved_candidate = candidate.resolve()
+            try:
+                resolved_candidate.relative_to(ds_root)
+            except ValueError:
+                continue
+            if resolved_candidate.is_file() and not resolved_candidate.name.startswith("."):
+                valid_candidates.append(resolved_candidate)
         if valid_candidates:
             target = valid_candidates[0].resolve()
         else:

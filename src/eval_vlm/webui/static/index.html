@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
   <link rel="stylesheet" href="styles.css?v=20260914settingsfix">
+  <script>
+    // Apply the stored preference before CSS paints to avoid a theme flash.
+    (() => {
+      const saved = localStorage.getItem("eval_vlm_theme");
+      const theme = saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+    })();
+  </script>
   <script src="app.js?v=20260914targetsfix" defer></script>
 </head>
 <body>

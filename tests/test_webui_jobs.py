@@ -34,19 +34,58 @@ def test_submit_and_list_jobs(job_mgr):
     assert job_mgr.is_dataset_busy("other_ds") is False
 
 
-def test_cancel_queued_job(job_mgr):
+@pytest.mark.anyio
+async def test_cancel_queued_job(job_mgr):
     summary = job_mgr.submit_job(
         job_type="pred",
         dataset="ds2",
         params={},
         user="test_user",
     )
-    ok = job_mgr.cancel_job(summary.id)
+    ok = await job_mgr.cancel_job(summary.id)
     assert ok is True
 
     job = job_mgr.get_job(summary.id)
     assert job.status == "canceled"
     assert job_mgr.is_dataset_busy("ds2") is False
+
+
+@pytest.mark.anyio
+async def test_cancel_running_job_waits_for_exit_before_releasing_dataset(job_mgr):
+    """A running job remains busy until its child has accepted termination."""
+    from eval_vlm.webui.jobs import Job
+
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.terminated = False
+            self.exit_gate = asyncio.Event()
+
+        def terminate(self):
+            self.terminated = True
+
+        def send_signal(self, _signal):
+            # JobManager uses CTRL_BREAK_EVENT on Windows.
+            self.terminate()
+
+        async def wait(self):
+            await self.exit_gate.wait()
+            self.returncode = -15
+            return self.returncode
+
+    job = Job("eval_ds_running", "eval", "ds-running", {}, "tester", job_mgr.settings)
+    job.status = "running"
+    job.proc = FakeProcess()
+    job_mgr.jobs[job.id] = job
+
+    cancel = asyncio.create_task(job_mgr.cancel_job(job.id))
+    await asyncio.sleep(0)
+    assert job_mgr.is_dataset_busy("ds-running") is True
+    job.proc.exit_gate.set()
+    assert await cancel is True
+    assert job.proc.terminated is True
+    assert job.status == "canceled"
+    assert job_mgr.is_dataset_busy("ds-running") is False
 
 
 @pytest.mark.anyio
@@ -158,5 +197,4 @@ async def test_job_worker_execution_and_log_emission(tmp_path):
     log_content = job.log_file.read_text(encoding="utf-8")
     assert "=== 正在启动任务" in log_content
     assert "=== 任务进程已就绪" in log_content
-
-
+    await mgr.shutdown()

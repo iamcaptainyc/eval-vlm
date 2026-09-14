@@ -143,6 +143,33 @@ def test_api_auth_token_enforcement(tmp_path, monkeypatch):
     assert ok_resp.status_code == 200
 
 
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "webui.example.test"])
+def test_api_non_loopback_host_requires_auth(tmp_path, monkeypatch, host):
+    """LAN/public binds cannot fall back to the anonymous editor account."""
+    cfg_file = tmp_path / "global.yaml"
+    monkeypatch.setenv("EVAL_VLM_CONFIG", str(cfg_file))
+    monkeypatch.delenv("EVAL_VLM_WEBUI_TOKEN", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    app = create_app(Settings(workspace_dir=ws, host=host))
+    response = TestClient(app).get("/api/whoami")
+    assert response.status_code == 401
+    assert "EVAL_VLM_WEBUI_TOKEN" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
+def test_api_loopback_host_allows_local_anonymous_development(tmp_path, monkeypatch, host):
+    cfg_file = tmp_path / "global.yaml"
+    monkeypatch.setenv("EVAL_VLM_CONFIG", str(cfg_file))
+    monkeypatch.delenv("EVAL_VLM_WEBUI_TOKEN", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    app = create_app(Settings(workspace_dir=ws, host=host))
+    response = TestClient(app).get("/api/whoami")
+    assert response.status_code == 200
+    assert response.json() == {"username": "anonymous", "role": "editor"}
+
+
 def test_api_config_all_backends_full_parameters(api_client):
     """验证所有推理引擎后端（MNN 完整参数、OpenAI 扩展参数、vLLM Offline 批处理参数）的读写配置持久化。"""
     client, ds_name, cfg, _ = api_client
@@ -271,3 +298,21 @@ def test_api_dataset_html_reports(api_client):
     res_traverse = client.get(f"/api/datasets/{ds_name}/html-view?path=../../forbidden.html")
     assert res_traverse.status_code in (400, 403)
 
+
+def test_api_dataset_html_rejects_same_prefix_sibling(api_client):
+    """A sibling named like the dataset must not pass the containment check."""
+    client, ds_name, cfg, _ = api_client
+    escaped_dir = cfg.dataset_dir.parent / f"{cfg.dataset_dir.name}_backup"
+    escaped_dir.mkdir()
+    (escaped_dir / "failure.html").write_text("outside dataset", encoding="utf-8")
+
+    resp = client.get(
+        f"/api/datasets/{ds_name}/html-view?path=../{escaped_dir.name}/failure.html"
+    )
+    assert resp.status_code == 403
+
+
+def test_api_rejects_unknown_job_type(api_client):
+    client, _, _, _ = api_client
+    resp = client.post("/api/jobs", json={"type": "shell", "params": {}})
+    assert resp.status_code == 422

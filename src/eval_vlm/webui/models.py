@@ -1,7 +1,7 @@
 """Pydantic 数据模型定义。"""
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -91,7 +91,9 @@ class ConfigUpdateRequest(BaseModel):
 
 
 class JobCreateRequest(BaseModel):
-    type: str  # "split" | "pred" | "eval" | "field-eval" | "sweep"
+    # convert-gguf is submitted only by its dedicated endpoint: it has a
+    # different, validated request model and must not be a generic CLI escape hatch.
+    type: Literal["split", "pred", "score", "eval", "field-eval", "sweep"]
     dataset: Optional[str] = None
     params: Optional[dict[str, Any]] = Field(default_factory=dict)
 

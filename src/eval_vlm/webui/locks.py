@@ -5,26 +5,17 @@ import asyncio
 import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from fastapi import HTTPException, status
 
 try:
     from filelock import FileLock, Timeout as LockTimeout
-except ImportError:
-    class LockTimeout(Exception):
-        pass
-
-    class FileLock:
-        def __init__(self, lock_file: str | Path, timeout: float = -1):
-            self.lock_file = Path(lock_file)
-            self.timeout = timeout
-
-        def acquire(self, timeout: Optional[float] = None):
-            return self
-
-        def release(self):
-            pass
+except ImportError as exc:  # pragma: no cover - covered by package dependency
+    raise RuntimeError(
+        "Web UI requires the 'filelock' package for cross-process dataset locks. "
+        "Install with: pip install 'eval-vlm[webui]'"
+    ) from exc
 
 
 from .settings import Settings

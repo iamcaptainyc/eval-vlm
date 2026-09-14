@@ -131,6 +131,26 @@ function showToast(msg, type = "info") {
   }, 3500);
 }
 
+async function getApiError(response) {
+  let detail = "";
+  try {
+    const body = await response.json();
+    detail = typeof body.detail === "string" ? body.detail : body.detail?.message || body.message || "";
+  } catch (_) {
+    detail = await response.text().catch(() => "");
+  }
+  if (response.status === 401 || response.status === 403) {
+    return "未获授权：请提供有效的 WebUI 访问凭据后重试。";
+  }
+  return detail || `请求失败 (HTTP ${response.status})`;
+}
+
+async function apiFetch(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(await getApiError(response));
+  return response;
+}
+
 // --------------------------------------------------------------------------
 // 路由与 Tab 切换 (两层架构：全局视图 vs 数据集专属视图)
 // --------------------------------------------------------------------------
@@ -304,8 +324,7 @@ document.addEventListener("click", (e) => {
 // --------------------------------------------------------------------------
 async function loadDatasets() {
   try {
-    const res = await fetch("/api/datasets");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/api/datasets");
     state.datasets = await res.json();
     if (!state.currentDataset && state.datasets.length > 0) {
       state.currentDataset = state.datasets[0].name;
@@ -315,7 +334,7 @@ async function loadDatasets() {
     renderDatasets();
     initInlineJobConsole();
   } catch (err) {
-    showToast("获取数据集列表失败", "error");
+    showToast(`获取数据集列表失败: ${err.message}`, "error");
   }
 }
 
@@ -1999,15 +2018,11 @@ async function confirmLaunchJob() {
   const { type, dataset, params } = buildJobModalArgs();
   try {
     const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type, dataset, params }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
     const job = await res.json();
     closeJobModal();
     showToast(`任务已提交入队: ${job.id}`, "success");
@@ -2306,15 +2321,11 @@ async function submitInlineJob() {
   const { type, dataset, params } = buildInlineJobArgs();
   try {
     const url = dataset ? `/api/datasets/${encodeURIComponent(dataset)}/jobs` : "/api/jobs";
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type, dataset, params }),
     });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
     const job = await res.json();
     showToast(`任务已成功提交入队: ${job.id}`, "success");
     await loadJobs();
@@ -2329,12 +2340,12 @@ async function submitInlineJob() {
 // --------------------------------------------------------------------------
 async function loadJobs() {
   try {
-    const res = await fetch("/api/jobs");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/api/jobs");
     state.jobs = await res.json();
     renderJobs();
   } catch (err) {
     console.error(err);
+    showToast(`获取任务队列失败: ${err.message}`, "error");
   }
 }
 
@@ -2364,7 +2375,7 @@ function renderJobs() {
       <tr>
         <td style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;">${escapeHtml(j.id)}</td>
         <td><span class="role-badge" style="background:rgba(6,182,212,0.15); color:var(--cyan-500);">${escapeHtml(j.type)}</span></td>
-        <td><strong style="color: #fff;">${escapeHtml(j.dataset || "—")}</strong></td>
+        <td><strong style="color: var(--text-main);">${escapeHtml(j.dataset || "—")}</strong></td>
         <td style="max-width: 320px; font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-dim); word-break: break-all;" title="${escapeHtml(cmdText)}">
           ${escapeHtml(cmdText)}
         </td>
@@ -2478,8 +2489,7 @@ function closeTerminal() {
 async function cancelJob(jobId) {
   if (!confirm(`确认终止任务 ${jobId} 吗？`)) return;
   try {
-    const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
     showToast("已发送终止指令", "warning");
     await loadJobs();
   } catch (err) {
@@ -2561,8 +2571,7 @@ async function loadRuns() {
   }
 
   try {
-    const res = await fetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/runs`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/runs`);
     state.runs = await res.json();
 
     if (!state.runs.length) {
@@ -2580,7 +2589,7 @@ async function loadRuns() {
     updateRunMethodState();
     await renderActiveRunView();
   } catch (err) {
-    showToast("获取评测结果失败", "error");
+    showToast(`获取评测结果失败: ${err.message}`, "error");
   }
 }
 
@@ -3428,7 +3437,8 @@ async function submitGGUFConvertTask() {
 // 浅色 / 暗黑主题系统
 // --------------------------------------------------------------------------
 function initTheme() {
-  const savedTheme = localStorage.getItem("eval_vlm_theme") || "dark";
+  const savedTheme = localStorage.getItem("eval_vlm_theme") ||
+    (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
   applyTheme(savedTheme);
 }
 
@@ -3457,15 +3467,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 检查鉴权
   try {
-    const authRes = await fetch("/api/whoami");
-    if (authRes.ok) {
-      state.user = await authRes.json();
-      const uEl = document.getElementById("header-username");
-      const rEl = document.getElementById("header-role");
-      if (uEl) uEl.textContent = state.user.username;
-      if (rEl) rEl.textContent = state.user.role;
-    }
-  } catch (_) {}
+    const authRes = await apiFetch("/api/whoami");
+    state.user = await authRes.json();
+    const uEl = document.getElementById("header-username");
+    const rEl = document.getElementById("header-role");
+    if (uEl) uEl.textContent = state.user.username;
+    if (rEl) rEl.textContent = state.user.role;
+  } catch (err) {
+    showToast(`身份验证失败: ${err.message}`, "error");
+  }
 
   // 绑定路由与监听
   window.addEventListener("hashchange", handleHash);

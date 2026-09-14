@@ -49,6 +49,7 @@ class Job:
         self.progress_msg: Optional[str] = None
 
         self.proc: Optional[asyncio.subprocess.Process] = None
+        self.cancel_requested = False
         self.subscribers: list[asyncio.Queue[dict[str, Any]]] = []
         self.command: list[str] = []
 
@@ -110,6 +111,7 @@ class JobManager:
         self.worker_task: Optional[asyncio.Task] = None
         self.current_job_id: Optional[str] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._shutdown = False
         self._reconcile_on_startup()
 
     def _reconcile_on_startup(self) -> None:
@@ -168,6 +170,8 @@ class JobManager:
     def is_dataset_busy(self, dataset_name: str) -> bool:
         """检查该数据集是否有正在运行或排队的任务。"""
         for job in self.jobs.values():
+            # A cancel request keeps the job running until its child process has
+            # actually exited, so edits cannot race a still-writing CLI process.
             if job.dataset == dataset_name and job.status in ("queued", "running"):
                 return True
         return False
@@ -241,6 +245,39 @@ class JobManager:
                 self.current_job_id = None
                 self.queue.task_done()
 
+    async def _stop_process(self, job: Job, grace_period: float = 5.0) -> None:
+        """Request process termination and wait for a definitive exit.
+
+        Keep ``job.status`` as running during this operation.  This is
+        intentional: callers relying on dataset locks must not see an idle
+        dataset while the child can still modify its files.
+        """
+        proc = job.proc
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            if sys.platform == "win32":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                proc.terminate()
+        except (ProcessLookupError, OSError):
+            return
+
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=grace_period)
+            return
+        except asyncio.TimeoutError:
+            pass
+
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            return
+        try:
+            await proc.wait()
+        except (ProcessLookupError, OSError):
+            pass
+
     def _build_cmd(self, job: Job) -> list[str]:
         cmd = ["python", "-m", "eval_vlm", job.type]
         if job.dataset:
@@ -304,11 +341,11 @@ class JobManager:
                 f_log.write(err_line)
                 f_log.flush()
             job.broadcast("log", err_line)
-            job.status = "failed"
-            job.progress_msg = f"启动失败: {e}"
+            job.status = "canceled" if job.cancel_requested else "failed"
+            job.progress_msg = "任务在启动前已取消" if job.cancel_requested else f"启动失败: {e}"
             job.finished_at = datetime.now(timezone.utc).isoformat()
             job.save_meta()
-            job.broadcast("status", {"status": "failed", "error": str(e)})
+            job.broadcast("status", {"status": job.status, "error": str(e)})
             return
 
         job.proc = proc
@@ -327,6 +364,11 @@ class JobManager:
             "pid": proc.pid,
         })
 
+        # Cancellation can arrive in the small window between setting running
+        # and creating the subprocess.  Honour it before consuming output.
+        if job.cancel_requested:
+            await self._stop_process(job)
+
         # 读取输出并推流
         assert proc.stdout is not None
         with job.log_file.open("a", encoding="utf-8") as f_log:
@@ -342,7 +384,9 @@ class JobManager:
         exit_code = await proc.wait()
         job.exit_code = exit_code
         job.finished_at = datetime.now(timezone.utc).isoformat()
-        if job.status != "canceled":
+        if job.cancel_requested:
+            job.status = "canceled"
+        elif job.status != "canceled":
             job.status = "succeeded" if exit_code == 0 else "failed"
 
         finish_line = f"\n=== 任务执行结束 (PID: {proc.pid}, 状态: {job.status}, 退出码: {exit_code}) ===\n"
@@ -361,7 +405,7 @@ class JobManager:
             },
         )
 
-    def cancel_job(self, job_id: str) -> bool:
+    async def cancel_job(self, job_id: str) -> bool:
         job = self.jobs.get(job_id)
         if not job or job.status not in ("queued", "running"):
             return False
@@ -382,24 +426,51 @@ class JobManager:
             job.broadcast("status", {"status": "canceled"})
             return True
 
-        # running 状态优雅取消
-        if job.proc:
-            try:
-                if sys.platform == "win32":
-                    job.proc.send_signal(signal.CTRL_BREAK_EVENT)
-                else:
-                    job.proc.terminate()
-            except Exception:
-                try:
-                    job.proc.kill()
-                except Exception:
-                    pass
-
-        job.status = "canceled"
-        job.finished_at = datetime.now(timezone.utc).isoformat()
-        job.save_meta()
-        job.broadcast("status", {"status": "canceled"})
+        job.cancel_requested = True
+        # Do not mark canceled early: the dataset remains busy until its child
+        # exits.  Once it has exited, expose the terminal state immediately;
+        # the worker will subsequently finish draining and persist its log.
+        await self._stop_process(job)
+        if job.proc is not None and job.proc.returncode is not None:
+            job.status = "canceled"
+            job.finished_at = datetime.now(timezone.utc).isoformat()
+            job.save_meta()
+            job.broadcast("status", {"status": "canceled"})
         return True
+
+    async def shutdown(self) -> None:
+        """Stop accepting work and reclaim the worker and active child process."""
+        self._shutdown = True
+        for job in self.jobs.values():
+            if job.status == "queued":
+                job.status = "canceled"
+                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.save_meta()
+                job.broadcast("status", {"status": "canceled"})
+
+        current = self.jobs.get(self.current_job_id) if self.current_job_id else None
+        if current and current.status == "running":
+            current.cancel_requested = True
+            await self._stop_process(current)
+            if current.proc is not None and current.proc.returncode is not None:
+                current.status = "canceled"
+                current.finished_at = datetime.now(timezone.utc).isoformat()
+                current.save_meta()
+                current.broadcast("status", {"status": "canceled"})
+
+        if self.worker_task and not self.worker_task.done():
+            # Give _execute_job a chance to drain the terminated child and
+            # write final metadata before stopping an otherwise endless queue
+            # worker.
+            try:
+                await asyncio.wait_for(asyncio.shield(self.worker_task), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+            self.worker_task.cancel()
+            try:
+                await self.worker_task
+            except asyncio.CancelledError:
+                pass
 
     def delete_job(self, job_id: str) -> bool:
         """删除任务记录及其日志文件目录。正在运行的任务不可直接删除，需先取消。"""
