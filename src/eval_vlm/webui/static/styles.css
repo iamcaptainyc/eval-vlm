@@ -1192,14 +1192,22 @@ dialog.custom-modal, dialog.modal-card, .modal-card {
   border: 1px solid var(--border-card);
   border-radius: var(--radius-xl);
   box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08);
-  padding: 1.75rem 2rem;
+  padding: 1.5rem 1.75rem;
   max-width: 560px;
   width: 92%;
+  max-height: min(88vh, 880px);
   color: var(--text-main);
   z-index: 1000;
   outline: none;
   animation: modalScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+dialog.custom-modal:not([open]), dialog.modal-card:not([open]) {
+  display: none;
 }
 
 @keyframes modalScaleIn {
@@ -1229,9 +1237,10 @@ dialog.custom-modal::backdrop, dialog.modal-card::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 1.1rem;
-  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
   border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
 .modal-title {
@@ -1242,7 +1251,36 @@ dialog.custom-modal::backdrop, dialog.modal-card::backdrop {
   letter-spacing: -0.01em;
 }
 
-.modal-close {
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+/* 统一弹窗内平滑滚动条 */
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.modal-close, .btn-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1256,9 +1294,11 @@ dialog.custom-modal::backdrop, dialog.modal-card::backdrop {
   font-size: 1.25rem;
   line-height: 1;
   transition: all var(--transition-fast);
+  padding: 0;
+  flex-shrink: 0;
 }
 
-.modal-close:hover {
+.modal-close:hover, .btn-close:hover {
   background: rgba(244, 63, 94, 0.15);
   border-color: var(--rose-border);
   color: #fff;
@@ -1270,9 +1310,118 @@ dialog.custom-modal::backdrop, dialog.modal-card::backdrop {
   justify-content: flex-end;
   align-items: center;
   gap: 0.75rem;
-  margin-top: 1.75rem;
-  padding-top: 1.15rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
   border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* 弹窗内的卡片分区规范化 */
+.modal-section-card {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  padding: 1.15rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  transition: border-color var(--transition-fast);
+}
+
+.modal-section-card:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.modal-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.modal-section-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* GGUF 专属高亮与表单美化 */
+.modal-section-card.accent-amber {
+  background: rgba(245, 158, 11, 0.035);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.modal-section-card.accent-amber:hover {
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.modal-tip-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-left: 4px solid var(--amber-500);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.15rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.modal-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition-fast);
+}
+
+.modal-checkbox-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.modal-checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--amber-500);
+  cursor: pointer;
+}
+
+[data-theme="light"] .modal-section-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .modal-section-card.accent-amber {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+[data-theme="light"] .modal-tip-banner {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+[data-theme="light"] .modal-checkbox-row {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="light"] .modal-checkbox-row:hover {
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 /* HTML 报告浏览与预览中心样式 */

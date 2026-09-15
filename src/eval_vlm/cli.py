@@ -377,11 +377,19 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     print(f"[field-eval] 已评 {metrics['num_scored']} 样本(模型无输出判错 {metrics['num_pred_missing']},"
           f" 跳过 ref {metrics['skipped_ref']}/pred {metrics['skipped_pred_error']})"
           f" -> {cfg.field_metrics_path}")
-    print(f"[field-eval] micro={ov['micro_accuracy']}  macro={ov['macro_accuracy']}  "
-          f"全对率={ov['exact_match_rate']}")
+    micro_ov = ov.get("micro_overall_accuracy", ov["micro_accuracy"])
+    macro_ov = ov.get("macro_overall_accuracy", ov["macro_accuracy"])
+    print(f"[field-eval] 非空 micro={ov['micro_accuracy']}  非空 macro={ov['macro_accuracy']}  "
+          f"总体 micro={micro_ov}  总体 macro={macro_ov}  全对率={ov['exact_match_rate']}")
     for f in metrics["fields"]:
         pf = metrics["per_field"][f]
-        print(f"  - {f}: {pf['accuracy']}  ({pf['correct']}/{pf['total']})")
+        ne_acc = f"{pf.get('non_empty_accuracy', pf['accuracy']) * 100:.2f}%"
+        ov_acc = f"{pf.get('overall_accuracy', pf['accuracy']) * 100:.2f}%"
+        ov_c = pf.get("overall_correct", pf["correct"])
+        ov_t = pf.get("overall_total", metrics["num_scored"])
+        empty_c = pf.get("empty_count", 0)
+        ne_c = pf.get("non_empty_count", pf["total"])
+        print(f"  - {f}: 非空 {ne_acc} ({pf['correct']}/{pf['total']}) | 总体 {ov_acc} ({ov_c}/{ov_t}) [空: {empty_c}, 非空: {ne_c}]")
         for v, d in (metrics.get("per_value", {}).get(f) or {}).items():
             print(f"      · {v}: {d['accuracy']}  ({d['correct']}/{d['support']})")
     for f, cm in (metrics.get("confusion_matrices") or {}).items():

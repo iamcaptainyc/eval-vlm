@@ -311,13 +311,23 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
     """
     fields = _canonical_fields(ref_fields)
     pred_text = pred_text or {}
-    per_field = {f: {"correct": 0, "total": 0} for f in fields}
+    field_stats = {
+        f: {
+            "empty_count": 0,
+            "non_empty_count": 0,
+            "non_empty_correct": 0,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+        }
+        for f in fields
+    }
     field_pairs: dict[str, list[tuple[str, str]]] = {f: [] for f in fields}
     # 逐取值(per-class):{字段: {取值: {correct, support}}}。support=该取值在 ref 出现的样本数,
     # correct=其中 pred 也含该取值的数;accuracy=correct/support(即该取值的召回)。
     per_value: dict[str, dict[str, dict[str, int]]] = {}
     n_scored = 0
     n_exact = 0
+    n_strict_exact = 0
     n_pred_missing = 0
     skipped_ref = 0
     skipped_pred_error = 0
@@ -346,27 +356,48 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
 
         n_scored += 1
         all_correct = True
+        strict_all_correct = True
         field_rows = []
         for f in fields:
             r = sorted(set(ref_f.get(f, [])))
+            is_empty_ref = (len(r) == 0)
             if state == "pred_missing":
                 p = []
                 correct = False                       # 模型没产出 -> 一律判错
+                strict_correct = False
             else:
                 p = sorted(set(pred_f.get(f, [])))
                 mode = (match_mode or "exact").strip().lower()
                 if mode in ("contain", "subset"):
                     if not r:
-                        correct = (len(p) == 0)
+                        strict_correct = (len(p) == 0)
+                        correct = strict_correct
                     else:
-                        correct = set(r).issubset(set(p))
+                        strict_correct = set(r).issubset(set(p))
+                        correct = strict_correct
                 else:
-                    correct = set(r) == set(p)
-            per_field[f]["total"] += 1
-            if correct:
-                per_field[f]["correct"] += 1
+                    strict_correct = (set(r) == set(p))
+                    correct = strict_correct
+
+            st = field_stats[f]
+            if is_empty_ref:
+                st["empty_count"] += 1
+                if len(p) == 0 and state != "pred_missing":
+                    st["empty_correct"] += 1
+                elif len(p) > 0:
+                    st["empty_incorrect"] += 1
+                # 空真值字段不计入非空评估:ref 为空时不拉低有效评估字段全对(all_correct)
+                if not strict_correct:
+                    strict_all_correct = False
             else:
-                all_correct = False
+                st["non_empty_count"] += 1
+                if correct:
+                    st["non_empty_correct"] += 1
+                else:
+                    all_correct = False
+                if not strict_correct:
+                    strict_all_correct = False
+
             # 逐取值:对 ref 里出现的每个取值,统计 pred 是否也命中(该取值的召回)
             pset = set(p)
             for v in r:
@@ -374,19 +405,63 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                 pv["support"] += 1
                 if v in pset:
                     pv["correct"] += 1
-            field_rows.append({"field": f, "ref": r, "pred": p, "correct": correct})
+            field_rows.append({
+                "field": f,
+                "ref": r,
+                "pred": p,
+                "correct": correct,
+                "is_empty_ref": is_empty_ref,
+            })
             field_pairs[f].append((_fmt(r), "(未产出)" if state == "pred_missing" else _fmt(p)))
+
+        if state == "pred_missing":
+            all_correct = False
+            strict_all_correct = False
+
         if all_correct:
             n_exact += 1
-        if not all_correct:                 # 只把有失配(含 pred_missing)的 id 列入清单
+        if strict_all_correct:
+            n_strict_exact += 1
+
+        # 若有非空字段失配或严格失配(含 pred_missing)，列入清单供可视化
+        if not all_correct or not strict_all_correct:
             rows.append({"id": sid, "images": list(s.images), "state": state,
                          "pred_desc": pred_text.get(sid, ""),
                          "fields": field_rows})
 
     # 聚合指标
+    per_field: dict[str, dict] = {}
     for f in fields:
-        c, t = per_field[f]["correct"], per_field[f]["total"]
-        per_field[f]["accuracy"] = round(c / t, 4) if t else 0.0
+        st = field_stats[f]
+        ne_c = st["non_empty_count"]
+        ne_hit = st["non_empty_correct"]
+        ne_acc = round(ne_hit / ne_c, 4) if ne_c else 0.0
+
+        empty_c = st["empty_count"]
+        empty_hit = st["empty_correct"]
+        empty_acc = round(empty_hit / empty_c, 4) if empty_c else 0.0
+
+        ov_hit = ne_hit + empty_hit
+        ov_acc = round(ov_hit / n_scored, 4) if n_scored else 0.0
+
+        per_field[f] = {
+            # 核心评估字段(按用户要求：评估总数 = 样本总数 - 空样本数 = 非空样本数)
+            "total": ne_c,
+            "correct": ne_hit,
+            "accuracy": ne_acc,
+            # 4项明确统计指标及细分
+            "empty_count": empty_c,
+            "non_empty_count": ne_c,
+            "non_empty_correct": ne_hit,
+            "non_empty_accuracy": ne_acc,
+            "empty_correct": empty_hit,
+            "empty_incorrect": st["empty_incorrect"],
+            "empty_accuracy": empty_acc,
+            "overall_correct": ov_hit,
+            "overall_total": n_scored,
+            "overall_accuracy": ov_acc,
+        }
+
     # 逐取值准确率(每字段内按 support 降序,便于阅读)
     per_value_out: dict[str, dict[str, dict]] = {}
     for f in fields:
@@ -396,9 +471,15 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
                 "accuracy": round(d["correct"] / d["support"], 4) if d["support"] else 0.0}
             for v, d in sorted(vals.items(), key=lambda kv: (-kv[1]["support"], kv[0]))
         }
-    tot_correct = sum(per_field[f]["correct"] for f in fields)
-    tot_total = sum(per_field[f]["total"] for f in fields)
-    macro = (sum(per_field[f]["accuracy"] for f in fields) / len(fields)) if fields else 0.0
+
+    tot_non_empty_correct = sum(per_field[f]["non_empty_correct"] for f in fields)
+    tot_non_empty_total = sum(per_field[f]["non_empty_count"] for f in fields)
+    tot_overall_correct = sum(per_field[f]["overall_correct"] for f in fields)
+    tot_overall_total = sum(per_field[f]["overall_total"] for f in fields)
+
+    valid_fields = [f for f in fields if per_field[f]["non_empty_count"] > 0]
+    macro = (sum(per_field[f]["non_empty_accuracy"] for f in valid_fields) / len(valid_fields)) if valid_fields else 0.0
+    macro_overall = (sum(per_field[f]["overall_accuracy"] for f in fields) / len(fields)) if fields else 0.0
 
     # 逐字段混淆矩阵
     confusion_matrices: dict[str, dict] = {}
@@ -419,10 +500,14 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
         "per_value": per_value_out,
         "confusion_matrices": confusion_matrices,
         "overall": {
-            "micro_accuracy": round(tot_correct / tot_total, 4) if tot_total else 0.0,
+            "micro_accuracy": round(tot_non_empty_correct / tot_non_empty_total, 4) if tot_non_empty_total else 0.0,
             "macro_accuracy": round(macro, 4),
+            "micro_overall_accuracy": round(tot_overall_correct / tot_overall_total, 4) if tot_overall_total else 0.0,
+            "macro_overall_accuracy": round(macro_overall, 4),
             "exact_match_samples": n_exact,
             "exact_match_rate": round(n_exact / n_scored, 4) if n_scored else 0.0,
+            "strict_exact_match_samples": n_strict_exact,
+            "strict_exact_match_rate": round(n_strict_exact / n_scored, 4) if n_scored else 0.0,
         },
     }
     return metrics, rows
@@ -434,6 +519,11 @@ def _aggregate(samples: list[Sample], desc_turn: dict[str, int],
 def _render_summary(metrics: dict, cfg: Config) -> str:
     ov = metrics["overall"]
     match_mode = metrics.get("match_mode", "exact")
+    micro_ov = ov.get("micro_overall_accuracy", ov.get("micro_accuracy", 0.0))
+    macro_ov = ov.get("macro_overall_accuracy", ov.get("macro_accuracy", 0.0))
+    strict_em = ov.get("strict_exact_match_samples", ov.get("exact_match_samples", 0))
+    strict_em_rate = ov.get("strict_exact_match_rate", ov.get("exact_match_rate", 0.0))
+
     lines = [
         f"# 逐字段准确率 — {cfg.run_name}",
         "",
@@ -443,18 +533,30 @@ def _render_summary(metrics: dict, cfg: Config) -> str:
         f"模型无输出(判错): {metrics['num_pred_missing']}",
         f"- 跳过(ref 抽取失败/无描述): {metrics['skipped_ref']}  "
         f"跳过(pred 抽取失败): {metrics['skipped_pred_error']}",
-        f"- **micro 准确率**: {ov['micro_accuracy']}  **macro 准确率**: {ov['macro_accuracy']}",
-        f"- 整样本全对: {ov['exact_match_samples']} / {metrics['num_scored']}"
+        f"- **非空 micro 准确率**: {ov['micro_accuracy']}  **非空 macro 准确率**: {ov['macro_accuracy']}",
+        f"- **总体 micro 准确率**: {micro_ov}  **总体 macro 准确率**: {macro_ov}",
+        f"- 整样本全对(非空有效字段): {ov['exact_match_samples']} / {metrics['num_scored']}"
         f"(全对率 {ov['exact_match_rate']})",
+        f"- 严格整样本全对(含空字段一致性): {strict_em} / {metrics['num_scored']}"
+        f"(严格全对率 {strict_em_rate})",
         "",
         "## 逐字段准确率",
         "",
-        "| 字段 | 准确率 | 命中/总数 |",
-        "| --- | --- | --- |",
+        "> 说明: 空真值样本不计入该字段的非空评估(有效总数 = 样本总数 - 空样本数);总体准确率将双方皆空亦计为匹配正确。",
+        "",
+        "| 字段 | 空样本数 | 非空样本数 | 非空命中/非空总数 | 非空中准确率 | 总体命中/总样本 | 总体准确率 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for f in metrics["fields"]:
         pf = metrics["per_field"][f]
-        lines.append(f"| {f} | {pf['accuracy']} | {pf['correct']}/{pf['total']} |")
+        empty_c = pf.get("empty_count", 0)
+        ne_c = pf.get("non_empty_count", pf.get("total", 0))
+        ne_hit = pf.get("non_empty_correct", pf.get("correct", 0))
+        ne_acc = f"{pf.get('non_empty_accuracy', pf.get('accuracy', 0.0)) * 100:.2f}%"
+        ov_hit = pf.get("overall_correct", ne_hit)
+        ov_tot = pf.get("overall_total", metrics.get("num_scored", 0))
+        ov_acc = f"{pf.get('overall_accuracy', pf.get('accuracy', 0.0)) * 100:.2f}%"
+        lines.append(f"| {f} | {empty_c} | {ne_c} | {ne_hit}/{ne_c} | {ne_acc} | {ov_hit}/{ov_tot} | {ov_acc} |")
     lines.append("")
 
     # 逐字段混淆矩阵 (若有)
@@ -517,7 +619,11 @@ def _render_mismatches(rows: list[dict], metrics: dict, cfg: Config) -> str:
         blocks.append("| 字段 | ref | pred | |")
         blocks.append("| --- | --- | --- | --- |")
         for fr in row["fields"]:
-            mark = "✓" if fr["correct"] else "✗"
+            is_empty_ref = fr.get("is_empty_ref", False)
+            if is_empty_ref:
+                mark = "✓ (皆空)" if fr["correct"] else "— (真值空,忽略)"
+            else:
+                mark = "✓" if fr["correct"] else "✗"
             blocks.append(f"| {fr['field']} | {_fmt(fr['ref'])} | {_fmt(fr['pred'])} | {mark} |")
         blocks.append("")
     return "\n".join(head + blocks)
@@ -537,7 +643,7 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
     sid = _html_escape(row["id"])
     is_missing = row["state"] == "pred_missing"
     tag = ('<span class="tag-pred-missing">⚠️ 模型未产出描述</span>' if is_missing else "")
-    bad_fields = [fr["field"] for fr in row["fields"] if not fr["correct"]]
+    bad_fields = [fr["field"] for fr in row["fields"] if not fr.get("is_empty_ref") and not fr["correct"]]
     data_attr = _html_escape("|".join(bad_fields))
 
     imgs_html: list[str] = []
@@ -561,8 +667,17 @@ def _render_mismatch_card(row: dict, cfg: Config) -> str:
 
     trs: list[str] = []
     for fr in row["fields"]:
-        cls = "ok" if fr["correct"] else "bad"
-        mark = "✓" if fr["correct"] else "✗"
+        is_empty_ref = fr.get("is_empty_ref", False)
+        if is_empty_ref:
+            if fr.get("correct"):
+                cls = "ok"
+                mark = "✓ (皆空)"
+            else:
+                cls = "ignored"
+                mark = "— (真值空,不计非空错误)"
+        else:
+            cls = "ok" if fr["correct"] else "bad"
+            mark = "✓" if fr["correct"] else "✗"
         trs.append(
             f"<tr><td>{_html_escape(fr['field'])}</td>"
             f"<td>{_html_escape(_fmt(fr['ref']))}</td>"
@@ -620,6 +735,7 @@ th, td { border: 1px solid var(--border-subtle); padding: 8px 12px; text-align: 
 th { background: #f1f5f9; color: var(--text-secondary); font-weight: 600; }
 td.ok { color: #047857; font-weight: 700; background: #ecfdf5; }
 td.bad { color: #be123c; font-weight: 700; background: #fff1f2; }
+td.ignored { color: #64748b; font-weight: 600; background: #f8fafc; }
 .tag-pred-missing { color: #b45309; font-weight: 700; background: #fffbeb; border: 1px solid #fde68a; padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
 #filters { margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: var(--bg-surface); padding: 12px 20px; border: 1px solid var(--border-card); border-radius: 12px; box-shadow: 0 4px 14px rgba(15,23,42,.08); }
 #filters label { font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
@@ -636,6 +752,8 @@ td.bad { color: #be123c; font-weight: 700; background: #fff1f2; }
 def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str:
     """把失配样本渲染成图文合一的单文件 HTML。"""
     ov = metrics["overall"]
+    micro_ov = ov.get("micro_overall_accuracy", ov.get("micro_accuracy", 0.0))
+    macro_ov = ov.get("macro_overall_accuracy", ov.get("macro_accuracy", 0.0))
     header = f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <title>{_html_escape(f"字段失配清单 — {cfg.run_name}")}</title>
 <style>
@@ -647,7 +765,8 @@ def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str
 <p>模型: <code>{_html_escape(cfg.inference.result_name)}</code>
    后端: <code>{_html_escape(cfg.inference.backend)}</code></p>
 <p>有失配的样本: {len(rows)} / 已评 {metrics['num_scored']}
-   &nbsp; micro={ov['micro_accuracy']} macro={ov['macro_accuracy']}
+   &nbsp; 非空 micro={ov['micro_accuracy']} macro={ov['macro_accuracy']}
+   &nbsp; 总体 micro={micro_ov} macro={macro_ov}
    &nbsp; 模型无输出(pred_missing): {metrics['num_pred_missing']}</p>
 </header>
 """

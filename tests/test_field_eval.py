@@ -91,14 +91,33 @@ def test_aggregate_correctness_matrix():
     assert metrics["fields"] == ["主辅路", "警示标志"]
 
     pf = metrics["per_field"]
-    assert pf["主辅路"] == {"correct": 2, "total": 3, "accuracy": 0.6667}   # a✓ b✓ c✗
-    assert pf["警示标志"] == {"correct": 1, "total": 3, "accuracy": 0.3333}  # a✓ b✗ c✗
+    assert pf["主辅路"]["correct"] == 2
+    assert pf["主辅路"]["total"] == 3
+    assert pf["主辅路"]["accuracy"] == 0.6667
+    assert pf["主辅路"]["empty_count"] == 0
+    assert pf["主辅路"]["non_empty_count"] == 3
+    assert pf["主辅路"]["overall_accuracy"] == 0.6667
+
+    # 警示标志: a(非空✓) b(空真值,pred有值不计入非空错) c(非空✗)
+    # 该字段总数 = 样本总数(3) - 空样本数(1) = 2
+    assert pf["警示标志"]["empty_count"] == 1
+    assert pf["警示标志"]["non_empty_count"] == 2
+    assert pf["警示标志"]["total"] == 2
+    assert pf["警示标志"]["correct"] == 1
+    assert pf["警示标志"]["accuracy"] == 0.5
+    assert pf["警示标志"]["non_empty_accuracy"] == 0.5
+    assert pf["警示标志"]["overall_correct"] == 1
+    assert pf["警示标志"]["overall_total"] == 3
+    assert pf["警示标志"]["overall_accuracy"] == 0.3333
 
     ov = metrics["overall"]
-    assert ov["micro_accuracy"] == 0.5          # (2+1)/(3+3)
-    assert ov["macro_accuracy"] == 0.5          # (0.6667+0.3333)/2
-    assert ov["exact_match_samples"] == 1       # 仅 a 全对
-    assert ov["exact_match_rate"] == 0.3333
+    assert ov["micro_accuracy"] == 0.6          # 非空: (2+1)/(3+2) = 0.6
+    assert ov["macro_accuracy"] == 0.5834       # (0.6667+0.5)/2
+    assert ov["micro_overall_accuracy"] == 0.5
+    assert ov["exact_match_samples"] == 2       # a, b 非空字段全对
+    assert ov["exact_match_rate"] == 0.6667
+    assert ov["strict_exact_match_samples"] == 1 # 仅 a 严格全对
+    assert ov["strict_exact_match_rate"] == 0.3333
 
     # 失配清单:仅含 b、c(a 全对不列),c 标 pred_missing
     ids = {r["id"]: r["state"] for r in rows}
@@ -123,8 +142,14 @@ def test_aggregate_both_empty_is_correct():
         pred_fields={"a": {"主辅路": []}},
         pred_desc_ids={"a"},
     )
-    assert metrics["per_field"]["主辅路"]["accuracy"] == 1.0
+    pf = metrics["per_field"]["主辅路"]
+    assert pf["empty_count"] == 1
+    assert pf["non_empty_count"] == 0
+    assert pf["total"] == 0
+    assert pf["empty_correct"] == 1
+    assert pf["overall_accuracy"] == 1.0
     assert metrics["overall"]["exact_match_rate"] == 1.0
+    assert metrics["overall"]["strict_exact_match_rate"] == 1.0
 
 
 def test_aggregate_multivalue_set_equality():
@@ -230,7 +255,9 @@ def test_run_field_eval_end_to_end(tmp_path, monkeypatch):
     metrics = field_eval.run_field_eval(cfg)
 
     assert metrics["num_scored"] == 2
-    assert metrics["per_field"]["主辅路"] == {"correct": 1, "total": 2, "accuracy": 0.5}
+    pf = metrics["per_field"]["主辅路"]
+    assert pf["correct"] == 1 and pf["total"] == 2 and pf["accuracy"] == 0.5
+    assert pf["non_empty_count"] == 2 and pf["empty_count"] == 0
     assert metrics["overall"]["exact_match_rate"] == 0.5
 
     # 落盘产物齐全
@@ -342,7 +369,9 @@ def test_run_field_eval_second_round(tmp_path, monkeypatch):
     # 抽取的全是第二轮文本(ref_a2/pred_a2…),第一轮文本未被动过
     assert set(calls) == {"ref_a2", "pred_a2", "ref_b2", "pred_b2"}
     assert metrics["num_scored"] == 2
-    assert metrics["per_field"]["主辅路"] == {"correct": 2, "total": 2, "accuracy": 1.0}
+    pf = metrics["per_field"]["主辅路"]
+    assert pf["correct"] == 2 and pf["total"] == 2 and pf["accuracy"] == 1.0
+    assert pf["non_empty_count"] == 2 and pf["empty_count"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -657,23 +686,32 @@ def test_aggregate_match_mode_contain_vs_exact():
     }
     pred_desc_ids = {"1", "2", "3", "4", "5"}
 
-    # 1. exact 模式: 只有 sample 4 (两边皆空) 全对
+    # 1. exact 模式: sample 4 (两边皆空, empty_correct=1), sample 1,2,3 非空皆失配
     m_exact, rows_exact = field_eval._aggregate(
         samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, match_mode="exact"
     )
-    assert m_exact["per_field"]["环境"]["correct"] == 1
-    assert m_exact["overall"]["exact_match_samples"] == 1
-    assert len(rows_exact) == 4  # 1, 2, 3, 5 均为失配
+    pf_exact = m_exact["per_field"]["环境"]
+    assert pf_exact["empty_count"] == 2
+    assert pf_exact["non_empty_count"] == 3
+    assert pf_exact["total"] == 3
+    assert pf_exact["correct"] == 0
+    assert pf_exact["empty_correct"] == 1
+    assert pf_exact["overall_correct"] == 1
+    assert pf_exact["overall_accuracy"] == 0.2
+    assert m_exact["overall"]["strict_exact_match_samples"] == 1
 
     # 2. contain 模式: sample 1 (超集), sample 3 (超集), sample 4 (皆空) 均为对
     m_contain, rows_contain = field_eval._aggregate(
         samples, desc_turn, ref_fields, pred_fields, pred_desc_ids, match_mode="contain"
     )
-    assert m_contain["per_field"]["环境"]["correct"] == 3
-    assert m_contain["overall"]["exact_match_samples"] == 3
-    # 失配的只有 sample 2 (完全没命中海滩) 和 sample 5 (无中生有森林)
-    mismatched_ids = {r["id"] for r in rows_contain}
-    assert mismatched_ids == {"2", "5"}
+    pf_contain = m_contain["per_field"]["环境"]
+    assert pf_contain["empty_count"] == 2
+    assert pf_contain["non_empty_count"] == 3
+    assert pf_contain["correct"] == 2               # 非空命中数 (sample 1, sample 3)
+    assert pf_contain["empty_correct"] == 1         # 空真值且预测也为空 (sample 4)
+    assert pf_contain["overall_correct"] == 3       # sample 1, 3, 4
+    assert pf_contain["overall_accuracy"] == 0.6    # 3 / 5
+    assert m_contain["overall"]["strict_exact_match_samples"] == 3
 
 
 def test_cli_match_mode_flag_and_persistence(tmp_path):
@@ -714,9 +752,68 @@ def test_render_summary_shows_match_mode():
         "skipped_ref": 0, "skipped_pred_error": 0,
         "fields": ["环境"],
         "match_mode": "contain",
-        "per_field": {"环境": {"correct": 9, "total": 10, "accuracy": 0.9}},
+        "per_field": {
+            "环境": {
+                "correct": 9, "total": 10, "accuracy": 0.9,
+                "empty_count": 0, "non_empty_count": 10,
+                "non_empty_correct": 9, "non_empty_accuracy": 0.9,
+                "overall_correct": 9, "overall_total": 10, "overall_accuracy": 0.9,
+            }
+        },
         "overall": {"micro_accuracy": 0.9, "macro_accuracy": 0.9, "exact_match_samples": 9, "exact_match_rate": 0.9}
     }
     summary = field_eval._render_summary(metrics, cfg)
     assert "- 匹配模式: `contain`" in summary
+    assert "| 环境 | 0 | 10 | 9/10 | 90.00% | 9/10 | 90.00% |" in summary
+
+
+def test_empty_ref_logic_and_report_rendering():
+    """测试真值为空不计入非空评估，报告中清晰呈现空数、非空数、非空准确率、总体准确率。"""
+    samples = [Sample(id="1"), Sample(id="2"), Sample(id="3"), Sample(id="4")]
+    desc_turn = {"1": 1, "2": 1, "3": 1, "4": 1}
+    ref_fields = {
+        "1": {"车道位置": ["左侧车道"]},
+        "2": {"车道位置": ["右侧车道"]},
+        "3": {"车道位置": []},  # 真值为空, 预测也为空 -> 空中匹配
+        "4": {"车道位置": []},  # 真值为空, 预测不为空 -> 以前算错, 现在不计入非空评估
+    }
+    pred_fields = {
+        "1": {"车道位置": ["左侧车道"]},  # 非空对
+        "2": {"车道位置": ["中间车道"]},  # 非空错
+        "3": {"车道位置": []},            # 皆空
+        "4": {"车道位置": ["左侧车道"]},  # 真值空但模型预测了
+    }
+    pred_desc_ids = {"1", "2", "3", "4"}
+
+    metrics, rows = field_eval._aggregate(samples, desc_turn, ref_fields, pred_fields, pred_desc_ids)
+    pf = metrics["per_field"]["车道位置"]
+
+    # 4个关键指标验证:
+    # 1. 空的多少
+    assert pf["empty_count"] == 2
+    # 2. 非空的多少: 样本总数(4) - 空样本数(2) = 2
+    assert pf["non_empty_count"] == 2
+    assert pf["total"] == 2
+    # 3. 非空中准确率: 1对 1错 -> 50%
+    assert pf["non_empty_correct"] == 1
+    assert pf["correct"] == 1
+    assert pf["non_empty_accuracy"] == 0.5
+    assert pf["accuracy"] == 0.5
+    # 4. 总体准确率: 非空对1 + 皆空对1 = 2 / 4 -> 50%
+    assert pf["overall_correct"] == 2
+    assert pf["overall_total"] == 4
+    assert pf["overall_accuracy"] == 0.5
+
+    # 报告渲染验证
+    cfg = Config()
+    cfg.run_name = "test_empty_run"
+    summary_md = field_eval._render_summary(metrics, cfg)
+    assert "| 字段 | 空样本数 | 非空样本数 | 非空命中/非空总数 | 非空中准确率 | 总体命中/总样本 | 总体准确率 |" in summary_md
+    assert "| 车道位置 | 2 | 2 | 1/2 | 50.00% | 2/4 | 50.00% |" in summary_md
+
+    # HTML 渲染验证
+    html = field_eval._render_mismatches_html(rows, metrics, cfg)
+    assert "非空 micro=" in html
+    assert "总体 micro=" in html
+
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260914imghead">
+  <link rel="stylesheet" href="styles.css?v=20260914ggufui">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260914imghead" defer></script>
+  <script src="app.js?v=20260914ggufui" defer></script>
 </head>
 <body>
 
@@ -1859,70 +1859,90 @@
   </dialog>
 
   <!-- GGUF 模型转换工坊弹窗 -->
-  <dialog id="gguf-convert-modal" class="modal-card" style="max-width: 840px; width: 92vw; padding: 1.5rem 1.75rem;">
-    <div class="modal-header" style="margin-bottom: 1.25rem;">
+  <dialog id="gguf-convert-modal" class="modal-card" style="max-width: 860px; width: 92vw;">
+    <div class="modal-header">
       <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <span style="font-size: 1.5rem;">📦</span>
+        <span style="font-size: 1.5rem; display: flex; align-items: center;">📦</span>
         <div>
-          <h3 class="modal-title" style="margin: 0; font-size: 1.15rem;">HuggingFace 转 GGUF 可视化工坊</h3>
-          <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: var(--text-dim);">支持多模态两阶段导出 (主骨干 + mmproj) 及 llama-quantize 低比特量化</p>
+          <h3 class="modal-title" style="font-size: 1.15rem;">HuggingFace 转 GGUF 可视化工坊</h3>
+          <p style="margin: 3px 0 0 0; font-size: 0.8rem; color: var(--text-dim);">支持多模态两阶段导出 (主骨干 + mmproj) 及 llama-quantize 低比特量化</p>
         </div>
       </div>
-      <button class="btn-close" onclick="closeGGUFConvertModal()">&times;</button>
+      <button class="modal-close" onclick="closeGGUFConvertModal()" title="关闭">&times;</button>
     </div>
 
-    <div class="modal-body" style="display: flex; flex-direction: column; gap: 1.25rem; max-height: 74vh; overflow-y: auto; padding-right: 0.35rem;">
-      <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: var(--radius-md); padding: 0.85rem 1.1rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+    <!-- 唯一的滚动容器：modal-body 负责全模态框的统一单层滚动 -->
+    <div class="modal-body">
+      <!-- 顶部提示横幅 -->
+      <div class="modal-tip-banner">
         💡 <strong>模型文件夹自动组织规范</strong>：<br>
         转换产物将统一收录在全局目录 <code>&lt;llamacpp_models_dir&gt;/&lt;模型名 A&gt;/</code> 下。<br>
         内部规范命名为 <code>A_&lt;QUANT&gt;.gguf</code> 与 <code>A_&lt;DTYPE&gt;_mmproj.gguf</code>，评测时系统自动识别 <code>A</code> 为模型名并成对绑定！
       </div>
 
-      <!-- 源模型选择 -->
-      <div class="config-field">
-        <label style="margin-bottom: 0.45rem;"><span>源 HuggingFace 模型路径 (--hf-path)</span><span class="config-key-badge">必需</span></label>
-        <div style="display: flex; gap: 0.65rem;">
-          <select id="gguf-conv-hf-select" class="select" style="width: 42%;" onchange="onGGUFConvertHfSelect(this.value)">
-            <option value="">(从已探测 HF 模型中快速选择)</option>
-          </select>
-          <input type="text" id="gguf-conv-hf-path" class="input" style="flex: 1;" placeholder="如 /root/autodl-tmp/Qwen2.5-VL-7B-Instruct" oninput="onGGUFConvertHfInput()">
-        </div>
-        <span class="config-field-desc">包含 config.json 与 safetensors 权重的本地 HuggingFace 文件夹路径</span>
-      </div>
-
-      <!-- 目标模型名与输出目录 -->
-      <div class="config-grid-2" style="gap: 1.25rem;">
-        <div class="config-field">
-          <label style="margin-bottom: 0.45rem;"><span>目标模型名 A (--name)</span><span class="config-key-badge">推荐</span></label>
-          <input type="text" id="gguf-conv-name" class="input" placeholder="如 Qwen2.5-VL-7B-Instruct" oninput="updateGGUFConvertPreview()">
-          <span class="config-field-desc">产物模型文件夹名与评测模型标识名</span>
+      <!-- 1. 源模型与目标模型设置 -->
+      <div class="modal-section-card">
+        <div class="modal-section-header">
+          <span class="modal-section-title">📂 1. 源模型与导出基座配置</span>
+          <span class="role-badge" style="background: rgba(99, 102, 241, 0.15); color: var(--primary-500);">核心输入</span>
         </div>
 
         <div class="config-field">
-          <label style="margin-bottom: 0.45rem;"><span>主模型导出精度 (--outtype)</span><span class="config-key-badge">outtype</span></label>
-          <select id="gguf-conv-outtype" class="select" onchange="updateGGUFConvertPreview()">
-            <option value="bf16">bf16 (推荐, 动态范围大, 与训练对齐)</option>
-            <option value="f16">f16 (半精度浮点)</option>
-            <option value="f32">f32 (单精度全量)</option>
-          </select>
-          <span class="config-field-desc">未量化时的主语言骨干数据类型</span>
-        </div>
-      </div>
-
-      <!-- 多模态视觉投影器专项设置 -->
-      <div class="dataset-card" style="background: rgba(245, 158, 11, 0.03); border: 1px dashed rgba(245, 158, 11, 0.35); border-radius: var(--radius-md); padding: 1.1rem 1.25rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-subtle);">
-          <label style="display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text-main); font-weight: 600; font-size: 0.9rem;">
-            <input type="checkbox" id="gguf-conv-mmproj-enable" checked onchange="toggleGGUFConvertMMProj(this.checked)">
-            <span>👁️ 导出多模态视觉投影器 (--mmproj)</span>
+          <label>
+            <span>源 HuggingFace 模型权重目录 (--hf-path)</span>
+            <span class="config-key-badge">必需</span>
           </label>
-          <span class="role-badge" style="background: rgba(245,158,11,0.15); color: var(--amber-500);">多模态两阶段专属</span>
+          <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
+            <select id="gguf-conv-hf-select" class="select" style="min-width: 260px; flex: 1;" onchange="onGGUFConvertHfSelect(this.value)">
+              <option value="">(从已探测 HF 模型中快速选择)</option>
+            </select>
+            <input type="text" id="gguf-conv-hf-path" class="input" style="flex: 2; min-width: 280px;" placeholder="如 /root/autodl-tmp/Qwen2.5-VL-7B-Instruct" oninput="onGGUFConvertHfInput()">
+          </div>
+          <span class="config-field-desc">包含 config.json 与 safetensors 权重的本地 HuggingFace 文件夹绝对路径</span>
         </div>
 
-        <div id="gguf-conv-mmproj-panel" style="display: flex; flex-direction: column; gap: 0.9rem;">
-          <div class="config-grid-2" style="gap: 1.25rem;">
+        <div class="config-grid-2">
+          <div class="config-field">
+            <label>
+              <span>目标模型名 A (--name)</span>
+              <span class="config-key-badge">推荐</span>
+            </label>
+            <input type="text" id="gguf-conv-name" class="input" placeholder="如 Qwen2.5-VL-7B-Instruct" oninput="updateGGUFConvertPreview()">
+            <span class="config-field-desc">产物模型文件夹名与后续评测的模型标识名</span>
+          </div>
+
+          <div class="config-field">
+            <label>
+              <span>主模型导出精度 (--outtype)</span>
+              <span class="config-key-badge">outtype</span>
+            </label>
+            <select id="gguf-conv-outtype" class="select" onchange="updateGGUFConvertPreview()">
+              <option value="bf16">bf16 (推荐, 动态范围大, 与训练对齐)</option>
+              <option value="f16">f16 (半精度浮点)</option>
+              <option value="f32">f32 (单精度全量)</option>
+            </select>
+            <span class="config-field-desc">未量化时的主语言骨干数据精度</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 多模态视觉投影器专项设置 -->
+      <div class="modal-section-card accent-amber">
+        <div class="modal-section-header">
+          <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; color: var(--text-main); font-weight: 700; font-size: 0.92rem; margin: 0;">
+            <input type="checkbox" id="gguf-conv-mmproj-enable" checked onchange="toggleGGUFConvertMMProj(this.checked)" style="width: 17px; height: 17px; accent-color: var(--amber-500); cursor: pointer;">
+            <span>👁️ 2. 导出多模态视觉投影器 (--mmproj)</span>
+          </label>
+          <span class="role-badge" style="background: rgba(245,158,11,0.18); color: var(--amber-500); font-weight: 600;">多模态两阶段专属</span>
+        </div>
+
+        <div id="gguf-conv-mmproj-panel" style="display: flex; flex-direction: column; gap: 0.95rem;">
+          <div class="config-grid-2">
             <div class="config-field">
-              <label style="margin-bottom: 0.45rem;"><span>mmproj 导出类型 / 精度 (--mmproj-outtype)</span><span class="config-key-badge">数据类型</span></label>
+              <label>
+                <span>mmproj 导出类型 / 精度 (--mmproj-outtype)</span>
+                <span class="config-key-badge">数据类型</span>
+              </label>
               <select id="gguf-conv-mmproj-outtype" class="select" onchange="updateGGUFConvertPreview()">
                 <option value="f16">f16 (float16: 推荐, 高保真视觉特征)</option>
                 <option value="bf16">bf16 (bfloat16: 动态范围大, 适配高版本)</option>
@@ -1932,7 +1952,10 @@
             </div>
 
             <div class="config-field">
-              <label style="margin-bottom: 0.45rem;"><span>mmproj 架构类型 (--mmproj-type)</span><span class="config-key-badge">可选</span></label>
+              <label>
+                <span>mmproj 架构类型 (--mmproj-type)</span>
+                <span class="config-key-badge">可选</span>
+              </label>
               <select id="gguf-conv-mmproj-type" class="select" onchange="updateGGUFConvertPreview()">
                 <option value="auto">auto (自动根据模型 config.json 探测识别)</option>
                 <option value="qwen2vl">Qwen2-VL / Qwen2.5-VL (qwenvl)</option>
@@ -1950,56 +1973,71 @@
           </div>
 
           <div class="config-field">
-            <label style="margin-bottom: 0.45rem;"><span>投影器产物目标文件名 (只读展示)</span></label>
+            <label>
+              <span>投影器产物目标文件名</span>
+              <span class="config-key-badge">系统自动命名</span>
+            </label>
             <input type="text" id="gguf-conv-mmproj-filename" class="input" readonly style="color: var(--text-dim); background: var(--bg-input); font-family: var(--font-mono); font-size: 0.8rem;" value="<A>_f16_mmproj.gguf">
           </div>
         </div>
       </div>
 
-      <!-- 量化与高级设置 -->
-      <div class="config-grid-2" style="gap: 1.25rem;">
-        <div class="config-field">
-          <label style="margin-bottom: 0.45rem;"><span>目标量化规格 (--quantize)</span><span class="config-key-badge">可选</span></label>
-          <select id="gguf-conv-quant" class="select" onchange="updateGGUFConvertPreview()">
-            <option value="">(不量化 - 保持 bf16/f16 基座精度)</option>
-            <option value="Q4_K_M">Q4_K_M (中等推荐: 权重高质量中等体积)</option>
-            <option value="Q4_K_S">Q4_K_S (小型: 极致节省显存)</option>
-            <option value="Q5_K_M">Q5_K_M (高质量: 接近全精度保真度)</option>
-            <option value="Q5_K_S">Q5_K_S (高质微缩)</option>
-            <option value="Q8_0">Q8_0 (8位高精度: 极低精度损耗)</option>
-            <option value="Q6_K">Q6_K (6位平衡档)</option>
-            <option value="Q3_K_M">Q3_K_M (3位超极限)</option>
-          </select>
-          <span class="config-field-desc">调用 llama-quantize 仅对语言主干量化，mmproj 始终保持全精度</span>
+      <!-- 3. 量化规格与高级选项 -->
+      <div class="modal-section-card">
+        <div class="modal-section-header">
+          <span class="modal-section-title">⚡ 3. 量化与环境配置</span>
+          <span class="role-badge" style="background: rgba(16, 185, 129, 0.15); color: var(--emerald-500);">性能调优</span>
         </div>
 
-        <div class="config-field">
-          <label style="margin-bottom: 0.45rem;"><span>llama.cpp 源码/编译目录</span><span class="config-key-badge">可选</span></label>
-          <input type="text" id="gguf-conv-llamacpp-dir" class="input" placeholder="留空自动在系统 PATH 与常见路径检索" oninput="updateGGUFConvertPreview()">
-          <span class="config-field-desc">需包含 convert_hf_to_gguf.py 或 build/bin/llama-quantize</span>
-        </div>
-      </div>
+        <div class="config-grid-2">
+          <div class="config-field">
+            <label>
+              <span>目标量化规格 (--quantize)</span>
+              <span class="config-key-badge">可选</span>
+            </label>
+            <select id="gguf-conv-quant" class="select" onchange="updateGGUFConvertPreview()">
+              <option value="">(不量化 - 保持 bf16/f16 基座精度)</option>
+              <option value="Q4_K_M">Q4_K_M (中等推荐: 权重高质量中等体积)</option>
+              <option value="Q4_K_S">Q4_K_S (小型: 极致节省显存)</option>
+              <option value="Q5_K_M">Q5_K_M (高质量: 接近全精度保真度)</option>
+              <option value="Q5_K_S">Q5_K_S (高质微缩)</option>
+              <option value="Q8_0">Q8_0 (8位高精度: 极低精度损耗)</option>
+              <option value="Q6_K">Q6_K (6位平衡档)</option>
+              <option value="Q3_K_M">Q3_K_M (3位超极限)</option>
+            </select>
+            <span class="config-field-desc">调用 llama-quantize 仅对语言主干量化，mmproj 始终保持全精度</span>
+          </div>
 
-      <div class="config-field" style="padding-top: 0.2rem;">
-        <label style="display: flex; align-items: center; gap: 0.55rem; cursor: pointer; color: var(--text-secondary); font-size: 0.84rem;">
+          <div class="config-field">
+            <label>
+              <span>llama.cpp 源码/编译目录</span>
+              <span class="config-key-badge">可选</span>
+            </label>
+            <input type="text" id="gguf-conv-llamacpp-dir" class="input" placeholder="留空自动在系统 PATH 与常见路径检索" oninput="updateGGUFConvertPreview()">
+            <span class="config-field-desc">需包含 convert_hf_to_gguf.py 或 build/bin/llama-quantize</span>
+          </div>
+        </div>
+
+        <label class="modal-checkbox-row">
           <input type="checkbox" id="gguf-conv-clean-intermediate" onchange="updateGGUFConvertPreview()">
           <span>量化完成后自动删除未量化的中间基座 gguf 文件 (--clean-intermediate)</span>
         </label>
       </div>
 
-      <!-- 命令预览与落地提示 -->
-      <div class="code-preview-box" style="margin-top: 0.4rem;">
+      <!-- 4. 命令预览与落地提示 -->
+      <div class="code-preview-box">
         <div class="code-preview-title">
           <span>🖥️ 即将异步执行的任务指令</span>
           <span id="gguf-conv-dest-hint" style="font-size: 0.74rem; color: var(--amber-500); font-weight: 600;">落地: &lt;llamacpp_models_dir&gt;/&lt;A&gt;/</span>
         </div>
-        <div id="gguf-conv-cmd-preview" class="code-preview-content" style="white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55;">python -m eval_vlm convert-gguf ...</div>
+        <div id="gguf-conv-cmd-preview" class="code-preview-content" style="white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55; color: var(--cyan-500);">python -m eval_vlm convert-gguf ...</div>
       </div>
     </div>
 
-    <div class="modal-footer" style="margin-top: 1.25rem;">
+    <!-- 固定底部操作栏 -->
+    <div class="modal-footer">
       <button class="btn" onclick="closeGGUFConvertModal()">取消</button>
-      <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b; padding: 0.55rem 1.5rem;" onclick="submitGGUFConvertTask()">🚀 开始执行转换</button>
+      <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #f59e0b; padding: 0.55rem 1.6rem; font-weight: 600;" onclick="submitGGUFConvertTask()">🚀 开始执行转换</button>
     </div>
   </dialog>
 

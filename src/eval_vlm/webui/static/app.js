@@ -3071,6 +3071,9 @@ function renderFieldMetrics() {
       const total = data.total ?? 0;
       const acc = data.accuracy !== undefined ? data.accuracy : (total ? correct / total : 0);
       const accPct = (acc * 100).toFixed(1);
+      const emptyCount = data.empty_count ?? 0;
+      const nonEmptyCount = data.non_empty_count ?? total;
+      const overallAcc = data.overall_accuracy !== undefined ? (data.overall_accuracy * 100).toFixed(1) : accPct;
       let barColor = "var(--emerald-500)";
       if (acc < 0.7) barColor = "var(--rose-500)";
       else if (acc < 0.9) barColor = "var(--amber-500)";
@@ -3079,14 +3082,20 @@ function renderFieldMetrics() {
       <div class="field-metric-card">
         <div class="field-metric-header">
           <span class="field-name-title">${escapeHtml(f)}</span>
-          <span class="field-acc-pct" style="color: ${barColor};">${accPct}%</span>
+          <span class="field-acc-pct" style="color: ${barColor};" title="非空准确率">${accPct}%</span>
         </div>
         <div class="field-progress-track">
           <div class="field-progress-bar" style="width: ${accPct}%; background: ${barColor};"></div>
         </div>
-        <div class="field-metric-footer">
-          <span>正确: <strong>${correct}</strong> / ${total}</span>
-          <span>失配: <strong>${total - correct}</strong></span>
+        <div class="field-metric-footer" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span>非空: <strong>${correct}</strong> / ${nonEmptyCount}</span>
+            <span>空样本: <strong>${emptyCount}</strong></span>
+          </div>
+          <div style="display: flex; justify-content: space-between; color: var(--text-dim, #64748b);">
+            <span>总体准确率: <strong>${overallAcc}%</strong></span>
+            <span>非空失配: <strong>${nonEmptyCount - correct}</strong></span>
+          </div>
         </div>
       </div>
     `;

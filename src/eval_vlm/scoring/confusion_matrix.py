@@ -260,7 +260,7 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
         '.cm-pill-btn:hover { color: #0f172a; background: #e2e8f0; }',
         '.cm-pill-btn.active { background: var(--primary, #6366f1); color: #ffffff; box-shadow: 0 2px 8px rgba(99,102,241,0.35); }',
         '.cm-colorbar-wrap { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted, #94a3b8); margin-left: auto; }',
-        '.cm-cb-gradient { width: 95px; height: 12px; border-radius: 3px; background: linear-gradient(to right, rgba(255,255,255,0.04) 0%, hsl(225, 80%, 25%) 25%, hsl(225, 80%, 40%) 70%, hsl(225, 80%, 55%) 100%); border: 1px solid var(--border-subtle, rgba(255,255,255,0.12)); }',
+        '.cm-cb-gradient { width: 95px; height: 12px; border-radius: 3px; background: linear-gradient(to right, #f8fafc 0%, hsl(225, 80%, 88%) 20%, hsl(225, 80%, 65%) 55%, hsl(225, 85%, 40%) 100%); border: 1px solid #cbd5e1; }',
         '.cm-layout { display: flex; flex-direction: column; gap: 20px; }',
         '.cm-matrix-container { width: 100%; }',
         '.cm-axis-top { text-align: center; font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px; color: var(--text-secondary, #334155); margin-bottom: 8px; }',
@@ -341,14 +341,14 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
             norm_pct = (val / row_sum) if row_sum > 0 else 0.0
             norm_cnt = (val / max_val) if max_val > 0 else 0.0
 
-            # 默认行归一化色彩（在固定浅色报告上保持足够对比度）
+            # 色彩映射: 由浅到深(0% 为浅底, 100% 为浓郁深蓝)
             if val == 0:
-                bg = "rgba(255, 255, 255, 0.02)"
-                fg = "var(--text-dim, #64748b)"
+                bg = "#f8fafc"
+                fg = "var(--text-dim, #94a3b8)"
             else:
-                lightness = round(22 + norm_pct * 30)
+                lightness = round(93 - norm_pct * 55)
                 bg = f"hsl(225, 80%, {lightness}%)"
-                fg = "#ffffff" if lightness > 35 else "#cbd5e1"
+                fg = "#0f172a" if lightness > 62 else "#ffffff"
 
             cell_cls = "cm-diag" if is_diag else ("cm-zero" if val == 0 else "cm-cell")
             pred_name = classes[j]
@@ -447,14 +447,14 @@ def format_confusion_matrix_html(cm_data: dict, title: str = "混淆矩阵 (Conf
         sec.querySelectorAll('.cm-cell, .cm-diag, .cm-zero').forEach(function(cell) {
           var val = parseFloat(cell.getAttribute('data-val') || 0);
           if (val === 0) {
-            cell.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
-            cell.style.color = 'var(--text-dim, #64748b)';
+            cell.style.backgroundColor = '#f8fafc';
+            cell.style.color = 'var(--text-dim, #94a3b8)';
             return;
           }
           var norm = parseFloat(cell.getAttribute(heat === 'count' ? 'data-norm-cnt' : 'data-norm-pct') || 0);
-          var lightness = Math.round(22 + norm * 30);
+          var lightness = Math.round(93 - norm * 55);
           cell.style.backgroundColor = 'hsl(225, 80%, ' + lightness + '%)';
-          cell.style.color = (lightness > 35) ? '#ffffff' : '#cbd5e1';
+          cell.style.color = (lightness > 62) ? '#0f172a' : '#ffffff';
         });
       });
     });

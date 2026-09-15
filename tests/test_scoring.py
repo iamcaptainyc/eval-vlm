@@ -298,6 +298,9 @@ def test_confusion_matrix_formatters():
     assert '<table class="cm-table">' in html_str
     assert 'class="cm-diag"' in html_str
     assert '<table class="cm-report-table">' in html_str
+    # 验证由浅到深颜色映射
+    assert "linear-gradient(to right, #f8fafc" in html_str
+    assert "93 - norm" in html_str
 
 
 def test_exact_match_scorer_generates_confusion_matrix():
