@@ -3686,13 +3686,10 @@ function applyTheme(theme) {
   } else {
     document.documentElement.removeAttribute("data-theme");
   }
-  // 切换主题时，若当前正处于 Sweep 混淆矩阵看板，即时以新主题对比度重新渲染
+  // 切换主题时，若当前正处于 Sweep 详情看板，即时以新主题对比度重新渲染（支持 field-eval 与 eval）
   try {
-    if (state.sweepResults && state.sweepResults.data && state.sweepResults.activeHeatmapField) {
-      const cms = state.sweepResults.data.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
-      if (cms[state.sweepResults.activeHeatmapField]) {
-        renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
-      }
+    if (state.sweepResults && state.sweepResults.data && state.sweepResults.selectedDatasetName) {
+      renderSweepSelectedDatasetDetail();
     }
   } catch (e) {
     console.warn("Theme switch heatmap refresh skipped:", e);
@@ -4066,6 +4063,7 @@ function getSweepResultOverallAccuracy(result) {
     overall.overall_accuracy,
     overall.accuracy,
     metrics.overall_accuracy,
+    metrics.overall_mean_score,
   ].find((candidate) => typeof candidate === "number");
   return value === undefined ? null : value;
 }
@@ -4078,6 +4076,7 @@ function getSweepResultNonEmptyAccuracy(result) {
     overall.macro_accuracy,
     overall.non_empty_accuracy,
     metrics.non_empty_accuracy,
+    result?.method === "eval" ? metrics.overall_mean_score : undefined,
   ].find((candidate) => typeof candidate === "number");
   return value === undefined ? null : value;
 }
@@ -4597,59 +4596,42 @@ function getHeatmapCellProps(val, ratio, isDiag, mode = "sequential") {
 }
 function toggleCmColormap(mode) {
   state.sweepResults.cmColormap = mode;
-  const cms = state.sweepResults.data?.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
-  if (state.sweepResults.activeHeatmapField && cms[state.sweepResults.activeHeatmapField]) {
-    renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
+  const current = state.sweepResults.data?.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName);
+  if (!current) return;
+  if (current.method === "field-eval") {
+    const cms = current.metrics?.confusion_matrices || {};
+    if (state.sweepResults.activeHeatmapField && cms[state.sweepResults.activeHeatmapField]) {
+      renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
+    }
+  } else {
+    renderSweepEvalDetail(current);
   }
 }
 
-function renderConfusionMatrixHeatmap(cm, fieldName) {
-  const activeFieldTitle = document.getElementById("sr-cm-active-field-name");
-  const tableContainer = document.getElementById("sr-cm-table-container");
-  const perclassContainer = document.getElementById("sr-cm-perclass-container");
-  const macroBadge = document.getElementById("sr-cm-macro-avg-badge");
-  const legendContainer = document.getElementById("sr-cm-legend-container");
+function buildCmLendAndPickerHtml() {
+  const isDivergent = state.sweepResults.cmColormap === "divergent";
+  return `
+    <div class="sr-cm-gradient-legend">
+      <span class="scale-lbl">行占比深浅色阶:</span>
+      <span class="scale-val">0% (浅)</span>
+      <div class="sr-cm-gradient-bar ${isDivergent ? 'divergent' : 'sequential'}"></div>
+      <span class="scale-val">100% (深)</span>
+    </div>
+    <div class="sr-cm-colormap-picker">
+      <button type="button" class="sr-cm-mode-btn ${!isDivergent ? 'active' : ''}" onclick="toggleCmColormap('sequential')">
+        单色深浅
+      </button>
+      <button type="button" class="sr-cm-mode-btn ${isDivergent ? 'active' : ''}" onclick="toggleCmColormap('divergent')">
+        命中/误差双色
+      </button>
+    </div>
+  `;
+}
 
-  if (activeFieldTitle) {
-    const acc = typeof cm.accuracy === "number" ? `(总体准确率 overall_accuracy: ${(cm.accuracy * 100).toFixed(2)}%)` : "";
-    activeFieldTitle.innerHTML = `${escapeHtml(fieldName)} <small style="font-size: 0.78rem; font-weight: normal; color: var(--emerald-500); margin-left: 0.5rem;">${acc}</small>`;
-  }
-
-  if (macroBadge) {
-    const macro = cm.macro_avg || {};
-    const f1 = typeof macro.f1 === "number" ? macro.f1.toFixed(3) : "—";
-    const prec = typeof macro.precision === "number" ? macro.precision.toFixed(3) : "—";
-    const recall = typeof macro.recall === "number" ? macro.recall.toFixed(3) : "—";
-    macroBadge.textContent = `宏平均 F1: ${f1} (Prec: ${prec}, Rec: ${recall})`;
-  }
-
+function buildConfusionMatrixTableHtml(cm) {
   const predClasses = cm.classes || [];
   const refClasses = cm.ref_classes || predClasses;
   const matrix = cm.matrix || [];
-
-  let maxVal = 1;
-  matrix.forEach(row => row.forEach(val => { if (val > maxVal) maxVal = val; }));
-
-  // 更新动态热力图渐变图例
-  if (legendContainer) {
-    const isDivergent = state.sweepResults.cmColormap === "divergent";
-    legendContainer.innerHTML = `
-      <div class="sr-cm-gradient-legend">
-        <span class="scale-lbl">行占比深浅色阶:</span>
-        <span class="scale-val">0% (浅)</span>
-        <div class="sr-cm-gradient-bar ${isDivergent ? 'divergent' : 'sequential'}"></div>
-        <span class="scale-val">100% (深)</span>
-      </div>
-      <div class="sr-cm-colormap-picker">
-        <button type="button" class="sr-cm-mode-btn ${!isDivergent ? 'active' : ''}" onclick="toggleCmColormap('sequential')">
-          单色深浅
-        </button>
-        <button type="button" class="sr-cm-mode-btn ${isDivergent ? 'active' : ''}" onclick="toggleCmColormap('divergent')">
-          命中/误差双色
-        </button>
-      </div>
-    `;
-  }
 
   let html = `
     <table class="confusion-matrix-table">
@@ -4693,9 +4675,10 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
     html += `</tr>`;
   });
   html += `</tbody></table>`;
-  if (tableContainer) tableContainer.innerHTML = html;
+  return html;
+}
 
-  const perClass = cm.per_class || {};
+function buildPerClassTableHtml(perClass) {
   let pcHtml = `
     <table class="sr-perclass-table">
       <thead>
@@ -4710,12 +4693,12 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
       <tbody>
   `;
 
-  const pcKeys = Object.keys(perClass);
+  const pcKeys = Object.keys(perClass || {});
   if (!pcKeys.length) {
     pcHtml += `<tr><td colspan="5" style="text-align: center; color: var(--text-dim);">无逐类指标数据</td></tr>`;
   } else {
     pcKeys.forEach(k => {
-      const item = perClass[k];
+      const item = perClass[k] || {};
       const p = typeof item.precision === "number" ? (item.precision * 100).toFixed(1) + "%" : "—";
       const r = typeof item.recall === "number" ? (item.recall * 100).toFixed(1) + "%" : "—";
       const f1 = typeof item.f1 === "number" ? item.f1.toFixed(3) : "—";
@@ -4734,7 +4717,40 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
   }
 
   pcHtml += `</tbody></table>`;
-  if (perclassContainer) perclassContainer.innerHTML = pcHtml;
+  return pcHtml;
+}
+
+function renderConfusionMatrixHeatmap(cm, fieldName) {
+  const activeFieldTitle = document.getElementById("sr-cm-active-field-name");
+  const tableContainer = document.getElementById("sr-cm-table-container");
+  const perclassContainer = document.getElementById("sr-cm-perclass-container");
+  const macroBadge = document.getElementById("sr-cm-macro-avg-badge");
+  const legendContainer = document.getElementById("sr-cm-legend-container");
+
+  if (activeFieldTitle) {
+    const acc = typeof cm.accuracy === "number" ? `(总体准确率 overall_accuracy: ${(cm.accuracy * 100).toFixed(2)}%)` : "";
+    activeFieldTitle.innerHTML = `${escapeHtml(fieldName)} <small style="font-size: 0.78rem; font-weight: normal; color: var(--emerald-500); margin-left: 0.5rem;">${acc}</small>`;
+  }
+
+  if (macroBadge) {
+    const macro = cm.macro_avg || {};
+    const f1 = typeof macro.f1 === "number" ? macro.f1.toFixed(3) : "—";
+    const prec = typeof macro.precision === "number" ? macro.precision.toFixed(3) : "—";
+    const recall = typeof macro.recall === "number" ? macro.recall.toFixed(3) : "—";
+    macroBadge.textContent = `宏平均 F1: ${f1} (Prec: ${prec}, Rec: ${recall})`;
+  }
+
+  if (legendContainer) {
+    legendContainer.innerHTML = buildCmLendAndPickerHtml();
+  }
+
+  if (tableContainer) {
+    tableContainer.innerHTML = buildConfusionMatrixTableHtml(cm);
+  }
+
+  if (perclassContainer) {
+    perclassContainer.innerHTML = buildPerClassTableHtml(cm.per_class || {});
+  }
 }
 
 function renderPerValueBreakdown(perValue) {
@@ -4792,14 +4808,19 @@ function renderSweepEvalDetail(result) {
   const overallPills = document.getElementById("sr-eval-overall-pills");
   if (overallPills) {
     const meanScore = typeof m.overall_mean_score === "number" ? m.overall_mean_score : 0;
+    const overallAcc = getSweepResultOverallAccuracy(result);
     overallPills.innerHTML = `
       <div class="sr-metric-pill">
+        <div class="title">总体准确率 (Overall Accuracy)</div>
+        <div class="val" style="color: var(--emerald-500);">${overallAcc !== null ? (overallAcc * 100).toFixed(2) + '%' : (meanScore * 100).toFixed(2) + '%'}</div>
+      </div>
+      <div class="sr-metric-pill">
         <div class="title">综合平均得分 (Overall Mean)</div>
-        <div class="val" style="color: var(--emerald-500);">${(meanScore * 100).toFixed(2)}%</div>
+        <div class="val" style="color: var(--cyan-500);">${(meanScore * 100).toFixed(2)}%</div>
       </div>
       <div class="sr-metric-pill">
         <div class="title">已评测样本数 (Samples)</div>
-        <div class="val" style="color: var(--cyan-500);">${m.num_samples || 0}</div>
+        <div class="val" style="color: var(--text-main);">${m.num_samples || 0}</div>
       </div>
       <div class="sr-metric-pill">
         <div class="title">评测目标总轮次 (Targets)</div>
@@ -4841,50 +4862,43 @@ function renderSweepEvalDetail(result) {
         let cmHtml = "";
         if (t.confusion_matrix) {
           const cm = t.confusion_matrix;
-          const predClasses = cm.classes || [];
-          const refClasses = cm.ref_classes || predClasses;
-          const matrix = cm.matrix || [];
-          let maxVal = 1;
-          matrix.forEach(row => row.forEach(val => { if (val > maxVal) maxVal = val; }));
+          const macro = cm.macro_avg || {};
+          const f1 = typeof macro.f1 === "number" ? macro.f1.toFixed(3) : "—";
+          const prec = typeof macro.precision === "number" ? macro.precision.toFixed(3) : "—";
+          const recall = typeof macro.recall === "number" ? macro.recall.toFixed(3) : "—";
+          const macroBadgeText = `Macro F1: ${f1} (Prec: ${prec}, Rec: ${recall})`;
+
+          const accVal = typeof cm.accuracy === "number" ? cm.accuracy : (typeof t.accuracy === "number" ? t.accuracy : null);
+          const accHtml = accVal !== null 
+            ? `<small style="font-size: 0.78rem; font-weight: normal; color: var(--emerald-500); margin-left: 0.4rem;">(总体准确率 overall_accuracy: ${(accVal * 100).toFixed(2)}%)</small>` 
+            : "";
 
           cmHtml = `
-            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);">
-              <div style="font-weight: 600; font-size: 0.84rem; color: var(--text-main); margin-bottom: 0.5rem;">🔥 第 ${idx + 1} 轮分类混淆矩阵</div>
-              <div style="overflow-x: auto; max-height: 350px;">
-                <table class="confusion-matrix-table">
-                  <thead>
-                    <tr>
-                      <th class="cm-corner">真实＼预测</th>
-                      ${predClasses.map(c => `<th>${escapeHtml(c)}</th>`).join("")}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${refClasses.map((rc, rIdx) => {
-                      const row = matrix[rIdx] || [];
-                      const rowTotal = row.reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
-                      return `
-                      <tr>
-                        <td class="cm-row-label">${escapeHtml(rc)} <small style="color: var(--text-dim); font-weight: normal; font-size: 0.7rem;">(${rowTotal})</small></td>
-                        ${predClasses.map((pc, cIdx) => {
-                          const val = row[cIdx] || 0;
-                          const isDiag = (rc === pc);
-                          const ratio = rowTotal > 0 ? (val / rowTotal) : 0;
-                          const ratioPct = (ratio * 100).toFixed(1) + "%";
-
-                          const styleObj = getHeatmapCellProps(val, ratio, isDiag, state.sweepResults.cmColormap);
-                          const cStyle = `background: ${styleObj.bg}; border: ${styleObj.border}; color: ${styleObj.text}; font-weight: ${styleObj.fontWeight}; text-shadow: ${styleObj.textShadow};`;
-                          const typeLabel = isDiag ? "【对角命中】" : "【误差失配】";
-                          const tooltip = `${typeLabel}\n真实: ${escapeHtml(rc)} (行总数: ${rowTotal})\n预测: ${escapeHtml(pc)}\n样本: ${val}\n行占比: ${ratioPct}`;
-                          const cellContent = val === 0
-                            ? `<span>0</span>`
-                            : `<div class="cm-cell-val">${val}</div><div class="cm-cell-pct">${ratioPct}</div>`;
-                          return `<td class="cm-cell ${styleObj.textClass || ''} ${styleObj.isZero ? 'cm-zero' : ''} ${isDiag ? 'cm-diag-marker' : ''}" style="${cStyle}" title="${tooltip}">${cellContent}</td>`;
-                        }).join("")}
-                      </tr>
-                    `;
-                    }).join("")}
-                  </tbody>
-                </table>
+            <div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+              <div class="sr-cm-header">
+                <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                  <span>🔥 第 ${idx + 1} 轮分类混淆矩阵 (${escapeHtml(tk)})</span>
+                  ${accHtml}
+                </div>
+                <div class="sr-cm-legend">
+                  ${buildCmLendAndPickerHtml()}
+                </div>
+              </div>
+              <div class="sr-cm-workspace-grid">
+                <div class="sr-cm-heatmap-container">
+                  <div class="sr-cm-table-scroll">
+                    ${buildConfusionMatrixTableHtml(cm)}
+                  </div>
+                </div>
+                <div class="sr-cm-metrics-container">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-main);">逐类别精确率 / 召回率 / F1 矩阵</div>
+                    <div class="role-badge" style="background: rgba(16,185,129,0.15); color: var(--emerald-500);">${macroBadgeText}</div>
+                  </div>
+                  <div class="sr-cm-perclass-scroll">
+                    ${buildPerClassTableHtml(cm.per_class || {})}
+                  </div>
+                </div>
               </div>
             </div>
           `;

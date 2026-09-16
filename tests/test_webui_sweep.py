@@ -137,3 +137,15 @@ def test_sweep_frontend_overall_accuracy_and_heatmap_colormap():
     assert "val / rowTotal" in source
     assert "cm-cell-pct" in source
 
+    # Validate unified confusion matrix helpers and eval detail rendering
+    assert "buildConfusionMatrixTableHtml" in source
+    assert "buildPerClassTableHtml" in source
+    assert "buildCmLendAndPickerHtml" in source
+    eval_detail = source.split("function renderSweepEvalDetail", 1)[1].split("function openSweepRawJsonModal", 1)[0]
+    assert "buildConfusionMatrixTableHtml(cm)" in eval_detail
+    assert "buildPerClassTableHtml(cm.per_class" in eval_detail
+    assert "buildCmLendAndPickerHtml()" in eval_detail
+    assert "总体准确率 overall_accuracy:" in eval_detail
+    assert "renderSweepEvalDetail(current)" in source
+    assert "renderSweepSelectedDatasetDetail()" in source
+
