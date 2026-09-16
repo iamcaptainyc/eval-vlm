@@ -4302,3 +4302,159 @@ table.ui-table tr:hover {
 [data-theme="light"] .sr-field-card-title {
   color: #0f172a !important;
 }
+
+/* 13.1 跨数据集总览表子指标与字段卡片指标强化 */
+.sr-overview-submetrics {
+  display: flex;
+  gap: 0.65rem;
+  font-size: 0.72rem;
+  margin-top: 0.25rem;
+  align-items: center;
+}
+
+.sr-field-header-scores {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.sr-field-primary-score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.sr-field-primary-score .val {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sr-field-primary-score .lbl {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.sr-field-metrics-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 0.76rem;
+}
+
+[data-theme="light"] .sr-field-metrics-breakdown {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.sr-fmb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sr-fmb-row .fmb-name {
+  color: var(--text-muted);
+}
+
+.sr-fmb-row .fmb-val {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+.sr-fmb-row .fmb-val small {
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  margin-left: 0.25rem;
+}
+
+.sr-fmb-empty {
+  font-size: 0.72rem;
+}
+
+/* 13.2 混淆矩阵热力图根据数值由浅到深梯度配色与图例 */
+.sr-cm-gradient-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.sr-cm-gradient-legend .scale-lbl {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sr-cm-gradient-legend .scale-val {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.sr-cm-gradient-bar {
+  width: 90px;
+  height: 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.sr-cm-gradient-bar.sequential {
+  background: linear-gradient(to right, hsla(226, 70%, 75%, 0.25), hsla(226, 95%, 32%, 0.95));
+}
+
+.sr-cm-gradient-bar.divergent {
+  background: linear-gradient(to right, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.95));
+}
+
+.sr-cm-colormap-picker {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.sr-cm-mode-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sr-cm-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.sr-cm-mode-btn.active {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: var(--primary-color, #6366f1);
+  color: #fff;
+  font-weight: 600;
+}
+
+[data-theme="light"] .sr-cm-mode-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .sr-cm-mode-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: #4f46e5;
+}
+
+.cm-cell.cm-diag-marker {
+  outline: 1.5px dashed rgba(255, 255, 255, 0.35);
+  outline-offset: -2px;
+}
+
+[data-theme="light"] .cm-cell.cm-diag-marker {
+  outline-color: rgba(0, 0, 0, 0.25);
+}

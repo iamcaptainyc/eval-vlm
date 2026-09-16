@@ -123,3 +123,16 @@ def test_sweep_frontend_scan_always_leaves_loading_state():
     assert "finally" in scan
     clear_state = source.split("function clearSweepResultsState", 1)[1].split("function showSweepEmptyState", 1)[0]
     assert "selectionRequestId++" in clear_state
+
+
+def test_sweep_frontend_overall_accuracy_and_heatmap_colormap():
+    source = (Path(__file__).parents[1] / "src" / "eval_vlm" / "webui" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "overall.micro_overall_accuracy" in source
+    assert "getSweepResultNonEmptyAccuracy" in source
+    assert "总体准确率 (overall_acc):" in source
+    assert "非空准确率 (non_empty_acc):" in source
+    assert "getHeatmapCellProps" in source
+    assert "Math.pow(norm, 0.65)" in source
+    assert "toggleCmColormap" in source
+    assert "sr-cm-gradient-bar" in source
+

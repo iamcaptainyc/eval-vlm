@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260916sweep">
+  <link rel="stylesheet" href="styles.css?v=20260916sweep2">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260916sweep" defer></script>
+  <script src="app.js?v=20260916sweep2" defer></script>
 </head>
 <body>
 
@@ -501,10 +501,7 @@
                     <div style="font-size: 0.86rem; font-weight: 600; color: #fff;">
                       混淆矩阵：<span id="sr-cm-active-field-name" style="color: var(--cyan-500);">主辅路</span>
                     </div>
-                    <div class="sr-cm-legend">
-                      <span class="sr-cm-legend-item"><span class="sr-cm-legend-swatch" style="background: rgba(16, 185, 129, 0.45); border: 1px solid var(--emerald-500);"></span>对角预测命中</span>
-                      <span class="sr-cm-legend-item"><span class="sr-cm-legend-swatch" style="background: rgba(244, 63, 94, 0.35); border: 1px solid var(--rose-500);"></span>偏离预测失配</span>
-                    </div>
+                    <div id="sr-cm-legend-container" class="sr-cm-legend"></div>
                   </div>
                   <div class="sr-cm-table-scroll" id="sr-cm-table-container"></div>
                 </div>

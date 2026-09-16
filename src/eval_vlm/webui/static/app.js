@@ -72,6 +72,7 @@ const state = {
     filterSearch: "",
     filterStatus: "all",
     sortBy: "default",
+    cmColormap: "sequential", // "sequential" | "divergent"
     subView: "cm", // "cm" | "pv"
   },
 
@@ -4049,9 +4050,23 @@ function getSweepResultOverallAccuracy(result) {
   const metrics = result?.metrics || {};
   const overall = metrics.overall || {};
   const value = [
-    metrics.overall_accuracy,
+    overall.micro_overall_accuracy,
+    overall.macro_overall_accuracy,
     overall.overall_accuracy,
     overall.accuracy,
+    metrics.overall_accuracy,
+  ].find((candidate) => typeof candidate === "number");
+  return value === undefined ? null : value;
+}
+
+function getSweepResultNonEmptyAccuracy(result) {
+  const metrics = result?.metrics || {};
+  const overall = metrics.overall || {};
+  const value = [
+    overall.micro_accuracy,
+    overall.macro_accuracy,
+    overall.non_empty_accuracy,
+    metrics.non_empty_accuracy,
   ].find((candidate) => typeof candidate === "number");
   return value === undefined ? null : value;
 }
@@ -4101,6 +4116,9 @@ function renderSweepOverviewTable(data) {
     const scorePct = (score * 100).toFixed(1) + "%";
     const overallAccuracy = getSweepResultOverallAccuracy(r);
     const overallAccuracyText = overallAccuracy === null ? "—" : `${(overallAccuracy * 100).toFixed(1)}%`;
+    const nonEmptyAcc = getSweepResultNonEmptyAccuracy(r);
+    const nonEmptyAccText = nonEmptyAcc === null ? "—" : `${(nonEmptyAcc * 100).toFixed(1)}%`;
+
     let barColor = "var(--emerald-500)";
     if (score < 0.5) barColor = "var(--rose-500)";
     else if (score < 0.8) barColor = "var(--amber-500)";
@@ -4126,7 +4144,7 @@ function renderSweepOverviewTable(data) {
       <tr class="${isSelected ? 'selected' : ''}" onclick="selectSweepDataset('${escapeHtml(r.dataset)}')">
         <td style="text-align: center; color: var(--text-dim); font-size: 0.75rem;">${idx + 1}</td>
         <td>
-          <strong style="color: #000; font-size: 0.86rem;">${escapeHtml(r.dataset)}</strong>
+          <strong style="color: var(--text-main); font-size: 0.86rem;">${escapeHtml(r.dataset)}</strong>
         </td>
         <td>
           <span class="role-badge" style="${isFieldEval ? 'background: rgba(99,102,241,0.2); color: #a5b4fc;' : 'background: rgba(6,182,212,0.2); color: var(--cyan-500);'}">
@@ -4135,11 +4153,18 @@ function renderSweepOverviewTable(data) {
         </td>
         <td style="text-align: right; font-family: var(--font-mono);">${samples}</td>
         <td>
-          <div class="sr-progress-bar-wrap" title="准确率/综合得分: ${scorePct}">
+          <div class="sr-progress-bar-wrap" title="总体准确率: ${overallAccuracyText} | 非空准确率: ${nonEmptyAccText}">
             <div class="sr-progress-bar-fill" style="width: ${score * 100}%; background: ${barColor};"></div>
             <span class="sr-progress-bar-text">${scorePct}</span>
           </div>
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">总体准确率 overall_accuracy: ${overallAccuracyText}</div>
+          ${isFieldEval ? `
+          <div class="sr-overview-submetrics">
+            <span title="总体准确率 overall_accuracy (全样本)">总体: <strong style="color: var(--text-main);">${overallAccuracyText}</strong></span>
+            <span title="非空准确率 non_empty_accuracy (非空样本)">非空: <strong style="color: var(--text-muted);">${nonEmptyAccText}</strong></span>
+          </div>` : `
+          <div class="sr-overview-submetrics">
+            <span>综合得分: <strong style="color: var(--text-main);">${scorePct}</strong></span>
+          </div>`}
         </td>
         <td style="text-align: right; font-family: var(--font-mono); font-weight: 600; color: ${emRate !== '—' ? 'var(--text-main)' : 'var(--text-dim)'};">${emRate}</td>
         <td style="font-size: 0.76rem; color: var(--text-muted);">${fieldsOrTurns}</td>
@@ -4286,33 +4311,37 @@ function renderSweepFieldEvalDetail(result) {
   if (overallPills) {
     const ov = m.overall || {};
     const overallAccuracy = getSweepResultOverallAccuracy(result);
-    const microAcc = ov.micro_accuracy ?? 0;
+    const macroOverallAcc = ov.macro_overall_accuracy ?? overallAccuracy;
+    const microAcc = ov.micro_accuracy ?? null;
     const macroAcc = ov.macro_accuracy ?? microAcc;
     const emRate = ov.exact_match_rate ?? 0;
     const strictEmRate = ov.strict_exact_match_rate ?? 0;
 
     overallPills.innerHTML = `
       <div class="sr-metric-pill">
-        <div class="title">总体准确率 (overall_accuracy)</div>
+        <div class="title">总体准确率 (Overall Acc)</div>
         <div class="val" style="color: var(--emerald-500);">${overallAccuracy === null ? "—" : `${(overallAccuracy * 100).toFixed(2)}%`}</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">全样本 micro_overall_accuracy</div>
       </div>
       <div class="sr-metric-pill">
-        <div class="title">综合微准确率 (Micro Acc)</div>
-        <div class="val" style="color: var(--emerald-500);">${(microAcc * 100).toFixed(2)}%</div>
+        <div class="title">宏平均总体准确率 (Macro Overall)</div>
+        <div class="val" style="color: #67e8f9;">${macroOverallAcc === null ? "—" : `${(macroOverallAcc * 100).toFixed(2)}%`}</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">各类别宏平均 overall_accuracy</div>
       </div>
       <div class="sr-metric-pill">
-        <div class="title">宏平均准确率 (Macro Acc)</div>
-        <div class="val" style="color: #a5b4fc;">${(macroAcc * 100).toFixed(2)}%</div>
+        <div class="title">非空微准确率 (Micro Non-Empty)</div>
+        <div class="val" style="color: #a5b4fc;">${microAcc === null ? "—" : `${(microAcc * 100).toFixed(2)}%`}</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">仅统计非空真实样本</div>
       </div>
       <div class="sr-metric-pill">
         <div class="title">完全一致率 (Exact Match)</div>
         <div class="val" style="color: var(--cyan-500);">${(emRate * 100).toFixed(2)}%</div>
-        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.exact_match_samples || 0} 样本完全命中</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.exact_match_samples || 0} 样本各字段全部命中</div>
       </div>
       <div class="sr-metric-pill">
         <div class="title">严格一致率 (Strict EM)</div>
         <div class="val" style="color: var(--amber-500);">${(strictEmRate * 100).toFixed(2)}%</div>
-        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.strict_exact_match_samples || 0} 样本</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.strict_exact_match_samples || 0} 样本严格一致</div>
       </div>
       <div class="sr-metric-pill">
         <div class="title">已评测样本总数</div>
@@ -4322,37 +4351,64 @@ function renderSweepFieldEvalDetail(result) {
     `;
   }
 
-  // 3. 逐字段卡片网格
+  // 3. 逐类别/字段卡片网格: 重点同时展示各类别 overall_accuracy 与 non_empty_accuracy
   const perFieldGrid = document.getElementById("sr-per-field-grid");
   if (perFieldGrid) {
     const perField = m.per_field || {};
     const fieldNames = Object.keys(perField);
     perFieldGrid.innerHTML = fieldNames.map(fName => {
       const f = perField[fName];
-      const acc = f.accuracy ?? f.overall_accuracy ?? 0;
-      const accPct = (acc * 100).toFixed(2) + "%";
+      const overallAcc = typeof f.overall_accuracy === "number" ? f.overall_accuracy : (f.accuracy ?? 0);
+      const overallAccPct = (overallAcc * 100).toFixed(2) + "%";
+      const nonEmptyAcc = typeof f.non_empty_accuracy === "number" ? f.non_empty_accuracy : (f.accuracy ?? 0);
+      const nonEmptyAccPct = (nonEmptyAcc * 100).toFixed(2) + "%";
+      const emptyAcc = typeof f.empty_accuracy === "number" ? f.empty_accuracy : 0;
+      const emptyAccPct = (emptyAcc * 100).toFixed(2) + "%";
+
+      const overallCorrect = f.overall_correct ?? f.correct ?? 0;
+      const overallTotal = f.overall_total ?? f.total ?? 0;
+      const nonEmptyCorrect = f.non_empty_correct ?? f.correct ?? 0;
+      const nonEmptyTotal = f.non_empty_count ?? f.total ?? 0;
+      const emptyCount = f.empty_count ?? 0;
+      const emptyCorrect = f.empty_correct ?? 0;
+
       let barCol = "var(--emerald-500)";
-      if (acc < 0.5) barCol = "var(--rose-500)";
-      else if (acc < 0.8) barCol = "var(--amber-500)";
+      if (overallAcc < 0.5) barCol = "var(--rose-500)";
+      else if (overallAcc < 0.8) barCol = "var(--amber-500)";
 
       return `
         <div class="sr-field-card">
           <div class="sr-field-card-header">
             <span class="sr-field-card-title">${escapeHtml(fName)}</span>
-            <span style="font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; color: ${barCol};">${accPct}</span>
+            <div class="sr-field-header-scores">
+              <div class="sr-field-primary-score" title="总体准确率 overall_accuracy: ${overallAccPct} (${overallCorrect}/${overallTotal})">
+                <span class="val" style="color: ${barCol};">${overallAccPct}</span>
+                <span class="lbl">总体准确率</span>
+              </div>
+            </div>
           </div>
-          <div class="sr-progress-bar-wrap" style="height: 10px;">
-            <div class="sr-progress-bar-fill" style="width: ${acc * 100}%; background: ${barCol};"></div>
+
+          <!-- 总体准确率主进度条 -->
+          <div class="sr-progress-bar-wrap" style="height: 10px;" title="总体准确率: ${overallAccPct} (${overallCorrect}/${overallTotal})">
+            <div class="sr-progress-bar-fill" style="width: ${overallAcc * 100}%; background: ${barCol};"></div>
           </div>
-          <div class="sr-field-meta-line">
-            <span>支持样本: <strong>${f.correct ?? f.overall_correct ?? 0} / ${f.total ?? f.overall_total ?? 0}</strong></span>
-            <span>非空准确率: <strong>${((f.non_empty_accuracy ?? 0) * 100).toFixed(1)}%</strong></span>
+
+          <!-- 各类别的指标明细: 总体准确率、非空准确率、空值判定率 -->
+          <div class="sr-field-metrics-breakdown">
+            <div class="sr-fmb-row">
+              <span class="fmb-name">总体准确率 (overall_acc):</span>
+              <span class="fmb-val"><strong style="color: ${barCol};">${overallAccPct}</strong> <small>(${overallCorrect} / ${overallTotal})</small></span>
+            </div>
+            <div class="sr-fmb-row">
+              <span class="fmb-name">非空准确率 (non_empty_acc):</span>
+              <span class="fmb-val"><strong style="color: #a5b4fc;">${nonEmptyAccPct}</strong> <small>(${nonEmptyCorrect} / ${nonEmptyTotal})</small></span>
+            </div>
+            ${emptyCount > 0 ? `
+            <div class="sr-fmb-row sr-fmb-empty">
+              <span class="fmb-name">空值准确率 (empty_acc):</span>
+              <span class="fmb-val"><strong style="color: var(--amber-500);">${emptyAccPct}</strong> <small>(${emptyCorrect} / ${emptyCount})</small></span>
+            </div>` : ''}
           </div>
-          ${f.empty_count > 0 ? `
-          <div class="sr-field-meta-line" style="color: var(--amber-500); font-size: 0.72rem;">
-            <span>空值样本: ${f.empty_count} 个</span>
-            <span>空值判定命中率: ${((f.empty_accuracy ?? 0) * 100).toFixed(1)}%</span>
-          </div>` : ''}
         </div>
       `;
     }).join("");
@@ -4401,10 +4457,74 @@ function onSelectCmField(fieldName) {
   pills.forEach(p => p.classList.toggle("active", p.textContent.trim() === fieldName));
 }
 
-function getConfusionMatrixCellAlpha(value, maxValue, maxAlpha) {
-  const ratio = maxValue > 0 ? Math.min(1, Math.max(0, value / maxValue)) : 0;
-  const minAlpha = 0.08;
-  return minAlpha + ratio * (maxAlpha - minAlpha);
+function getHeatmapCellProps(val, maxVal, isDiag, mode = "sequential") {
+  if (val === 0) {
+    return {
+      bg: "rgba(255, 255, 255, 0.02)",
+      border: "1px solid rgba(255, 255, 255, 0.05)",
+      text: "var(--text-dim)",
+      fontWeight: "400",
+      textShadow: "none",
+      isZero: true,
+      isDiag: isDiag
+    };
+  }
+
+  const norm = maxVal > 0 ? Math.min(1, Math.max(0, val / maxVal)) : 0;
+  // 采用幂函数平滑曲线，确保极低数值(如1/561)能清晰看见微浅色，而大数值(数百)呈现饱满深色
+  const intensity = 0.12 + 0.88 * Math.pow(norm, 0.65);
+
+  if (mode === "divergent") {
+    // 命中(绿)与误差(红)双色阶模式: 均严格根据数值由浅到深
+    if (isDiag) {
+      const alpha = (0.15 + 0.82 * intensity).toFixed(2);
+      return {
+        bg: `rgba(16, 185, 129, ${alpha})`,
+        border: `1px solid rgba(16, 185, 129, ${(0.25 + intensity * 0.75).toFixed(2)})`,
+        text: intensity > 0.45 ? "#ffffff" : "#6ee7b7",
+        fontWeight: intensity > 0.45 ? "700" : "600",
+        textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+        isZero: false,
+        isDiag: true
+      };
+    } else {
+      const alpha = (0.15 + 0.82 * intensity).toFixed(2);
+      return {
+        bg: `rgba(244, 63, 94, ${alpha})`,
+        border: `1px solid rgba(244, 63, 94, ${(0.25 + intensity * 0.75).toFixed(2)})`,
+        text: intensity > 0.45 ? "#ffffff" : "#fca5a5",
+        fontWeight: intensity > 0.45 ? "700" : "600",
+        textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+        isZero: false,
+        isDiag: false
+      };
+    }
+  }
+
+  // 默认: 统一经典热力图单色阶 (根据数值由浅到深)
+  // 低数值 -> 极浅淡蓝紫; 高数值 -> 极深浓郁纯正深蓝/靛蓝
+  const lightness = Math.max(26, Math.round(76 - intensity * 46));
+  const saturation = Math.min(96, Math.round(68 + intensity * 28));
+  const alpha = (0.14 + 0.84 * intensity).toFixed(2);
+  const borderAlpha = (0.20 + intensity * 0.70).toFixed(2);
+
+  return {
+    bg: `hsla(226, ${saturation}%, ${lightness}%, ${alpha})`,
+    border: `1px solid hsla(226, 85%, 62%, ${borderAlpha})`,
+    text: intensity > 0.45 ? "#ffffff" : "#c7d2fe",
+    fontWeight: intensity > 0.45 ? "700" : "600",
+    textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+    isZero: false,
+    isDiag: isDiag
+  };
+}
+
+function toggleCmColormap(mode) {
+  state.sweepResults.cmColormap = mode;
+  const cms = state.sweepResults.data?.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
+  if (state.sweepResults.activeHeatmapField && cms[state.sweepResults.activeHeatmapField]) {
+    renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
+  }
 }
 
 function renderConfusionMatrixHeatmap(cm, fieldName) {
@@ -4412,8 +4532,12 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
   const tableContainer = document.getElementById("sr-cm-table-container");
   const perclassContainer = document.getElementById("sr-cm-perclass-container");
   const macroBadge = document.getElementById("sr-cm-macro-avg-badge");
+  const legendContainer = document.getElementById("sr-cm-legend-container");
 
-  if (activeFieldTitle) activeFieldTitle.textContent = fieldName;
+  if (activeFieldTitle) {
+    const acc = typeof cm.accuracy === "number" ? `(总体准确率 overall_accuracy: ${(cm.accuracy * 100).toFixed(2)}%)` : "";
+    activeFieldTitle.innerHTML = `${escapeHtml(fieldName)} <small style="font-size: 0.78rem; font-weight: normal; color: var(--emerald-500); margin-left: 0.5rem;">${acc}</small>`;
+  }
 
   if (macroBadge) {
     const macro = cm.macro_avg || {};
@@ -4429,6 +4553,27 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
 
   let maxVal = 1;
   matrix.forEach(row => row.forEach(val => { if (val > maxVal) maxVal = val; }));
+
+  // 更新动态热力图渐变图例
+  if (legendContainer) {
+    const isDivergent = state.sweepResults.cmColormap === "divergent";
+    legendContainer.innerHTML = `
+      <div class="sr-cm-gradient-legend">
+        <span class="scale-lbl">数值深浅色阶:</span>
+        <span class="scale-val">0 (浅)</span>
+        <div class="sr-cm-gradient-bar ${isDivergent ? 'divergent' : 'sequential'}"></div>
+        <span class="scale-val">${maxVal} (深)</span>
+      </div>
+      <div class="sr-cm-colormap-picker">
+        <button type="button" class="sr-cm-mode-btn ${!isDivergent ? 'active' : ''}" onclick="toggleCmColormap('sequential')">
+          单色深浅
+        </button>
+        <button type="button" class="sr-cm-mode-btn ${isDivergent ? 'active' : ''}" onclick="toggleCmColormap('divergent')">
+          命中/误差双色
+        </button>
+      </div>
+    `;
+  }
 
   let html = `
     <table class="confusion-matrix-table">
@@ -4449,22 +4594,15 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
       const val = row[colIdx] || 0;
       const isDiag = (refCls === predCls);
 
+      const styleObj = getHeatmapCellProps(val, maxVal, isDiag, state.sweepResults.cmColormap);
       let cellClass = "cm-cell";
-      let cellStyle = "";
+      if (styleObj.isZero) cellClass += " cm-zero";
+      if (isDiag) cellClass += " cm-diag-marker";
 
-      if (val === 0) {
-        cellClass += " cm-zero";
-      } else if (isDiag) {
-        cellClass += " cm-diag";
-        const alpha = getConfusionMatrixCellAlpha(val, maxVal, 0.85);
-        cellStyle = `background: rgba(16, 185, 129, ${alpha.toFixed(2)}); border: 1px solid var(--emerald-500);`;
-      } else {
-        cellClass += " cm-error";
-        const alpha = getConfusionMatrixCellAlpha(val, maxVal, 0.8);
-        cellStyle = `background: rgba(244, 63, 94, ${alpha.toFixed(2)}); border: 1px solid var(--rose-500);`;
-      }
+      const cellStyle = `background: ${styleObj.bg}; border: ${styleObj.border}; color: ${styleObj.text}; font-weight: ${styleObj.fontWeight}; text-shadow: ${styleObj.textShadow};`;
+      const typeLabel = isDiag ? "【对角命中·预测正确】" : "【误差失配·预测偏差】";
+      const tooltip = `${typeLabel}\n真实类别 (Ref): ${escapeHtml(refCls)}\n预测类别 (Pred): ${escapeHtml(predCls)}\n样本数量 (Count): ${val}`;
 
-      const tooltip = `真实: ${escapeHtml(refCls)}\n预测: ${escapeHtml(predCls)}\n样本数: ${val}`;
       html += `<td class="${cellClass}" style="${cellStyle}" title="${tooltip}">${val}</td>`;
     });
 
@@ -4796,7 +4934,8 @@ function exportSweepCsv() {
 }
 
 // 导出到全局 window 对象
-window.loadSweepResultsData = loadSweepResultsData;
+window.toggleCmColormap = toggleCmColormap;
+  window.loadSweepResultsData = loadSweepResultsData;
 window.loadSweepRunsList = loadSweepRunsList;
 window.onSweepRunSelect = onSweepRunSelect;
 window.openSweepRawJsonModal = openSweepRawJsonModal;
