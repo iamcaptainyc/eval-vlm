@@ -1,10 +1,28 @@
 import json
+import os
 from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
 from eval_vlm.webui.app import create_app
 from eval_vlm.webui.settings import Settings
+
+
+def write_summary(path: Path, *, model: str = "test_model", backend: str = "vllm_offline") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "datasets": ["ds1", "ds2"],
+        "results": [{
+            "dataset": "ds1",
+            "method": "field-eval",
+            "model": model,
+            "backend": backend,
+            "status": "ok",
+            "metrics": {"num_samples": 100, "overall": {"micro_accuracy": 0.95}},
+        }],
+        "num_ok": 1,
+        "num_error": 0,
+    }, ensure_ascii=False), encoding="utf-8")
 
 
 def test_api_sweep_runs_and_summary(tmp_path: Path):
@@ -14,25 +32,7 @@ def test_api_sweep_runs_and_summary(tmp_path: Path):
     sweep_dir = workspace / "_sweep" / "test_model" / "vllm_offline"
     sweep_dir.mkdir(parents=True)
 
-    summary_data = {
-        "datasets": ["ds1", "ds2"],
-        "results": [
-            {
-                "dataset": "ds1",
-                "method": "field-eval",
-                "model": "test_model",
-                "backend": "vllm_offline",
-                "status": "ok",
-                "metrics": {
-                    "num_samples": 100,
-                    "overall": {"micro_accuracy": 0.95, "exact_match_rate": 0.85},
-                },
-            }
-        ],
-        "num_ok": 1,
-        "num_error": 0,
-    }
-    (sweep_dir / "summary.json").write_text(json.dumps(summary_data, ensure_ascii=False), encoding="utf-8")
+    write_summary(sweep_dir / "summary.json")
 
     settings = Settings(workspace_dir=workspace)
     app = create_app(settings)
@@ -67,3 +67,59 @@ def test_api_sweep_runs_and_summary(tmp_path: Path):
     # 5. Test path traversal protection
     res_traversal = client.get("/api/sweep/summary?path=../../etc/passwd")
     assert res_traversal.status_code in (403, 404)
+
+
+def test_sweep_listing_is_limited_to_model_backend_summary_files(tmp_path: Path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    newest = workspace / "_sweep" / "model-new" / "backend-a" / "summary.json"
+    oldest = workspace / "_sweep" / "model-old" / "backend-b" / "summary.json"
+    write_summary(newest, model="different-name")
+    write_summary(oldest)
+    os.utime(oldest, (10, 10))
+    os.utime(newest, (20, 20))
+
+    # Neither a deep result nor a summary at the wrong level is a sweep run.
+    write_summary(workspace / "_sweep" / "model-new" / "backend-a" / "nested" / "summary.json")
+    write_summary(workspace / "_sweep" / "model-only" / "summary.json")
+
+    client = TestClient(create_app(Settings(workspace_dir=workspace)))
+    runs = client.get("/api/sweep/runs").json()
+
+    assert [run["path"] for run in runs] == [
+        "_sweep/model-new/backend-a/summary.json",
+        "_sweep/model-old/backend-b/summary.json",
+    ]
+    # Directory names are the browse categories, independent of summary content.
+    assert runs[0]["model"] == "model-new"
+    assert runs[0]["backend"] == "backend-a"
+
+
+def test_sweep_summary_rejects_noncanonical_or_outside_paths(tmp_path: Path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    valid = workspace / "_sweep" / "model" / "backend" / "summary.json"
+    write_summary(valid)
+    outside = tmp_path / "ws_evil" / "_sweep" / "model" / "backend" / "summary.json"
+    write_summary(outside)
+
+    client = TestClient(create_app(Settings(workspace_dir=workspace)))
+    assert client.get("/api/sweep/summary?path=_sweep/model/backend/summary.json").status_code == 200
+    assert client.get("/api/sweep/summary?path=_sweep/model/backend/not-summary.json").status_code == 404
+    assert client.get("/api/sweep/summary?path=_sweep/model/backend/nested/summary.json").status_code == 404
+    assert client.get("/api/sweep/summary?path=../ws_evil/_sweep/model/backend/summary.json").status_code == 403
+
+
+def test_sweep_frontend_scan_always_leaves_loading_state():
+    source = (Path(__file__).parents[1] / "src" / "eval_vlm" / "webui" / "static" / "app.js").read_text(encoding="utf-8")
+    scan = source.split("async function loadSweepRunsList", 1)[1].split("async function onSweepRunSelect", 1)[0]
+    assert "runsLoadPromise" in scan
+    assert "AbortController" in scan
+    assert "controller.abort(), 5000" in scan
+    assert "正在扫描工作区 _sweep/" in scan
+    assert "扫描失败" in scan
+    assert "clearSweepResultsState()" in scan
+    assert "forceRefresh || !activeExists || !state.sweepResults.data" in scan
+    assert "finally" in scan
+    clear_state = source.split("function clearSweepResultsState", 1)[1].split("function showSweepEmptyState", 1)[0]
+    assert "selectionRequestId++" in clear_state

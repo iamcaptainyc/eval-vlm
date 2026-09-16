@@ -292,20 +292,14 @@
         </div>
         <div class="control-bar-right" style="flex-wrap: wrap; gap: 0.5rem;">
           <div style="display: flex; align-items: center; gap: 0.4rem;">
-            <span style="font-size: 0.8rem; color: var(--text-muted);">本地记录:</span>
-            <select id="sr-run-select" class="select" style="min-width: 230px; font-size: 0.8rem;" onchange="onSweepRunSelect(this.value)">
-              <option value="">(探测本地 _sweep/ 运行记录...)</option>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">自动探测 _sweep:</span>
+            <select id="sr-run-select" class="select" style="min-width: 320px; font-size: 0.8rem;" onchange="onSweepRunSelect(this.value)">
+              <option value="">(正在自动扫描工作区 _sweep/ ...)</option>
             </select>
           </div>
-          <button class="btn btn-sm" onclick="loadSweepRunsList(true)" title="重新扫描工作区 _sweep 目录">
+          <button class="btn btn-sm btn-primary" onclick="loadSweepRunsList(true)" title="重新扫描工作区 _sweep 目录">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-            <span>刷新</span>
-          </button>
-          <button class="btn btn-sm" onclick="loadDemoSweepJson()" title="载入预置真实 11 数据集评测数据示例">
-            🧪 示例 Benchmark
-          </button>
-          <button class="btn btn-sm btn-primary" onclick="openSweepPasteModal()" title="手动粘贴或上传外部 summary.json 文件">
-            📥 导入 / 粘贴 JSON
+            <span>重新扫描</span>
           </button>
           <div style="display: flex; gap: 0.35rem;">
             <button class="btn btn-sm" onclick="exportSweepMarkdown()" title="导出格式化 Markdown 评测总结报告">
@@ -321,17 +315,17 @@
         </div>
       </div>
 
-      <!-- 隐藏的文件选择器 -->
-      <input type="file" id="sr-file-input" accept=".json" style="display: none;" onchange="handleSweepFileSelected(event)">
-
-      <!-- 空状态与拖拽注入卡片 (当未载入数据或想要切换数据时可直接拖入) -->
-      <div id="sr-dropzone" class="sr-dropzone" onclick="document.getElementById('sr-file-input').click()" ondragover="handleSweepDragOver(event)" ondragleave="handleSweepDragLeave(event)" ondrop="handleSweepDrop(event)">
-        <div class="sr-dropzone-inner">
-          <div class="sr-dropzone-icon">📥</div>
-          <div class="sr-dropzone-text">
-            <strong>拖拽 summary.json 文件到此处</strong>，或 <span class="sr-link-text">点击选择本地文件</span>、<button type="button" class="btn btn-sm" style="margin-left: 0.5rem;" onclick="event.stopPropagation(); openSweepPasteModal();">粘贴 JSON</button>、<button type="button" class="btn btn-sm" style="margin-left: 0.3rem;" onclick="event.stopPropagation(); loadDemoSweepJson();">载入演示样例</button>
-          </div>
-          <div class="sr-dropzone-hint">支持包含 datasets、results、metrics 的标准 eval_vlm 批量评测报告 JSON</div>
+      <!-- 工作区未检测到记录时的提示卡片 -->
+      <div id="sr-empty-state" class="dataset-card" style="display: none; text-align: center; padding: 3rem 1.5rem; max-width: 640px; margin: 2rem auto;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+        <h3 style="color: #fff; font-size: 1.15rem; margin-bottom: 0.5rem;">未在工作目录中检测到 Sweep 评测结果</h3>
+        <p style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.6;">
+          系统已自动检索工作区 <code><span id="sr-empty-ws-path">&lt;workspace&gt;/_sweep/</span></code>。<br>
+          当在【批量评测】或通过命令行执行 <code>eval-vlm sweep ...</code> 产出 <code>summary.json</code> 后，将在此自动呈现。
+        </p>
+        <div style="margin-top: 1.5rem; display: flex; justify-content: center; gap: 0.75rem;">
+          <button class="btn btn-primary" onclick="switchTab('sweep')">🚀 前往【批量评测】启动任务</button>
+          <button class="btn" onclick="loadSweepRunsList(true)">🔄 重新扫描目录</button>
         </div>
       </div>
 
@@ -446,7 +440,7 @@
               <span style="font-size: 1.4rem;">🔬</span>
               <div>
                 <div style="display: flex; align-items: center; gap: 0.6rem;">
-                  <h3 id="sr-detail-ds-name" style="font-size: 1.15rem; color: #fff; margin: 0;">4dim_road_v6_desc</h3>
+                  <h3 id="sr-detail-ds-name" style="font-size: 1.15rem; color: #000; margin: 0;">4dim_road_v6_desc</h3>
                   <span id="sr-detail-method-badge" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">field-eval</span>
                   <span id="sr-detail-matchmode-badge" class="config-key-badge">exact 匹配</span>
                 </div>
@@ -2346,29 +2340,7 @@
     <pre id="terminal-pre" class="terminal-stream-log"></pre>
   </div>
 
-  <!-- Sweep JSON 导入 / 粘贴模态框 -->
-  <dialog id="sr-paste-modal" class="custom-modal modal-card" style="max-width: 620px; width: 92vw;">
-    <div class="modal-header">
-      <div style="display: flex; align-items: center; gap: 0.65rem;">
-        <span style="font-size: 1.35rem;">📥</span>
-        <h3 class="modal-title">导入 Sweep 评测结果 JSON</h3>
-      </div>
-      <button class="modal-close" onclick="closeSweepPasteModal()" title="关闭">&times;</button>
-    </div>
-    <div style="font-size: 0.84rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-      可直接将批量扫描产生的 <code>summary.json</code> 文件的完整文本粘贴到下方文本框中，或点击直接选择本地文件。
-    </div>
-    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-      <button class="btn btn-sm btn-primary" onclick="document.getElementById('sr-modal-file-input').click()">📁 从本地文件载入</button>
-      <button class="btn btn-sm" onclick="loadDemoSweepJson(); closeSweepPasteModal();">🧪 载入示例 Benchmark 数据</button>
-      <input type="file" id="sr-modal-file-input" accept=".json" style="display: none;" onchange="handleSweepFileSelected(event); closeSweepPasteModal();">
-    </div>
-    <textarea id="sr-paste-textarea" class="textarea" rows="12" style="width: 100%; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.45;" placeholder='粘贴 {"datasets": [...], "results": [...]} 内容...'></textarea>
-    <div class="modal-footer" style="margin-top: 1rem;">
-      <button class="btn" onclick="closeSweepPasteModal()">取消</button>
-      <button class="btn btn-primary" onclick="confirmPasteSweepJson()">解析并渲染看板</button>
-    </div>
-  </dialog>
+
 
   <!-- Sweep 原始 JSON 查看器模态框 -->
   <dialog id="sr-raw-json-modal" class="custom-modal modal-card" style="max-width: 800px; width: 92vw;">

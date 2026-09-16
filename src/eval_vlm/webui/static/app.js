@@ -63,6 +63,9 @@ const state = {
     data: null,
     activeRunPath: "",
     runsList: [],
+    runsLoadPromise: null,
+    runsRequestId: 0,
+    selectionRequestId: 0,
     selectedDatasetName: null,
     activeHeatmapField: null,
     filterMethod: "all",
@@ -3806,3 +3809,1004 @@ window.closeHtmlPreview = closeHtmlPreview;
 window.updateDatasetHtmlCount = updateDatasetHtmlCount;
 window.filterDatasetHtmlCategory = filterDatasetHtmlCategory;
 window.filterDatasetHtmlFiles = filterDatasetHtmlFiles;
+
+
+// ==========================================================================
+// Sweep 批量评测结果全自动探测与可视化看板 (Sweep Results Studio)
+// ==========================================================================
+
+async function loadSweepResultsData() {
+  // 自动从后端探测工作目录下的 _sweep 记录。
+  // loadSweepRunsList also selects the newest available run when needed.
+  await loadSweepRunsList(false);
+}
+
+async function loadSweepRunsList(forceRefresh = false) {
+  if (state.sweepResults.runsLoadPromise) return state.sweepResults.runsLoadPromise;
+
+  const select = document.getElementById("sr-run-select");
+  if (select) select.innerHTML = `<option value="">(正在扫描工作区 _sweep/ ...)</option>`;
+  const requestId = ++state.sweepResults.runsRequestId;
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await apiFetch("/api/sweep/runs", { signal: controller.signal });
+      const runs = await res.json();
+      if (requestId !== state.sweepResults.runsRequestId) return;
+
+      state.sweepResults.runsList = Array.isArray(runs) ? runs : [];
+      const activeExists = state.sweepResults.runsList.some((run) => run.path === state.sweepResults.activeRunPath);
+      const selectedPath = activeExists ? state.sweepResults.activeRunPath : state.sweepResults.runsList[0]?.path || "";
+      if (select) {
+        if (!state.sweepResults.runsList.length) {
+          select.innerHTML = `<option value="">(未在工作区 _sweep/ 下检测到评测记录)</option>`;
+        } else {
+          select.innerHTML = state.sweepResults.runsList.map((r) => {
+            const timeStr = r.mtime ? new Date(r.mtime).toLocaleString("zh-CN") : "未知时间";
+            const label = `${r.model || "默认模型"} [${r.backend || "默认后端"}] - ${timeStr} (${r.datasets_count || 0} 个数据集)`;
+            return `<option value="${escapeHtml(r.path)}" ${r.path === selectedPath ? "selected" : ""}>${escapeHtml(label)}</option>`;
+          }).join("");
+        }
+      }
+
+      if (!selectedPath) {
+        clearSweepResultsState();
+        if (forceRefresh) showToast("工作目录下暂无 _sweep 记录", "info");
+        return;
+      }
+      if (forceRefresh || !activeExists || !state.sweepResults.data) {
+        await onSweepRunSelect(selectedPath);
+      } else {
+        renderSweepResultsDashboard();
+      }
+      if (forceRefresh) showToast(`已成功扫描到 ${state.sweepResults.runsList.length} 个 Sweep 运行记录`, "success");
+    } catch (err) {
+      if (requestId !== state.sweepResults.runsRequestId) return;
+      console.warn("加载本地 sweep 列表失败:", err);
+      clearSweepResultsState();
+      if (select) {
+        const message = err.name === "AbortError" ? "扫描超时" : `扫描失败: ${err.message}`;
+        select.innerHTML = `<option value="">(${escapeHtml(message)}，请点击“重新扫描”重试)</option>`;
+      }
+      showToast("Sweep 结果扫描失败，请点击“重新扫描”重试", "error");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  })();
+  state.sweepResults.runsLoadPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (state.sweepResults.runsLoadPromise === request) {
+      state.sweepResults.runsLoadPromise = null;
+    }
+  }
+}
+
+async function onSweepRunSelect(path) {
+  if (!path) {
+    clearSweepResultsState();
+    return;
+  }
+  const requestId = ++state.sweepResults.selectionRequestId;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await apiFetch(`/api/sweep/summary?path=${encodeURIComponent(path)}`, { signal: controller.signal });
+    const data = await res.json();
+    if (requestId !== state.sweepResults.selectionRequestId) return;
+    parseAndSetSweepData(data, path);
+    const select = document.getElementById("sr-run-select");
+    if (select) select.value = path;
+  } catch (err) {
+    if (requestId !== state.sweepResults.selectionRequestId) return;
+    clearSweepResultsState();
+    const message = err.name === "AbortError" ? "读取 Sweep 记录超时" : `读取 Sweep 记录失败: ${err.message}`;
+    showToast(`${message}，请点击“重新扫描”重试`, "error");
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function clearSweepResultsState() {
+  // Invalidate a late summary response before removing its associated view.
+  state.sweepResults.selectionRequestId++;
+  state.sweepResults.data = null;
+  state.sweepResults.activeRunPath = "";
+  state.sweepResults.selectedDatasetName = null;
+  showSweepEmptyState();
+}
+
+function showSweepEmptyState() {
+  const dashboard = document.getElementById("sr-dashboard");
+  const emptyState = document.getElementById("sr-empty-state");
+  const wsPathEl = document.getElementById("sr-empty-ws-path");
+  if (dashboard) dashboard.style.display = "none";
+  if (emptyState) emptyState.style.display = "block";
+  if (wsPathEl && state.settings.workspace) {
+    wsPathEl.textContent = `${state.settings.workspace}/_sweep/`;
+  }
+}
+
+function parseAndSetSweepData(json, runPath = "") {
+  state.sweepResults.data = json;
+  state.sweepResults.activeRunPath = runPath;
+
+  const results = json.results || [];
+  if (results.length > 0 && (!state.sweepResults.selectedDatasetName || !results.some(r => r.dataset === state.sweepResults.selectedDatasetName))) {
+    state.sweepResults.selectedDatasetName = results[0].dataset;
+  }
+
+  const emptyState = document.getElementById("sr-empty-state");
+  const dashboard = document.getElementById("sr-dashboard");
+  if (emptyState) emptyState.style.display = "none";
+  if (dashboard) dashboard.style.display = "flex";
+
+  renderSweepResultsDashboard();
+}
+
+function renderSweepResultsDashboard() {
+  const data = state.sweepResults.data;
+  if (!data) return;
+
+  renderSweepHeroKpis(data);
+  renderSweepOverviewTable(data);
+  renderSweepSelectedDatasetDetail();
+}
+
+function renderSweepHeroKpis(data) {
+  const results = data.results || [];
+  const datasets = data.datasets || results.map(r => r.dataset);
+  const first = results[0] || {};
+
+  const modelName = first.model || "未知模型";
+  const backend = first.backend || "未知后端";
+
+  const totalDatasets = datasets.length || results.length;
+  const numOk = typeof data.num_ok === "number" ? data.num_ok : results.filter(r => r.status === "ok").length;
+  const numErr = typeof data.num_error === "number" ? data.num_error : results.filter(r => r.status !== "ok").length;
+
+  let totalSamples = 0;
+  let accSum = 0;
+  let accCount = 0;
+  let emSum = 0;
+  let emCount = 0;
+
+  for (const r of results) {
+    const m = r.metrics || {};
+    const nSamples = m.num_samples || m.overall_total || 0;
+    totalSamples += nSamples;
+
+    if (r.method === "field-eval") {
+      const overall = m.overall || {};
+      const acc = typeof overall.micro_accuracy === "number" ? overall.micro_accuracy : (m.overall_accuracy || 0);
+      accSum += acc;
+      accCount++;
+      if (typeof overall.exact_match_rate === "number") {
+        emSum += overall.exact_match_rate;
+        emCount++;
+      }
+    } else {
+      const score = typeof m.overall_mean_score === "number" ? m.overall_mean_score : 0;
+      accSum += score;
+      accCount++;
+    }
+  }
+
+  const avgAcc = accCount ? (accSum / accCount) : 0;
+  const avgEm = emCount ? (emSum / emCount) : 0;
+
+  const heroModel = document.getElementById("sr-hero-model-name");
+  const heroBackend = document.getElementById("sr-hero-backend-badge");
+  const heroDsCount = document.getElementById("sr-hero-datasets-count");
+  const heroStatus = document.getElementById("sr-hero-status-pill");
+  const heroTotalSamples = document.getElementById("sr-hero-total-samples");
+  const heroAvgAcc = document.getElementById("sr-hero-avg-accuracy");
+  const heroAvgEm = document.getElementById("sr-hero-avg-em");
+  const heroMeta = document.getElementById("sr-hero-meta-desc");
+
+  if (heroModel) heroModel.textContent = modelName;
+  if (heroBackend) heroBackend.textContent = backend;
+  if (heroDsCount) heroDsCount.textContent = totalDatasets;
+  if (heroStatus) {
+    heroStatus.textContent = `${numOk} 正常 / ${numErr} 异常`;
+    heroStatus.style.color = numErr > 0 ? "var(--rose-500)" : "var(--emerald-500)";
+  }
+  if (heroTotalSamples) heroTotalSamples.textContent = totalSamples.toLocaleString();
+  if (heroAvgAcc) heroAvgAcc.textContent = `${(avgAcc * 100).toFixed(1)}%`;
+  if (heroAvgEm) heroAvgEm.textContent = emCount ? `${(avgEm * 100).toFixed(1)}%` : "—";
+  if (heroMeta && state.sweepResults.activeRunPath) {
+    heroMeta.textContent = `文件路径: ${state.sweepResults.activeRunPath}`;
+  }
+}
+
+function onSweepFilterChange() {
+  const searchInput = document.getElementById("sr-filter-search");
+  const methodSelect = document.getElementById("sr-filter-method");
+  const statusSelect = document.getElementById("sr-filter-status");
+  const sortSelect = document.getElementById("sr-filter-sort");
+
+  state.sweepResults.filterSearch = searchInput ? searchInput.value.trim().toLowerCase() : "";
+  state.sweepResults.filterMethod = methodSelect ? methodSelect.value : "all";
+  state.sweepResults.filterStatus = statusSelect ? statusSelect.value : "all";
+  state.sweepResults.sortBy = sortSelect ? sortSelect.value : "default";
+
+  if (state.sweepResults.data) {
+    renderSweepOverviewTable(state.sweepResults.data);
+  }
+}
+
+function getSweepResultScore(r) {
+  const m = r.metrics || {};
+  if (r.method === "field-eval") {
+    return getSweepResultOverallAccuracy(r) ?? m.overall?.micro_accuracy ?? 0;
+  }
+  return m.overall_mean_score ?? 0;
+}
+
+function getSweepResultOverallAccuracy(result) {
+  const metrics = result?.metrics || {};
+  const overall = metrics.overall || {};
+  const value = [
+    metrics.overall_accuracy,
+    overall.overall_accuracy,
+    overall.accuracy,
+  ].find((candidate) => typeof candidate === "number");
+  return value === undefined ? null : value;
+}
+
+function renderSweepOverviewTable(data) {
+  const tbody = document.getElementById("sr-overview-tbody");
+  const countBadge = document.getElementById("sr-table-count-badge");
+  if (!tbody) return;
+
+  const rawResults = data.results || [];
+  let filtered = rawResults.filter(r => {
+    if (state.sweepResults.filterMethod !== "all" && r.method !== state.sweepResults.filterMethod) return false;
+    if (state.sweepResults.filterStatus !== "all" && r.status !== state.sweepResults.filterStatus) return false;
+    if (state.sweepResults.filterSearch) {
+      const q = state.sweepResults.filterSearch;
+      const ds = (r.dataset || "").toLowerCase();
+      const model = (r.model || "").toLowerCase();
+      if (!ds.includes(q) && !model.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (state.sweepResults.sortBy === "score_desc") {
+    filtered.sort((a, b) => getSweepResultScore(b) - getSweepResultScore(a));
+  } else if (state.sweepResults.sortBy === "score_asc") {
+    filtered.sort((a, b) => getSweepResultScore(a) - getSweepResultScore(b));
+  } else if (state.sweepResults.sortBy === "samples_desc") {
+    filtered.sort((a, b) => (b.metrics?.num_samples || 0) - (a.metrics?.num_samples || 0));
+  } else if (state.sweepResults.sortBy === "name_asc") {
+    filtered.sort((a, b) => (a.dataset || "").localeCompare(b.dataset || ""));
+  }
+
+  if (countBadge) countBadge.textContent = `${filtered.length} / ${rawResults.length} 个数据集`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: var(--text-dim);">没有符合当前筛选条件的数据集</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((r, idx) => {
+    const isSelected = r.dataset === state.sweepResults.selectedDatasetName;
+    const m = r.metrics || {};
+    const samples = m.num_samples ?? m.overall_total ?? "—";
+    const isFieldEval = r.method === "field-eval";
+
+    const score = getSweepResultScore(r);
+    const scorePct = (score * 100).toFixed(1) + "%";
+    const overallAccuracy = getSweepResultOverallAccuracy(r);
+    const overallAccuracyText = overallAccuracy === null ? "—" : `${(overallAccuracy * 100).toFixed(1)}%`;
+    let barColor = "var(--emerald-500)";
+    if (score < 0.5) barColor = "var(--rose-500)";
+    else if (score < 0.8) barColor = "var(--amber-500)";
+
+    const emRate = isFieldEval && typeof m.overall?.exact_match_rate === "number"
+      ? (m.overall.exact_match_rate * 100).toFixed(1) + "%"
+      : "—";
+
+    let fieldsOrTurns = "";
+    if (isFieldEval) {
+      const fCount = m.fields ? m.fields.length : Object.keys(m.per_field || {}).length;
+      fieldsOrTurns = `<span title="${escapeHtml((m.fields || []).join(', '))}">${fCount} 个字段</span>`;
+    } else {
+      const tCount = m.per_turn ? Object.keys(m.per_turn).length : "—";
+      fieldsOrTurns = `<span>${tCount} 轮对话</span>`;
+    }
+
+    const statusBadge = r.status === "ok"
+      ? `<span class="badge badge-success">OK</span>`
+      : `<span class="badge badge-danger">Error</span>`;
+
+    return `
+      <tr class="${isSelected ? 'selected' : ''}" onclick="selectSweepDataset('${escapeHtml(r.dataset)}')">
+        <td style="text-align: center; color: var(--text-dim); font-size: 0.75rem;">${idx + 1}</td>
+        <td>
+          <strong style="color: #000; font-size: 0.86rem;">${escapeHtml(r.dataset)}</strong>
+        </td>
+        <td>
+          <span class="role-badge" style="${isFieldEval ? 'background: rgba(99,102,241,0.2); color: #a5b4fc;' : 'background: rgba(6,182,212,0.2); color: var(--cyan-500);'}">
+            ${isFieldEval ? 'field-eval' : 'eval'}
+          </span>
+        </td>
+        <td style="text-align: right; font-family: var(--font-mono);">${samples}</td>
+        <td>
+          <div class="sr-progress-bar-wrap" title="准确率/综合得分: ${scorePct}">
+            <div class="sr-progress-bar-fill" style="width: ${score * 100}%; background: ${barColor};"></div>
+            <span class="sr-progress-bar-text">${scorePct}</span>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">总体准确率 overall_accuracy: ${overallAccuracyText}</div>
+        </td>
+        <td style="text-align: right; font-family: var(--font-mono); font-weight: 600; color: ${emRate !== '—' ? 'var(--text-main)' : 'var(--text-dim)'};">${emRate}</td>
+        <td style="font-size: 0.76rem; color: var(--text-muted);">${fieldsOrTurns}</td>
+        <td style="text-align: center;">${statusBadge}</td>
+        <td style="text-align: center;">
+          <button class="btn btn-sm ${isSelected ? 'btn-primary' : ''}" onclick="event.stopPropagation(); selectSweepDataset('${escapeHtml(r.dataset)}')">
+            审查
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function selectSweepDataset(datasetName) {
+  state.sweepResults.selectedDatasetName = datasetName;
+  state.sweepResults.activeHeatmapField = null;
+
+  renderSweepOverviewTable(state.sweepResults.data);
+  renderSweepSelectedDatasetDetail();
+
+  const drillPanel = document.getElementById("sr-drilldown-panel");
+  if (drillPanel) {
+    drillPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function navigateSweepDetail(direction) {
+  const results = state.sweepResults.data?.results || [];
+  if (!results.length) return;
+  const currentIdx = results.findIndex(r => r.dataset === state.sweepResults.selectedDatasetName);
+  if (currentIdx === -1) return;
+
+  let newIdx = currentIdx + direction;
+  if (newIdx < 0) newIdx = results.length - 1;
+  if (newIdx >= results.length) newIdx = 0;
+
+  selectSweepDataset(results[newIdx].dataset);
+}
+
+function openSelectedRunReport() {
+  const results = state.sweepResults.data?.results || [];
+  const current = results.find(r => r.dataset === state.sweepResults.selectedDatasetName);
+  if (!current || !current.report) {
+    showToast("该数据集未生成独立报告文件", "info");
+    return;
+  }
+  showToast(`报告落盘路径: ${current.report}`, "info");
+}
+
+function switchSweepSubView(subView) {
+  state.sweepResults.subView = subView;
+  const cmBtn = document.getElementById("sr-subtab-cm-btn");
+  const pvBtn = document.getElementById("sr-subtab-pv-btn");
+  const cmView = document.getElementById("sr-subview-cm");
+  const pvView = document.getElementById("sr-subview-pv");
+
+  if (cmBtn) cmBtn.classList.toggle("active", subView === "cm");
+  if (pvBtn) pvBtn.classList.toggle("active", subView === "pv");
+  if (cmView) cmView.style.display = subView === "cm" ? "block" : "none";
+  if (pvView) pvView.style.display = subView === "pv" ? "block" : "none";
+}
+
+function renderSweepSelectedDatasetDetail() {
+  const drillPanel = document.getElementById("sr-drilldown-panel");
+  const results = state.sweepResults.data?.results || [];
+  if (!results.length) {
+    if (drillPanel) drillPanel.style.display = "none";
+    return;
+  }
+
+  const current = results.find(r => r.dataset === state.sweepResults.selectedDatasetName) || results[0];
+  state.sweepResults.selectedDatasetName = current.dataset;
+
+  if (drillPanel) drillPanel.style.display = "block";
+
+  const dsIdx = results.findIndex(r => r.dataset === current.dataset);
+  const idxCounter = document.getElementById("sr-detail-idx-counter");
+  if (idxCounter) idxCounter.textContent = `${dsIdx + 1} / ${results.length}`;
+
+  const titleEl = document.getElementById("sr-detail-ds-name");
+  const methodBadge = document.getElementById("sr-detail-method-badge");
+  const matchmodeBadge = document.getElementById("sr-detail-matchmode-badge");
+  const submetaEl = document.getElementById("sr-detail-submeta");
+  const reportBtn = document.getElementById("sr-detail-report-btn");
+
+  if (titleEl) titleEl.textContent = current.dataset;
+  if (methodBadge) methodBadge.textContent = current.method;
+  if (matchmodeBadge) {
+    if (current.metrics?.match_mode) {
+      matchmodeBadge.style.display = "inline-block";
+      matchmodeBadge.textContent = `${current.metrics.match_mode} 匹配模式`;
+    } else {
+      matchmodeBadge.style.display = "none";
+    }
+  }
+  if (submetaEl) {
+    const scoredAt = current.metrics?.scored_at ? new Date(current.metrics.scored_at).toLocaleString("zh-CN") : "未知时间";
+    const samples = current.metrics?.num_samples ?? current.metrics?.overall_total ?? "—";
+    submetaEl.textContent = `评测时间: ${scoredAt} · 样本量: ${samples} · 状态: ${current.status || "ok"}`;
+  }
+  if (reportBtn) {
+    reportBtn.style.display = current.report ? "inline-block" : "none";
+  }
+
+  const fieldContent = document.getElementById("sr-field-eval-content");
+  const evalContent = document.getElementById("sr-eval-content");
+
+  if (current.method === "field-eval") {
+    if (fieldContent) fieldContent.style.display = "block";
+    if (evalContent) evalContent.style.display = "none";
+    renderSweepFieldEvalDetail(current);
+  } else {
+    if (fieldContent) fieldContent.style.display = "none";
+    if (evalContent) evalContent.style.display = "block";
+    renderSweepEvalDetail(current);
+  }
+}
+
+function renderSweepFieldEvalDetail(result) {
+  const m = result.metrics || {};
+
+  // 1. 抽取统计条
+  const extractBar = document.getElementById("sr-extract-stats-bar");
+  if (extractBar) {
+    const ref = m.ref_extract || {};
+    const pred = m.pred_extract || {};
+    extractBar.innerHTML = `
+      <span style="font-size: 0.8rem; font-weight: 700; color: var(--cyan-500); margin-right: 0.5rem;">⚡ 抽取缓存状态:</span>
+      <div class="sr-extract-pill">
+        <span>标准参考 Ref:</span>
+        <strong>${ref.total || 0}</strong> 条 (复用 <strong>${ref.skipped_already_done || 0}</strong>, 新增 <strong>${ref.newly_completed || 0}</strong>, 异常 <strong>${ref.errors || 0}</strong>)
+      </div>
+      <div style="width: 1px; height: 16px; background: var(--border-subtle);"></div>
+      <div class="sr-extract-pill">
+        <span>模型预测 Pred:</span>
+        <strong>${pred.total || 0}</strong> 条 (复用 <strong>${pred.skipped_already_done || 0}</strong>, 新增 <strong>${pred.newly_completed || 0}</strong>, 异常 <strong>${pred.errors || 0}</strong>)
+      </div>
+    `;
+  }
+
+  // 2. 整体指标卡片组
+  const overallPills = document.getElementById("sr-field-overall-pills");
+  if (overallPills) {
+    const ov = m.overall || {};
+    const overallAccuracy = getSweepResultOverallAccuracy(result);
+    const microAcc = ov.micro_accuracy ?? 0;
+    const macroAcc = ov.macro_accuracy ?? microAcc;
+    const emRate = ov.exact_match_rate ?? 0;
+    const strictEmRate = ov.strict_exact_match_rate ?? 0;
+
+    overallPills.innerHTML = `
+      <div class="sr-metric-pill">
+        <div class="title">总体准确率 (overall_accuracy)</div>
+        <div class="val" style="color: var(--emerald-500);">${overallAccuracy === null ? "—" : `${(overallAccuracy * 100).toFixed(2)}%`}</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">综合微准确率 (Micro Acc)</div>
+        <div class="val" style="color: var(--emerald-500);">${(microAcc * 100).toFixed(2)}%</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">宏平均准确率 (Macro Acc)</div>
+        <div class="val" style="color: #a5b4fc;">${(macroAcc * 100).toFixed(2)}%</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">完全一致率 (Exact Match)</div>
+        <div class="val" style="color: var(--cyan-500);">${(emRate * 100).toFixed(2)}%</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.exact_match_samples || 0} 样本完全命中</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">严格一致率 (Strict EM)</div>
+        <div class="val" style="color: var(--amber-500);">${(strictEmRate * 100).toFixed(2)}%</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">${ov.strict_exact_match_samples || 0} 样本</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">已评测样本总数</div>
+        <div class="val" style="color: #fff;">${m.num_scored || m.num_samples || 0}</div>
+        <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">缺失样本: ${m.num_pred_missing || 0}</div>
+      </div>
+    `;
+  }
+
+  // 3. 逐字段卡片网格
+  const perFieldGrid = document.getElementById("sr-per-field-grid");
+  if (perFieldGrid) {
+    const perField = m.per_field || {};
+    const fieldNames = Object.keys(perField);
+    perFieldGrid.innerHTML = fieldNames.map(fName => {
+      const f = perField[fName];
+      const acc = f.accuracy ?? f.overall_accuracy ?? 0;
+      const accPct = (acc * 100).toFixed(2) + "%";
+      let barCol = "var(--emerald-500)";
+      if (acc < 0.5) barCol = "var(--rose-500)";
+      else if (acc < 0.8) barCol = "var(--amber-500)";
+
+      return `
+        <div class="sr-field-card">
+          <div class="sr-field-card-header">
+            <span class="sr-field-card-title">${escapeHtml(fName)}</span>
+            <span style="font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; color: ${barCol};">${accPct}</span>
+          </div>
+          <div class="sr-progress-bar-wrap" style="height: 10px;">
+            <div class="sr-progress-bar-fill" style="width: ${acc * 100}%; background: ${barCol};"></div>
+          </div>
+          <div class="sr-field-meta-line">
+            <span>支持样本: <strong>${f.correct ?? f.overall_correct ?? 0} / ${f.total ?? f.overall_total ?? 0}</strong></span>
+            <span>非空准确率: <strong>${((f.non_empty_accuracy ?? 0) * 100).toFixed(1)}%</strong></span>
+          </div>
+          ${f.empty_count > 0 ? `
+          <div class="sr-field-meta-line" style="color: var(--amber-500); font-size: 0.72rem;">
+            <span>空值样本: ${f.empty_count} 个</span>
+            <span>空值判定命中率: ${((f.empty_accuracy ?? 0) * 100).toFixed(1)}%</span>
+          </div>` : ''}
+        </div>
+      `;
+    }).join("");
+  }
+
+  // 4. 设置混淆矩阵字段切换 pills
+  const cmPillsContainer = document.getElementById("sr-cm-field-pills");
+  const cms = m.confusion_matrices || {};
+  const cmFields = Object.keys(cms);
+
+  if (!state.sweepResults.activeHeatmapField || !cms[state.sweepResults.activeHeatmapField]) {
+    state.sweepResults.activeHeatmapField = cmFields[0] || null;
+  }
+
+  if (cmPillsContainer) {
+    if (!cmFields.length) {
+      cmPillsContainer.innerHTML = `<span style="font-size: 0.8rem; color: var(--text-dim);">该字段抽取无混淆矩阵数据</span>`;
+    } else {
+      cmPillsContainer.innerHTML = cmFields.map(fn => {
+        const isActive = fn === state.sweepResults.activeHeatmapField;
+        return `
+          <button class="sr-field-pill-btn ${isActive ? 'active' : ''}" onclick="onSelectCmField('${escapeHtml(fn)}')">
+            ${escapeHtml(fn)}
+          </button>
+        `;
+      }).join("");
+    }
+  }
+
+  // 渲染混淆矩阵
+  if (state.sweepResults.activeHeatmapField && cms[state.sweepResults.activeHeatmapField]) {
+    renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
+  }
+
+  // 渲染逐取值统计
+  renderPerValueBreakdown(m.per_value || {});
+}
+
+function onSelectCmField(fieldName) {
+  state.sweepResults.activeHeatmapField = fieldName;
+  const cms = state.sweepResults.data?.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
+  if (cms[fieldName]) {
+    renderConfusionMatrixHeatmap(cms[fieldName], fieldName);
+  }
+  const pills = document.querySelectorAll(".sr-field-pill-btn");
+  pills.forEach(p => p.classList.toggle("active", p.textContent.trim() === fieldName));
+}
+
+function getConfusionMatrixCellAlpha(value, maxValue, maxAlpha) {
+  const ratio = maxValue > 0 ? Math.min(1, Math.max(0, value / maxValue)) : 0;
+  const minAlpha = 0.08;
+  return minAlpha + ratio * (maxAlpha - minAlpha);
+}
+
+function renderConfusionMatrixHeatmap(cm, fieldName) {
+  const activeFieldTitle = document.getElementById("sr-cm-active-field-name");
+  const tableContainer = document.getElementById("sr-cm-table-container");
+  const perclassContainer = document.getElementById("sr-cm-perclass-container");
+  const macroBadge = document.getElementById("sr-cm-macro-avg-badge");
+
+  if (activeFieldTitle) activeFieldTitle.textContent = fieldName;
+
+  if (macroBadge) {
+    const macro = cm.macro_avg || {};
+    const f1 = typeof macro.f1 === "number" ? macro.f1.toFixed(3) : "—";
+    const prec = typeof macro.precision === "number" ? macro.precision.toFixed(3) : "—";
+    const recall = typeof macro.recall === "number" ? macro.recall.toFixed(3) : "—";
+    macroBadge.textContent = `宏平均 F1: ${f1} (Prec: ${prec}, Rec: ${recall})`;
+  }
+
+  const predClasses = cm.classes || [];
+  const refClasses = cm.ref_classes || predClasses;
+  const matrix = cm.matrix || [];
+
+  let maxVal = 1;
+  matrix.forEach(row => row.forEach(val => { if (val > maxVal) maxVal = val; }));
+
+  let html = `
+    <table class="confusion-matrix-table">
+      <thead>
+        <tr>
+          <th class="cm-corner" title="行: 真实标签 / 列: 模型预测">真实＼预测</th>
+          ${predClasses.map(cls => `<th title="预测类别: ${escapeHtml(cls)}">${escapeHtml(cls)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  refClasses.forEach((refCls, rowIdx) => {
+    html += `<tr><td class="cm-row-label" title="真实类别: ${escapeHtml(refCls)}">${escapeHtml(refCls)}</td>`;
+    const row = matrix[rowIdx] || [];
+
+    predClasses.forEach((predCls, colIdx) => {
+      const val = row[colIdx] || 0;
+      const isDiag = (refCls === predCls);
+
+      let cellClass = "cm-cell";
+      let cellStyle = "";
+
+      if (val === 0) {
+        cellClass += " cm-zero";
+      } else if (isDiag) {
+        cellClass += " cm-diag";
+        const alpha = getConfusionMatrixCellAlpha(val, maxVal, 0.85);
+        cellStyle = `background: rgba(16, 185, 129, ${alpha.toFixed(2)}); border: 1px solid var(--emerald-500);`;
+      } else {
+        cellClass += " cm-error";
+        const alpha = getConfusionMatrixCellAlpha(val, maxVal, 0.8);
+        cellStyle = `background: rgba(244, 63, 94, ${alpha.toFixed(2)}); border: 1px solid var(--rose-500);`;
+      }
+
+      const tooltip = `真实: ${escapeHtml(refCls)}\n预测: ${escapeHtml(predCls)}\n样本数: ${val}`;
+      html += `<td class="${cellClass}" style="${cellStyle}" title="${tooltip}">${val}</td>`;
+    });
+
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  if (tableContainer) tableContainer.innerHTML = html;
+
+  const perClass = cm.per_class || {};
+  let pcHtml = `
+    <table class="sr-perclass-table">
+      <thead>
+        <tr>
+          <th>类别名称</th>
+          <th>精确率 P</th>
+          <th>召回率 R</th>
+          <th>F1 值</th>
+          <th>支持样本</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  const pcKeys = Object.keys(perClass);
+  if (!pcKeys.length) {
+    pcHtml += `<tr><td colspan="5" style="text-align: center; color: var(--text-dim);">无逐类指标数据</td></tr>`;
+  } else {
+    pcKeys.forEach(k => {
+      const item = perClass[k];
+      const p = typeof item.precision === "number" ? (item.precision * 100).toFixed(1) + "%" : "—";
+      const r = typeof item.recall === "number" ? (item.recall * 100).toFixed(1) + "%" : "—";
+      const f1 = typeof item.f1 === "number" ? item.f1.toFixed(3) : "—";
+      const sup = item.support ?? "—";
+
+      pcHtml += `
+        <tr>
+          <td title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+          <td>${p}</td>
+          <td>${r}</td>
+          <td style="font-weight: 700; color: #a5b4fc;">${f1}</td>
+          <td>${sup}</td>
+        </tr>
+      `;
+    });
+  }
+
+  pcHtml += `</tbody></table>`;
+  if (perclassContainer) perclassContainer.innerHTML = pcHtml;
+}
+
+function renderPerValueBreakdown(perValue) {
+  const container = document.getElementById("sr-per-value-content");
+  if (!container) return;
+
+  const fields = Object.keys(perValue);
+  if (!fields.length) {
+    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 2rem;">无逐取值支持度统计数据</div>`;
+    return;
+  }
+
+  container.innerHTML = fields.map(fName => {
+    const valuesObj = perValue[fName] || {};
+    const valNames = Object.keys(valuesObj);
+
+    return `
+      <div class="sr-pv-field-card">
+        <div class="sr-pv-field-title">
+          <span>🏷️ ${escapeHtml(fName)}</span>
+          <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: normal;">${valNames.length} 个可能取值</span>
+        </div>
+        <div class="sr-pv-list">
+          ${valNames.map(vn => {
+            const item = valuesObj[vn];
+            const acc = typeof item.accuracy === "number" ? item.accuracy : 0;
+            const accPct = (acc * 100).toFixed(1) + "%";
+            let bColor = "var(--emerald-500)";
+            if (acc < 0.5) bColor = "var(--rose-500)";
+            else if (acc < 0.8) bColor = "var(--amber-500)";
+
+            return `
+              <div class="sr-pv-item">
+                <div class="sr-pv-item-head">
+                  <span class="sr-pv-val-name" title="${escapeHtml(vn)}">${escapeHtml(vn)}</span>
+                  <span class="sr-pv-val-stats">
+                    ${item.correct || 0} / ${item.support || 0} (${accPct})
+                  </span>
+                </div>
+                <div class="sr-pv-bar">
+                  <div class="sr-pv-bar-fill" style="width: ${acc * 100}%; background: ${bColor};"></div>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderSweepEvalDetail(result) {
+  const m = result.metrics || {};
+
+  const overallPills = document.getElementById("sr-eval-overall-pills");
+  if (overallPills) {
+    const meanScore = typeof m.overall_mean_score === "number" ? m.overall_mean_score : 0;
+    overallPills.innerHTML = `
+      <div class="sr-metric-pill">
+        <div class="title">综合平均得分 (Overall Mean)</div>
+        <div class="val" style="color: var(--emerald-500);">${(meanScore * 100).toFixed(2)}%</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">已评测样本数 (Samples)</div>
+        <div class="val" style="color: var(--cyan-500);">${m.num_samples || 0}</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">评测目标总轮次 (Targets)</div>
+        <div class="val" style="color: #a5b4fc;">${m.num_targets || 0}</div>
+      </div>
+      <div class="sr-metric-pill">
+        <div class="title">未达标样本数 (Failed Samples)</div>
+        <div class="val" style="color: ${m.num_failed_samples > 0 ? 'var(--rose-500)' : 'var(--emerald-500)'};">${m.num_failed_samples || 0}</div>
+      </div>
+    `;
+  }
+
+  const turnsContainer = document.getElementById("sr-eval-turns-container");
+  if (turnsContainer) {
+    const perTurn = m.per_turn || {};
+    const turnKeys = Object.keys(perTurn);
+
+    if (!turnKeys.length) {
+      turnsContainer.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 1.5rem;">未提供轮次拆解得分</div>`;
+    } else {
+      turnsContainer.innerHTML = turnKeys.map((tk, idx) => {
+        const t = perTurn[tk];
+        const scorer = t.scorer || "scorer";
+
+        let metricDetails = "";
+        if (typeof t.accuracy === "number") {
+          metricDetails += `<div class="sr-metric-pill"><div class="title">准确率 Accuracy</div><div class="val" style="color: var(--emerald-500);">${(t.accuracy * 100).toFixed(2)}%</div></div>`;
+        }
+        if (typeof t.f1 === "number") {
+          metricDetails += `<div class="sr-metric-pill"><div class="title">Token F1</div><div class="val" style="color: var(--cyan-500);">${(t.f1 * 100).toFixed(2)}%</div></div>`;
+        }
+        if (typeof t.precision === "number") {
+          metricDetails += `<div class="sr-metric-pill"><div class="title">精确率 Precision</div><div class="val">${(t.precision * 100).toFixed(2)}%</div></div>`;
+        }
+        if (typeof t.recall === "number") {
+          metricDetails += `<div class="sr-metric-pill"><div class="title">召回率 Recall</div><div class="val">${(t.recall * 100).toFixed(2)}%</div></div>`;
+        }
+
+        let cmHtml = "";
+        if (t.confusion_matrix) {
+          const cm = t.confusion_matrix;
+          const predClasses = cm.classes || [];
+          const refClasses = cm.ref_classes || predClasses;
+          const matrix = cm.matrix || [];
+          let maxVal = 1;
+          matrix.forEach(row => row.forEach(val => { if (val > maxVal) maxVal = val; }));
+
+          cmHtml = `
+            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);">
+              <div style="font-weight: 600; font-size: 0.84rem; color: #fff; margin-bottom: 0.5rem;">🔥 第 ${idx + 1} 轮分类混淆矩阵</div>
+              <div style="overflow-x: auto; max-height: 350px;">
+                <table class="confusion-matrix-table">
+                  <thead>
+                    <tr>
+                      <th class="cm-corner">真实＼预测</th>
+                      ${predClasses.map(c => `<th>${escapeHtml(c)}</th>`).join("")}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${refClasses.map((rc, rIdx) => `
+                      <tr>
+                        <td class="cm-row-label">${escapeHtml(rc)}</td>
+                        ${predClasses.map((pc, cIdx) => {
+                          const val = (matrix[rIdx] || [])[cIdx] || 0;
+                          const isDiag = (rc === pc);
+                          let cStyle = "";
+                          if (val === 0) cStyle = "background: rgba(255,255,255,0.02); color: var(--text-dim);";
+                          else if (isDiag) {
+                            const a = getConfusionMatrixCellAlpha(val, maxVal, 0.85);
+                            cStyle = `background: rgba(16, 185, 129, ${a.toFixed(2)}); border: 1px solid var(--emerald-500); color: #fff;`;
+                          } else {
+                            const a = getConfusionMatrixCellAlpha(val, maxVal, 0.8);
+                            cStyle = `background: rgba(244, 63, 94, ${a.toFixed(2)}); border: 1px solid var(--rose-500); color: #fff;`;
+                          }
+                          return `<td class="cm-cell" style="${cStyle}">${val}</td>`;
+                        }).join("")}
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="dataset-card" style="padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc; font-weight: 700;">
+                  轮次: ${escapeHtml(tk)}
+                </span>
+                <span class="config-key-badge">${escapeHtml(scorer)}</span>
+              </div>
+              <span style="font-size: 0.75rem; color: var(--text-dim);">样本量: ${t.num_scored || t.num_total || 0}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem;">
+              ${metricDetails}
+            </div>
+            ${cmHtml}
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  const failBox = document.getElementById("sr-eval-failures-box");
+  if (failBox) {
+    if (m.failures_html_path || m.failures_path) {
+      failBox.style.display = "block";
+      failBox.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <strong style="color: var(--rose-500);">⚠️ 失败与坏例诊断报告</strong>
+            <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem;">${escapeHtml(m.failures_path || m.failures_html_path)}</div>
+          </div>
+          <button class="btn btn-sm" onclick="showToast('失败分析报告路径: ${escapeHtml(m.failures_path || '')}', 'info')">
+            查看详情
+          </button>
+        </div>
+      `;
+    } else {
+      failBox.style.display = "none";
+    }
+  }
+}
+
+function openSweepRawJsonModal() {
+  const modal = document.getElementById("sr-raw-json-modal");
+  const pre = document.getElementById("sr-raw-json-pre");
+  if (!state.sweepResults.data) {
+    showToast("当前未加载任何 Sweep 评测数据", "warning");
+    return;
+  }
+  if (pre) {
+    pre.textContent = JSON.stringify(state.sweepResults.data, null, 2);
+  }
+  if (modal) modal.showModal();
+}
+
+function closeSweepRawJsonModal() {
+  const modal = document.getElementById("sr-raw-json-modal");
+  if (modal) modal.close();
+}
+
+function copySweepRawJson() {
+  if (!state.sweepResults.data) return;
+  const text = JSON.stringify(state.sweepResults.data, null, 2);
+  navigator.clipboard.writeText(text).then(() => {
+    showToast("已复制原始 JSON 到剪贴板", "success");
+  }).catch(() => {
+    showToast("复制失败，请手动全选复制", "error");
+  });
+}
+
+function exportSweepMarkdown() {
+  const data = state.sweepResults.data;
+  if (!data) {
+    showToast("无可用评测数据", "warning");
+    return;
+  }
+  const results = data.results || [];
+  let md = `# Sweep 批量评测结果汇总报告\n\n`;
+  md += `- **评估模型**: ${results[0]?.model || "默认模型"}\n`;
+  md += `- **推理后端**: ${results[0]?.backend || "默认后端"}\n`;
+  md += `- **覆盖数据集数**: ${results.length}\n`;
+  md += `- **生成时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+  md += `| 数据集 | 评测模式 | 样本量 | 准确率 / 综合得分 | 严格精确匹配 (EM) | 状态 |\n`;
+  md += `| :--- | :--- | :---: | :---: | :---: | :---: |\n`;
+
+  results.forEach(r => {
+    const isField = r.method === "field-eval";
+    const m = r.metrics || {};
+    const samples = m.num_samples ?? m.overall_total ?? "—";
+    const score = (getSweepResultScore(r) * 100).toFixed(2) + "%";
+    const em = isField && typeof m.overall?.exact_match_rate === "number" ? (m.overall.exact_match_rate * 100).toFixed(2) + "%" : "—";
+    md += `| ${r.dataset} | ${r.method} | ${samples} | ${score} | ${em} | ${r.status} |\n`;
+  });
+
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `sweep_summary_${Date.now()}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("已导出 Markdown 汇总报告", "success");
+}
+
+function exportSweepCsv() {
+  const data = state.sweepResults.data;
+  if (!data) {
+    showToast("无可用评测数据", "warning");
+    return;
+  }
+  const results = data.results || [];
+  let csv = `\uFEFFDataset,Method,Model,Backend,NumSamples,OverallScore,ExactMatchRate,Status\n`;
+  results.forEach(r => {
+    const isField = r.method === "field-eval";
+    const m = r.metrics || {};
+    const samples = m.num_samples ?? m.overall_total ?? 0;
+    const score = getSweepResultScore(r).toFixed(4);
+    const em = isField && typeof m.overall?.exact_match_rate === "number" ? m.overall.exact_match_rate.toFixed(4) : "";
+    csv += `"${r.dataset}","${r.method}","${r.model || ''}","${r.backend || ''}",${samples},${score},${em},"${r.status || 'ok'}"\n`;
+  });
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `sweep_metrics_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("已导出 CSV 指标表", "success");
+}
+
+// 导出到全局 window 对象
+window.loadSweepResultsData = loadSweepResultsData;
+window.loadSweepRunsList = loadSweepRunsList;
+window.onSweepRunSelect = onSweepRunSelect;
+window.openSweepRawJsonModal = openSweepRawJsonModal;
+window.closeSweepRawJsonModal = closeSweepRawJsonModal;
+window.copySweepRawJson = copySweepRawJson;
+window.exportSweepMarkdown = exportSweepMarkdown;
+window.exportSweepCsv = exportSweepCsv;
+window.onSweepFilterChange = onSweepFilterChange;
+window.selectSweepDataset = selectSweepDataset;
+window.navigateSweepDetail = navigateSweepDetail;
+window.openSelectedRunReport = openSelectedRunReport;
+window.switchSweepSubView = switchSweepSubView;
+window.onSelectCmField = onSelectCmField;

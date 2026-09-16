@@ -515,37 +515,63 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def api_list_sweep_runs(
         st: Settings = Depends(get_settings),
     ) -> list[dict[str, Any]]:
-        sweep_base = st.workspace / "_sweep"
+        sweep_base = (st.workspace / "_sweep").resolve()
         if not sweep_base.is_dir():
             return []
 
-        runs: list[dict[str, Any]] = []
-        for summary_file in sorted(sweep_base.rglob("summary.json")):
+        runs: list[tuple[float, dict[str, Any]]] = []
+        # Sweep output has a deliberately fixed layout.  Do not recurse here:
+        # a workspace can contain large model artifacts or stale nested result
+        # trees, which made a simple rglob block this endpoint indefinitely.
+        try:
+            model_dirs = list(sweep_base.iterdir())
+        except OSError:
+            return []
+
+        for model_dir in model_dirs:
             try:
-                rel = summary_file.relative_to(st.workspace).as_posix()
-                parts = summary_file.relative_to(sweep_base).parts
-                model = parts[0] if len(parts) > 1 else ""
-                backend = parts[1] if len(parts) > 2 else ""
+                if not model_dir.is_dir() or model_dir.is_symlink():
+                    continue
+                model_dir.resolve().relative_to(sweep_base)
+                backend_dirs = list(model_dir.iterdir())
+            except (OSError, ValueError):
+                continue
 
-                content = json.loads(summary_file.read_text(encoding="utf-8"))
-                mtime = datetime.fromtimestamp(summary_file.stat().st_mtime, tz=timezone.utc).isoformat()
-                first_res = content.get("results", [{}])[0] if content.get("results") else {}
+            for backend_dir in backend_dirs:
+                try:
+                    if not backend_dir.is_dir() or backend_dir.is_symlink():
+                        continue
+                    backend_dir.resolve().relative_to(sweep_base)
+                    summary_file = backend_dir / "summary.json"
+                    if not summary_file.is_file() or summary_file.is_symlink():
+                        continue
+                    resolved_summary = summary_file.resolve()
+                    resolved_summary.relative_to(sweep_base)
+                    # Only accept the exact, documented three-component path.
+                    relative_parts = resolved_summary.relative_to(sweep_base).parts
+                    if len(relative_parts) != 3 or relative_parts[-1] != "summary.json":
+                        continue
 
-                runs.append({
-                    "path": rel,
-                    "model": first_res.get("model", model),
-                    "backend": first_res.get("backend", backend),
-                    "mtime": mtime,
+                    stat = summary_file.stat()
+                    content = json.loads(summary_file.read_text(encoding="utf-8"))
+                    if not isinstance(content, dict):
+                        continue
+                except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+
+                runs.append((stat.st_mtime, {
+                    "path": summary_file.relative_to(st.workspace).as_posix(),
+                    "model": model_dir.name,
+                    "backend": backend_dir.name,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                     "datasets_count": len(content.get("datasets", [])),
                     "num_ok": content.get("num_ok", 0),
                     "num_error": content.get("num_error", 0),
-                    "size_bytes": summary_file.stat().st_size,
-                })
-            except Exception:
-                continue
+                    "size_bytes": stat.st_size,
+                }))
 
-        runs.sort(key=lambda x: x.get("mtime", ""), reverse=True)
-        return runs
+        runs.sort(key=lambda item: item[0], reverse=True)
+        return [run for _, run in runs]
 
     @app.get("/api/sweep/summary")
     def api_get_sweep_summary(
@@ -555,14 +581,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         st: Settings = Depends(get_settings),
     ) -> dict[str, Any]:
         target: Optional[Path] = None
+        sweep_base = (st.workspace / "_sweep").resolve()
         if path:
             candidate = (st.workspace / path).resolve()
-            if not str(candidate).startswith(str(st.workspace.resolve())):
+            try:
+                relative_parts = candidate.relative_to(sweep_base).parts
+            except ValueError:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="路径越界")
+            if len(relative_parts) != 3 or relative_parts[-1] != "summary.json":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到指定的 sweep summary.json")
             target = candidate
         elif model and backend:
             from ..config import safe_model_dirname
-            target = st.workspace / "_sweep" / safe_model_dirname(model) / backend / "summary.json"
+            target = sweep_base / safe_model_dirname(model) / backend / "summary.json"
+
+        if target:
+            try:
+                resolved_target = target.resolve()
+                relative_parts = resolved_target.relative_to(sweep_base).parts
+            except ValueError:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="路径越界")
+            if len(relative_parts) != 3 or relative_parts[-1] != "summary.json":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到指定的 sweep summary.json")
+            target = resolved_target
 
         if not target or not target.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到指定的 sweep summary.json")
