@@ -3882,7 +3882,7 @@ table.ui-table tr:hover {
 
 .sr-extract-pill strong {
   font-family: var(--font-mono);
-  color: #fff;
+  color: var(--text-main);
 }
 
 .sr-metrics-pills-row {
@@ -3936,7 +3936,7 @@ table.ui-table tr:hover {
 .sr-field-card-title {
   font-size: 0.92rem;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-main);
 }
 
 .sr-field-meta-line {
@@ -4004,7 +4004,7 @@ table.ui-table tr:hover {
 
 .sr-field-pill-btn:hover {
   border-color: var(--border-card);
-  color: #fff;
+  color: var(--text-main);
 }
 
 .sr-field-pill-btn.active {
@@ -4457,4 +4457,282 @@ table.ui-table tr:hover {
 
 [data-theme="light"] .cm-cell.cm-diag-marker {
   outline-color: rgba(0, 0, 0, 0.25);
+}
+
+/* 13.3 浅色主题 (Light Theme) 字体对比度与色彩可读性全面增强 */
+[data-theme="light"] .sr-hero-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] #sr-hero-datasets-count {
+  color: #4f46e5 !important;
+}
+
+[data-theme="light"] .sr-metric-pill {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-metric-pill .title {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val[style*="a5b4fc"] {
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val[style*="67e8f9"] {
+  color: #0284c7 !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val[style*="cyan"] {
+  color: #0891b2 !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val[style*="amber"] {
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .sr-metric-pill .val[style*="emerald"] {
+  color: #047857 !important;
+}
+
+[data-theme="light"] .sr-field-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-field-card-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-field-primary-score .lbl {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-name {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-val {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-val strong[style*="a5b4fc"] {
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-val strong[style*="amber"] {
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-val strong[style*="emerald"] {
+  color: #047857 !important;
+}
+
+[data-theme="light"] .sr-fmb-row .fmb-val small {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .sr-field-pill-btn {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .sr-field-pill-btn:hover {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-field-pill-btn.active {
+  background: rgba(6, 182, 212, 0.15) !important;
+  border-color: #0891b2 !important;
+  color: #0e7490 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .confusion-matrix-table th {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .confusion-matrix-table th.cm-corner {
+  background: transparent !important;
+  color: #64748b !important;
+}
+
+[data-theme="light"] .confusion-matrix-table td.cm-row-label {
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .sr-perclass-table th {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .sr-perclass-table td {
+  color: #1e293b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-perclass-table td[style*="a5b4fc"] {
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .sr-pv-field-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-pv-field-title {
+  color: #0f172a !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-pv-item {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-pv-val-name {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .sr-pv-val-stats {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .sr-cm-gradient-legend .scale-lbl {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .sr-cm-gradient-legend .scale-val {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .sr-cm-gradient-bar {
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .sr-cm-gradient-bar.sequential {
+  background: linear-gradient(to right, hsla(226, 70%, 88%, 0.5), hsla(226, 85%, 45%, 0.95)) !important;
+}
+
+[data-theme="light"] .cm-cell.cm-zero {
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: #94a3b8 !important;
+}
+
+[data-theme="light"] .sr-subview-tab {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .sr-subview-tab:hover {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-subview-tab.active {
+  background: var(--primary-500) !important;
+  color: #ffffff !important;
+}
+
+/* 13.4 抽取缓存条与混淆矩阵动态色阶字体深度对比度增强 */
+.sr-extract-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--cyan-500);
+  margin-right: 0.5rem;
+}
+
+[data-theme="light"] .sr-extract-label {
+  color: #0e7490 !important;
+}
+
+.sr-extract-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.sr-extract-pill strong,
+.sr-extract-pill .pill-strong {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+[data-theme="light"] .sr-extract-stats-bar {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .sr-extract-pill,
+[data-theme="light"] .sr-extract-pill span,
+[data-theme="light"] .sr-extract-pill .pill-text,
+[data-theme="light"] .sr-extract-pill .pill-label {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .sr-extract-pill strong,
+[data-theme="light"] .sr-extract-pill .pill-strong {
+  color: #0f172a !important;
+}
+
+/* 混淆矩阵单元格按背景深浅高对比排版 */
+.cm-cell {
+  padding: 8px 12px;
+  text-align: center;
+  border-radius: 4px;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  position: relative;
+  cursor: default;
+  font-family: var(--font-mono);
+}
+
+.cm-cell.cm-text-dark {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+  text-shadow: none !important;
+}
+
+.cm-cell.cm-text-light {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65) !important;
+}
+
+.cm-cell.cm-text-dim {
+  color: var(--text-dim) !important;
+  font-weight: 400 !important;
+  text-shadow: none !important;
+}
+
+[data-theme="light"] .cm-cell.cm-text-dim {
+  color: #94a3b8 !important;
+}
+
+/* 混淆矩阵单元格内数值与行占比排版 */
+.cm-cell-val {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.cm-cell-pct {
+  font-size: 0.65rem;
+  opacity: 0.85;
+  line-height: 1.1;
+  margin-top: 1px;
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260916sweep2">
+  <link rel="stylesheet" href="styles.css?v=20260916sweep5">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260916sweep2" defer></script>
+  <script src="app.js?v=20260916sweep5" defer></script>
 </head>
 <body>
 
@@ -318,7 +318,7 @@
       <!-- 工作区未检测到记录时的提示卡片 -->
       <div id="sr-empty-state" class="dataset-card" style="display: none; text-align: center; padding: 3rem 1.5rem; max-width: 640px; margin: 2rem auto;">
         <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
-        <h3 style="color: #fff; font-size: 1.15rem; margin-bottom: 0.5rem;">未在工作目录中检测到 Sweep 评测结果</h3>
+        <h3 style="color: var(--text-main); font-size: 1.15rem; margin-bottom: 0.5rem;">未在工作目录中检测到 Sweep 评测结果</h3>
         <p style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.6;">
           系统已自动检索工作区 <code><span id="sr-empty-ws-path">&lt;workspace&gt;/_sweep/</span></code>。<br>
           当在【批量评测】或通过命令行执行 <code>eval-vlm sweep ...</code> 产出 <code>summary.json</code> 后，将在此自动呈现。
@@ -383,7 +383,7 @@
         <div class="dataset-card sr-overview-card">
           <div class="sr-section-header">
             <div>
-              <h3 style="font-size: 1.05rem; color: #fff; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+              <h3 style="font-size: 1.05rem; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
                 <span>📋 跨数据集横向评测指标矩阵</span>
                 <span id="sr-table-count-badge" class="global-ds-count">11 个数据集</span>
               </h3>
@@ -440,7 +440,7 @@
               <span style="font-size: 1.4rem;">🔬</span>
               <div>
                 <div style="display: flex; align-items: center; gap: 0.6rem;">
-                  <h3 id="sr-detail-ds-name" style="font-size: 1.15rem; color: #000; margin: 0;">4dim_road_v6_desc</h3>
+                  <h3 id="sr-detail-ds-name" style="font-size: 1.15rem; color: var(--text-main); margin: 0;">4dim_road_v6_desc</h3>
                   <span id="sr-detail-method-badge" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">field-eval</span>
                   <span id="sr-detail-matchmode-badge" class="config-key-badge">exact 匹配</span>
                 </div>
@@ -498,7 +498,7 @@
                 <!-- 左侧/上方: 混淆矩阵热力图主视图 -->
                 <div class="sr-cm-heatmap-container">
                   <div class="sr-cm-header">
-                    <div style="font-size: 0.86rem; font-weight: 600; color: #fff;">
+                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-main);">
                       混淆矩阵：<span id="sr-cm-active-field-name" style="color: var(--cyan-500);">主辅路</span>
                     </div>
                     <div id="sr-cm-legend-container" class="sr-cm-legend"></div>
@@ -509,7 +509,7 @@
                 <!-- 右侧/下方: 逐类别 Precision / Recall / F1-score 指标表 -->
                 <div class="sr-cm-metrics-container">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
-                    <div style="font-size: 0.86rem; font-weight: 600; color: #fff;">逐类别精确率 / 召回率 / F1 矩阵</div>
+                    <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-main);">逐类别精确率 / 召回率 / F1 矩阵</div>
                     <div id="sr-cm-macro-avg-badge" class="role-badge" style="background: rgba(16,185,129,0.15); color: var(--emerald-500);">Macro F1: 0.589</div>
                   </div>
                   <div class="sr-cm-perclass-scroll" id="sr-cm-perclass-container"></div>

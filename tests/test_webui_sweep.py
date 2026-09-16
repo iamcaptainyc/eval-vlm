@@ -133,6 +133,7 @@ def test_sweep_frontend_overall_accuracy_and_heatmap_colormap():
     assert "非空准确率 (non_empty_acc):" in source
     assert "getHeatmapCellProps" in source
     assert "Math.pow(norm, 0.65)" in source
-    assert "toggleCmColormap" in source
     assert "sr-cm-gradient-bar" in source
+    assert "val / rowTotal" in source
+    assert "cm-cell-pct" in source
 

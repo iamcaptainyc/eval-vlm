@@ -3686,6 +3686,17 @@ function applyTheme(theme) {
   } else {
     document.documentElement.removeAttribute("data-theme");
   }
+  // 切换主题时，若当前正处于 Sweep 混淆矩阵看板，即时以新主题对比度重新渲染
+  try {
+    if (state.sweepResults && state.sweepResults.data && state.sweepResults.activeHeatmapField) {
+      const cms = state.sweepResults.data.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
+      if (cms[state.sweepResults.activeHeatmapField]) {
+        renderConfusionMatrixHeatmap(cms[state.sweepResults.activeHeatmapField], state.sweepResults.activeHeatmapField);
+      }
+    }
+  } catch (e) {
+    console.warn("Theme switch heatmap refresh skipped:", e);
+  }
 }
 
 function toggleTheme() {
@@ -4293,15 +4304,23 @@ function renderSweepFieldEvalDetail(result) {
     const ref = m.ref_extract || {};
     const pred = m.pred_extract || {};
     extractBar.innerHTML = `
-      <span style="font-size: 0.8rem; font-weight: 700; color: var(--cyan-500); margin-right: 0.5rem;">⚡ 抽取缓存状态:</span>
+      <span class="sr-extract-label">⚡ 抽取缓存状态:</span>
       <div class="sr-extract-pill">
-        <span>标准参考 Ref:</span>
-        <strong>${ref.total || 0}</strong> 条 (复用 <strong>${ref.skipped_already_done || 0}</strong>, 新增 <strong>${ref.newly_completed || 0}</strong>, 异常 <strong>${ref.errors || 0}</strong>)
+        <span class="pill-label">标准参考 Ref:</span>
+        <strong class="pill-strong">${ref.total || 0}</strong>
+        <span class="pill-text">条 (复用</span>
+        <strong class="pill-strong">${ref.skipped_already_done || 0}</strong><span class="pill-text">, 新增</span>
+        <strong class="pill-strong">${ref.newly_completed || 0}</strong><span class="pill-text">, 异常</span>
+        <strong class="pill-strong">${ref.errors || 0}</strong><span class="pill-text">)</span>
       </div>
       <div style="width: 1px; height: 16px; background: var(--border-subtle);"></div>
       <div class="sr-extract-pill">
-        <span>模型预测 Pred:</span>
-        <strong>${pred.total || 0}</strong> 条 (复用 <strong>${pred.skipped_already_done || 0}</strong>, 新增 <strong>${pred.newly_completed || 0}</strong>, 异常 <strong>${pred.errors || 0}</strong>)
+        <span class="pill-label">模型预测 Pred:</span>
+        <strong class="pill-strong">${pred.total || 0}</strong>
+        <span class="pill-text">条 (复用</span>
+        <strong class="pill-strong">${pred.skipped_already_done || 0}</strong><span class="pill-text">, 新增</span>
+        <strong class="pill-strong">${pred.newly_completed || 0}</strong><span class="pill-text">, 异常</span>
+        <strong class="pill-strong">${pred.errors || 0}</strong><span class="pill-text">)</span>
       </div>
     `;
   }
@@ -4345,7 +4364,7 @@ function renderSweepFieldEvalDetail(result) {
       </div>
       <div class="sr-metric-pill">
         <div class="title">已评测样本总数</div>
-        <div class="val" style="color: #fff;">${m.num_scored || m.num_samples || 0}</div>
+        <div class="val" style="color: var(--text-main);">${m.num_scored || m.num_samples || 0}</div>
         <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">缺失样本: ${m.num_pred_missing || 0}</div>
       </div>
     `;
@@ -4457,12 +4476,20 @@ function onSelectCmField(fieldName) {
   pills.forEach(p => p.classList.toggle("active", p.textContent.trim() === fieldName));
 }
 
-function getHeatmapCellProps(val, maxVal, isDiag, mode = "sequential") {
-  if (val === 0) {
+function isCurrentThemeLight() {
+  return document.documentElement.getAttribute("data-theme") === "light" ||
+         document.body.getAttribute("data-theme") === "light";
+}
+
+function getHeatmapCellProps(val, ratio, isDiag, mode = "sequential") {
+  const isLight = isCurrentThemeLight();
+
+  if (val === 0 || ratio <= 0) {
     return {
-      bg: "rgba(255, 255, 255, 0.02)",
-      border: "1px solid rgba(255, 255, 255, 0.05)",
-      text: "var(--text-dim)",
+      bg: isLight ? "#f8fafc" : "rgba(255, 255, 255, 0.02)",
+      border: isLight ? "1px solid #e2e8f0" : "1px solid rgba(255, 255, 255, 0.05)",
+      textClass: "cm-text-dim",
+      text: isLight ? "#94a3b8" : "var(--text-dim)",
       fontWeight: "400",
       textShadow: "none",
       isZero: true,
@@ -4470,55 +4497,104 @@ function getHeatmapCellProps(val, maxVal, isDiag, mode = "sequential") {
     };
   }
 
-  const norm = maxVal > 0 ? Math.min(1, Math.max(0, val / maxVal)) : 0;
-  // 采用幂函数平滑曲线，确保极低数值(如1/561)能清晰看见微浅色，而大数值(数百)呈现饱满深色
+  // ratio 为当前单元格占该真实行总样本的比例 (0.0 ~ 1.0)
+  const norm = Math.min(1, Math.max(0, ratio));
+  // 采用幂函数平滑曲线 (norm^0.65)
   const intensity = 0.12 + 0.88 * Math.pow(norm, 0.65);
 
   if (mode === "divergent") {
-    // 命中(绿)与误差(红)双色阶模式: 均严格根据数值由浅到深
+    // 命中(绿)与误差(红)双色阶模式
     if (isDiag) {
-      const alpha = (0.15 + 0.82 * intensity).toFixed(2);
-      return {
-        bg: `rgba(16, 185, 129, ${alpha})`,
-        border: `1px solid rgba(16, 185, 129, ${(0.25 + intensity * 0.75).toFixed(2)})`,
-        text: intensity > 0.45 ? "#ffffff" : "#6ee7b7",
-        fontWeight: intensity > 0.45 ? "700" : "600",
-        textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
-        isZero: false,
-        isDiag: true
-      };
+      if (isLight) {
+        const isDeepBg = norm >= 0.45 || intensity >= 0.65;
+        const bgL = Math.max(34, Math.round(92 - norm * 58));
+        return {
+          bg: `hsl(158, 85%, ${bgL}%)`,
+          border: `1px solid hsl(158, 70%, ${Math.max(28, bgL - 15)}%)`,
+          textClass: isDeepBg ? "cm-text-light" : "cm-text-dark",
+          text: isDeepBg ? "#ffffff" : "#064e3b",
+          fontWeight: "700",
+          textShadow: isDeepBg ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+          isZero: false,
+          isDiag: true
+        };
+      } else {
+        const alpha = (0.15 + 0.82 * intensity).toFixed(2);
+        return {
+          bg: `rgba(16, 185, 129, ${alpha})`,
+          border: `1px solid rgba(16, 185, 129, ${(0.25 + intensity * 0.75).toFixed(2)})`,
+          textClass: intensity > 0.5 ? "cm-text-light" : "cm-text-dark",
+          text: intensity > 0.5 ? "#ffffff" : "#6ee7b7",
+          fontWeight: intensity > 0.5 ? "700" : "600",
+          textShadow: intensity > 0.5 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+          isZero: false,
+          isDiag: true
+        };
+      }
     } else {
-      const alpha = (0.15 + 0.82 * intensity).toFixed(2);
-      return {
-        bg: `rgba(244, 63, 94, ${alpha})`,
-        border: `1px solid rgba(244, 63, 94, ${(0.25 + intensity * 0.75).toFixed(2)})`,
-        text: intensity > 0.45 ? "#ffffff" : "#fca5a5",
-        fontWeight: intensity > 0.45 ? "700" : "600",
-        textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
-        isZero: false,
-        isDiag: false
-      };
+      if (isLight) {
+        const isDeepBg = norm >= 0.45 || intensity >= 0.65;
+        const bgL = Math.max(36, Math.round(93 - norm * 57));
+        return {
+          bg: `hsl(350, 85%, ${bgL}%)`,
+          border: `1px solid hsl(350, 70%, ${Math.max(30, bgL - 15)}%)`,
+          textClass: isDeepBg ? "cm-text-light" : "cm-text-dark",
+          text: isDeepBg ? "#ffffff" : "#881337",
+          fontWeight: "700",
+          textShadow: isDeepBg ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+          isZero: false,
+          isDiag: false
+        };
+      } else {
+        const alpha = (0.15 + 0.82 * intensity).toFixed(2);
+        return {
+          bg: `rgba(244, 63, 94, ${alpha})`,
+          border: `1px solid rgba(244, 63, 94, ${(0.25 + intensity * 0.75).toFixed(2)})`,
+          textClass: intensity > 0.5 ? "cm-text-light" : "cm-text-dark",
+          text: intensity > 0.5 ? "#ffffff" : "#fca5a5",
+          fontWeight: intensity > 0.5 ? "700" : "600",
+          textShadow: intensity > 0.5 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+          isZero: false,
+          isDiag: false
+        };
+      }
     }
   }
 
-  // 默认: 统一经典热力图单色阶 (根据数值由浅到深)
-  // 低数值 -> 极浅淡蓝紫; 高数值 -> 极深浓郁纯正深蓝/靛蓝
-  const lightness = Math.max(26, Math.round(76 - intensity * 46));
-  const saturation = Math.min(96, Math.round(68 + intensity * 28));
-  const alpha = (0.14 + 0.84 * intensity).toFixed(2);
-  const borderAlpha = (0.20 + intensity * 0.70).toFixed(2);
+  // 默认模式: 统一经典热力图单色阶 (根据行占比由浅到深)
+  if (isLight) {
+    const isDeepBg = norm >= 0.45 || intensity >= 0.65;
+    const bgLightness = Math.max(30, Math.round(93 - norm * 63));
+    const bgSaturation = Math.min(95, Math.round(75 + norm * 20));
 
-  return {
-    bg: `hsla(226, ${saturation}%, ${lightness}%, ${alpha})`,
-    border: `1px solid hsla(226, 85%, 62%, ${borderAlpha})`,
-    text: intensity > 0.45 ? "#ffffff" : "#c7d2fe",
-    fontWeight: intensity > 0.45 ? "700" : "600",
-    textShadow: intensity > 0.45 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
-    isZero: false,
-    isDiag: isDiag
-  };
+    return {
+      bg: `hsl(226, ${bgSaturation}%, ${bgLightness}%)`,
+      border: `1px solid hsl(226, 75%, ${Math.max(25, bgLightness - 18)}%)`,
+      textClass: isDeepBg ? "cm-text-light" : "cm-text-dark",
+      text: isDeepBg ? "#ffffff" : "#1e1b4b",
+      fontWeight: "700",
+      textShadow: isDeepBg ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+      isZero: false,
+      isDiag: isDiag
+    };
+  } else {
+    const lightness = Math.max(26, Math.round(76 - intensity * 46));
+    const saturation = Math.min(96, Math.round(68 + intensity * 28));
+    const alpha = (0.14 + 0.84 * intensity).toFixed(2);
+    const borderAlpha = (0.20 + intensity * 0.70).toFixed(2);
+
+    return {
+      bg: `hsla(226, ${saturation}%, ${lightness}%, ${alpha})`,
+      border: `1px solid hsla(226, 85%, 62%, ${borderAlpha})`,
+      textClass: intensity > 0.5 ? "cm-text-light" : "cm-text-dark",
+      text: intensity > 0.5 ? "#ffffff" : "#c7d2fe",
+      fontWeight: intensity > 0.5 ? "700" : "600",
+      textShadow: intensity > 0.5 ? "0 1px 2px rgba(0,0,0,0.6)" : "none",
+      isZero: false,
+      isDiag: isDiag
+    };
+  }
 }
-
 function toggleCmColormap(mode) {
   state.sweepResults.cmColormap = mode;
   const cms = state.sweepResults.data?.results?.find(r => r.dataset === state.sweepResults.selectedDatasetName)?.metrics?.confusion_matrices || {};
@@ -4559,10 +4635,10 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
     const isDivergent = state.sweepResults.cmColormap === "divergent";
     legendContainer.innerHTML = `
       <div class="sr-cm-gradient-legend">
-        <span class="scale-lbl">数值深浅色阶:</span>
-        <span class="scale-val">0 (浅)</span>
+        <span class="scale-lbl">行占比深浅色阶:</span>
+        <span class="scale-val">0% (浅)</span>
         <div class="sr-cm-gradient-bar ${isDivergent ? 'divergent' : 'sequential'}"></div>
-        <span class="scale-val">${maxVal} (深)</span>
+        <span class="scale-val">100% (深)</span>
       </div>
       <div class="sr-cm-colormap-picker">
         <button type="button" class="sr-cm-mode-btn ${!isDivergent ? 'active' : ''}" onclick="toggleCmColormap('sequential')">
@@ -4587,28 +4663,35 @@ function renderConfusionMatrixHeatmap(cm, fieldName) {
   `;
 
   refClasses.forEach((refCls, rowIdx) => {
-    html += `<tr><td class="cm-row-label" title="真实类别: ${escapeHtml(refCls)}">${escapeHtml(refCls)}</td>`;
     const row = matrix[rowIdx] || [];
+    const rowTotal = row.reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
+
+    html += `<tr><td class="cm-row-label" title="真实类别: ${escapeHtml(refCls)} (行样本总计: ${rowTotal})">${escapeHtml(refCls)} <small style="color: var(--text-dim); font-weight: normal; font-size: 0.7rem;">(${rowTotal})</small></td>`;
 
     predClasses.forEach((predCls, colIdx) => {
       const val = row[colIdx] || 0;
       const isDiag = (refCls === predCls);
+      const ratio = rowTotal > 0 ? (val / rowTotal) : 0;
+      const ratioPct = (ratio * 100).toFixed(1) + "%";
 
-      const styleObj = getHeatmapCellProps(val, maxVal, isDiag, state.sweepResults.cmColormap);
-      let cellClass = "cm-cell";
+      const styleObj = getHeatmapCellProps(val, ratio, isDiag, state.sweepResults.cmColormap);
+      let cellClass = `cm-cell ${styleObj.textClass || ''}`;
       if (styleObj.isZero) cellClass += " cm-zero";
       if (isDiag) cellClass += " cm-diag-marker";
 
       const cellStyle = `background: ${styleObj.bg}; border: ${styleObj.border}; color: ${styleObj.text}; font-weight: ${styleObj.fontWeight}; text-shadow: ${styleObj.textShadow};`;
       const typeLabel = isDiag ? "【对角命中·预测正确】" : "【误差失配·预测偏差】";
-      const tooltip = `${typeLabel}\n真实类别 (Ref): ${escapeHtml(refCls)}\n预测类别 (Pred): ${escapeHtml(predCls)}\n样本数量 (Count): ${val}`;
+      const tooltip = `${typeLabel}\n真实类别 (Ref): ${escapeHtml(refCls)} (行总数: ${rowTotal})\n预测类别 (Pred): ${escapeHtml(predCls)}\n样本数量: ${val} 条\n行内占比: ${ratioPct}`;
 
-      html += `<td class="${cellClass}" style="${cellStyle}" title="${tooltip}">${val}</td>`;
+      const cellContent = val === 0
+        ? `<span>0</span>`
+        : `<div class="cm-cell-val">${val}</div><div class="cm-cell-pct">${ratioPct}</div>`;
+
+      html += `<td class="${cellClass}" style="${cellStyle}" title="${tooltip}">${cellContent}</td>`;
     });
 
     html += `</tr>`;
   });
-
   html += `</tbody></table>`;
   if (tableContainer) tableContainer.innerHTML = html;
 
@@ -4766,7 +4849,7 @@ function renderSweepEvalDetail(result) {
 
           cmHtml = `
             <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);">
-              <div style="font-weight: 600; font-size: 0.84rem; color: #fff; margin-bottom: 0.5rem;">🔥 第 ${idx + 1} 轮分类混淆矩阵</div>
+              <div style="font-weight: 600; font-size: 0.84rem; color: var(--text-main); margin-bottom: 0.5rem;">🔥 第 ${idx + 1} 轮分类混淆矩阵</div>
               <div style="overflow-x: auto; max-height: 350px;">
                 <table class="confusion-matrix-table">
                   <thead>
@@ -4776,25 +4859,30 @@ function renderSweepEvalDetail(result) {
                     </tr>
                   </thead>
                   <tbody>
-                    ${refClasses.map((rc, rIdx) => `
+                    ${refClasses.map((rc, rIdx) => {
+                      const row = matrix[rIdx] || [];
+                      const rowTotal = row.reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
+                      return `
                       <tr>
-                        <td class="cm-row-label">${escapeHtml(rc)}</td>
+                        <td class="cm-row-label">${escapeHtml(rc)} <small style="color: var(--text-dim); font-weight: normal; font-size: 0.7rem;">(${rowTotal})</small></td>
                         ${predClasses.map((pc, cIdx) => {
-                          const val = (matrix[rIdx] || [])[cIdx] || 0;
+                          const val = row[cIdx] || 0;
                           const isDiag = (rc === pc);
-                          let cStyle = "";
-                          if (val === 0) cStyle = "background: rgba(255,255,255,0.02); color: var(--text-dim);";
-                          else if (isDiag) {
-                            const a = getConfusionMatrixCellAlpha(val, maxVal, 0.85);
-                            cStyle = `background: rgba(16, 185, 129, ${a.toFixed(2)}); border: 1px solid var(--emerald-500); color: #fff;`;
-                          } else {
-                            const a = getConfusionMatrixCellAlpha(val, maxVal, 0.8);
-                            cStyle = `background: rgba(244, 63, 94, ${a.toFixed(2)}); border: 1px solid var(--rose-500); color: #fff;`;
-                          }
-                          return `<td class="cm-cell" style="${cStyle}">${val}</td>`;
+                          const ratio = rowTotal > 0 ? (val / rowTotal) : 0;
+                          const ratioPct = (ratio * 100).toFixed(1) + "%";
+
+                          const styleObj = getHeatmapCellProps(val, ratio, isDiag, state.sweepResults.cmColormap);
+                          const cStyle = `background: ${styleObj.bg}; border: ${styleObj.border}; color: ${styleObj.text}; font-weight: ${styleObj.fontWeight}; text-shadow: ${styleObj.textShadow};`;
+                          const typeLabel = isDiag ? "【对角命中】" : "【误差失配】";
+                          const tooltip = `${typeLabel}\n真实: ${escapeHtml(rc)} (行总数: ${rowTotal})\n预测: ${escapeHtml(pc)}\n样本: ${val}\n行占比: ${ratioPct}`;
+                          const cellContent = val === 0
+                            ? `<span>0</span>`
+                            : `<div class="cm-cell-val">${val}</div><div class="cm-cell-pct">${ratioPct}</div>`;
+                          return `<td class="cm-cell ${styleObj.textClass || ''} ${styleObj.isZero ? 'cm-zero' : ''} ${isDiag ? 'cm-diag-marker' : ''}" style="${cStyle}" title="${tooltip}">${cellContent}</td>`;
                         }).join("")}
                       </tr>
-                    `).join("")}
+                    `;
+                    }).join("")}
                   </tbody>
                 </table>
               </div>
