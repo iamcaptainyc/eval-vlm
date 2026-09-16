@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import shutil
 import signal
 import subprocess
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,8 @@ class Job:
         params: dict[str, Any],
         user: str,
         settings: Settings,
+        *,
+        persist: bool = True,
     ) -> None:
         self.id = job_id
         self.type = job_type
@@ -52,8 +55,27 @@ class Job:
         self.cancel_requested = False
         self.subscribers: list[asyncio.Queue[dict[str, Any]]] = []
         self.command: list[str] = []
+        self._finalized = False
 
-        self.save_meta()
+        if persist:
+            self.save_meta()
+
+    @classmethod
+    def from_meta(cls, data: dict[str, Any], settings: Settings) -> "Job":
+        """Restore a job without first writing default values over its metadata."""
+        job = cls(
+            job_id=data["id"], job_type=data["type"], dataset=data.get("dataset"),
+            params=data.get("params") or {}, user=data.get("user", "anonymous"),
+            settings=settings, persist=False,
+        )
+        for field in (
+            "status", "created_at", "started_at", "finished_at", "exit_code",
+            "pid", "progress", "progress_msg",
+        ):
+            if field in data:
+                setattr(job, field, data[field])
+        job.command = data.get("command") or []
+        return job
 
     def save_meta(self) -> None:
         data = {
@@ -125,30 +147,16 @@ class JobManager:
             if mfile.exists():
                 try:
                     data = json.loads(mfile.read_text(encoding="utf-8"))
-                    job = Job(
-                        job_id=data["id"],
-                        job_type=data["type"],
-                        dataset=data.get("dataset"),
-                        params=data.get("params", {}),
-                        user=data.get("user", "anonymous"),
-                        settings=self.settings,
-                    )
-                    job.created_at = data.get("created_at", job.created_at)
-                    job.started_at = data.get("started_at")
-                    job.finished_at = data.get("finished_at")
-                    job.exit_code = data.get("exit_code")
-                    job.pid = data.get("pid")
-                    job.progress = data.get("progress")
-                    job.progress_msg = data.get("progress_msg")
-                    job.command = data.get("command") or self._build_cmd(job)
+                    job = Job.from_meta(data, self.settings)
+                    if not job.command:
+                        self._build_cmd(job)
 
                     # 若原本标为 running 或 queued，服务重启后标为 interrupted
-                    if data.get("status") in ("running", "queued"):
+                    if job.status in ("running", "queued"):
                         job.status = "interrupted"
                         job.finished_at = datetime.now(timezone.utc).isoformat()
+                        job.progress_msg = "WebUI 重启时任务尚未结束，已标记为中断"
                         job.save_meta()
-                    else:
-                        job.status = data.get("status", "failed")
 
                     self.jobs[job.id] = job
                 except Exception:
@@ -183,10 +191,17 @@ class JobManager:
         params: dict[str, Any],
         user: str = "anonymous",
     ) -> JobSummary:
-        now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        suffix = os.urandom(2).hex()
-        ds_part = f"_{dataset}" if dataset else ""
-        job_id = f"{job_type}{ds_part}_{now_str}_{suffix}"
+        now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = os.urandom(3).hex()
+        # A sweep dataset is usually a comma-delimited list and must never be
+        # mirrored into a directory name.  Keep it in metadata only.
+        if job_type == "sweep":
+            job_id = f"sweep_{now_str}_{suffix}"
+        else:
+            safe_dataset = re.sub(r"[^A-Za-z0-9._-]+", "-", dataset or "").strip(".-")
+            safe_dataset = safe_dataset[:48]
+            ds_part = f"_{safe_dataset}" if safe_dataset else ""
+            job_id = f"{job_type}{ds_part}_{now_str}_{suffix}"
 
         job = Job(
             job_id=job_id,
@@ -235,6 +250,11 @@ class JobManager:
 
             try:
                 await self._execute_job(job)
+            except asyncio.CancelledError:
+                job.cancel_requested = True
+                await self._stop_process(job, grace_period=0.5)
+                await self._finalize_job(job, exit_code=getattr(job.proc, "returncode", None), force_status="canceled")
+                raise
             except Exception as e:
                 job.status = "failed"
                 job.progress_msg = f"执行异常: {e}"
@@ -369,41 +389,57 @@ class JobManager:
         if job.cancel_requested:
             await self._stop_process(job)
 
-        # 读取输出并推流
+        # Waiting for process exit and draining stdout are independent.  In
+        # particular, inherited stdout handles can keep readline() blocked
+        # after the child has already exited.
+        drain_task = asyncio.create_task(self._drain_stdout(job, proc))
+        try:
+            exit_code = await proc.wait()
+            try:
+                await asyncio.wait_for(asyncio.shield(drain_task), timeout=0.75)
+            except asyncio.TimeoutError:
+                drain_task.cancel()
+                await asyncio.gather(drain_task, return_exceptions=True)
+            await self._finalize_job(job, exit_code=exit_code)
+        except asyncio.CancelledError:
+            drain_task.cancel()
+            await asyncio.gather(drain_task, return_exceptions=True)
+            raise
+        finally:
+            if not drain_task.done():
+                drain_task.cancel()
+
+    async def _drain_stdout(self, job: Job, proc: asyncio.subprocess.Process) -> None:
         assert proc.stdout is not None
         with job.log_file.open("a", encoding="utf-8") as f_log:
-            while True:
-                line_bytes = await proc.stdout.readline()
-                if not line_bytes:
-                    break
+            while line_bytes := await proc.stdout.readline():
                 line_str = line_bytes.decode("utf-8", errors="replace")
                 f_log.write(line_str)
                 f_log.flush()
                 job.broadcast("log", line_str)
 
-        exit_code = await proc.wait()
+    async def _finalize_job(
+        self, job: Job, *, exit_code: Optional[int], force_status: Optional[str] = None
+    ) -> None:
+        """Persist and announce one terminal state exactly once."""
+        if job._finalized:
+            return
         job.exit_code = exit_code
-        job.finished_at = datetime.now(timezone.utc).isoformat()
-        if job.cancel_requested:
+        job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
+        if force_status:
+            job.status = force_status
+        elif job.cancel_requested:
             job.status = "canceled"
-        elif job.status != "canceled":
+        else:
             job.status = "succeeded" if exit_code == 0 else "failed"
-
-        finish_line = f"\n=== 任务执行结束 (PID: {proc.pid}, 状态: {job.status}, 退出码: {exit_code}) ===\n"
+        finish_line = f"\n=== 任务执行结束 (PID: {job.pid}, 状态: {job.status}, 退出码: {exit_code}) ===\n"
         with job.log_file.open("a", encoding="utf-8") as f_log:
             f_log.write(finish_line)
             f_log.flush()
         job.broadcast("log", finish_line)
-
         job.save_meta()
-        job.broadcast(
-            "status",
-            {
-                "status": job.status,
-                "exit_code": exit_code,
-                "finished_at": job.finished_at,
-            },
-        )
+        job.broadcast("status", {"status": job.status, "exit_code": exit_code, "finished_at": job.finished_at})
+        job._finalized = True
 
     async def cancel_job(self, job_id: str) -> bool:
         job = self.jobs.get(job_id)
@@ -432,10 +468,7 @@ class JobManager:
         # the worker will subsequently finish draining and persist its log.
         await self._stop_process(job)
         if job.proc is not None and job.proc.returncode is not None:
-            job.status = "canceled"
-            job.finished_at = datetime.now(timezone.utc).isoformat()
-            job.save_meta()
-            job.broadcast("status", {"status": "canceled"})
+            await self._finalize_job(job, exit_code=job.proc.returncode, force_status="canceled")
         return True
 
     async def shutdown(self) -> None:
@@ -452,11 +485,6 @@ class JobManager:
         if current and current.status == "running":
             current.cancel_requested = True
             await self._stop_process(current)
-            if current.proc is not None and current.proc.returncode is not None:
-                current.status = "canceled"
-                current.finished_at = datetime.now(timezone.utc).isoformat()
-                current.save_meta()
-                current.broadcast("status", {"status": "canceled"})
 
         if self.worker_task and not self.worker_task.done():
             # Give _execute_job a chance to drain the terminated child and
@@ -508,11 +536,33 @@ class JobManager:
     def list_jobs(self) -> list[JobSummary]:
         summaries: list[JobSummary] = []
         for jid, job in sorted(self.jobs.items(), key=lambda x: x[1].created_at, reverse=True):
+            self._reconcile_finished_process(job)
             summaries.append(job.to_summary())
         return summaries
 
     def get_job(self, job_id: str) -> Optional[Job]:
-        return self.jobs.get(job_id)
+        job = self.jobs.get(job_id)
+        if job:
+            self._reconcile_finished_process(job)
+        return job
+
+    def _reconcile_finished_process(self, job: Job) -> None:
+        """Cheap defensive convergence for callers that observe a stale running job."""
+        if job.status != "running" or job.proc is None or job.proc.returncode is None:
+            return
+        # The active worker owns the brief post-exit stdout drain window and
+        # will finalize within its bounded grace period. Avoid closing SSE
+        # early and hiding the last buffered log lines from viewers.
+        if self.current_job_id == job.id and self.worker_task and not self.worker_task.done():
+            return
+        job.exit_code = job.proc.returncode
+        job.finished_at = datetime.now(timezone.utc).isoformat()
+        job.status = "canceled" if job.cancel_requested else (
+            "succeeded" if job.exit_code == 0 else "failed"
+        )
+        job.progress_msg = job.progress_msg or "进程已退出，日志流正在收尾"
+        job.save_meta()
+        job.broadcast("status", {"status": job.status, "exit_code": job.exit_code, "finished_at": job.finished_at})
 
     async def stream_job_logs(
         self, job_id: str, offset: int = 0
@@ -523,32 +573,38 @@ class JobManager:
             yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
             return
 
-        # 1. 首次连线：回放历史日志
-        if job.log_file.exists():
-            with job.log_file.open("r", encoding="utf-8", errors="replace") as f:
-                if offset > 0:
-                    f.seek(offset)
-                content = f.read()
-                if content:
-                    yield f"event: log\ndata: {json.dumps(content)}\n\n"
-        elif job.status == "queued":
-            cmd_preview = " ".join(job.command) if job.command else "—"
-            queued_msg = f"=== 任务已进入调度队列等待执行 (ID: {job.id}) ===\n=== 预备执行: {cmd_preview} ===\n\n"
-            yield f"event: log\ndata: {json.dumps(queued_msg)}\n\n"
-
-        # 推送当前状态
-        yield f"event: status\ndata: {json.dumps({'status': job.status, 'exit_code': job.exit_code})}\n\n"
-
-        if job.status not in ("queued", "running"):
-            return
-
-        # 2. 挂载到广播订阅
+        # Subscribe first: status can transition while disk history is being
+        # replayed.  The queue closes that race (a duplicate tail is harmless).
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         job.subscribers.append(q)
-
+        self._reconcile_finished_process(job)
         try:
+            # 1. 首次连线：回放历史日志
+            if job.log_file.exists():
+                with job.log_file.open("r", encoding="utf-8", errors="replace") as f:
+                    if offset > 0:
+                        f.seek(offset)
+                    content = f.read()
+                    if content:
+                        yield f"event: log\ndata: {json.dumps(content)}\n\n"
+            elif job.status == "queued":
+                cmd_preview = " ".join(job.command) if job.command else "—"
+                queued_msg = f"=== 任务已进入调度队列等待执行 (ID: {job.id}) ===\n=== 预备执行: {cmd_preview} ===\n\n"
+                yield f"event: log\ndata: {json.dumps(queued_msg)}\n\n"
+
+            # 推送当前状态. The subscriber is already attached, so a terminal
+            # transition cannot be lost between this snapshot and waiting.
+            yield f"event: status\ndata: {json.dumps({'status': job.status, 'exit_code': job.exit_code})}\n\n"
+
+            if job.status not in ("queued", "running"):
+                return
+
             while True:
-                msg = await q.get()
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
                 ev = msg.get("event", "log")
                 data = msg.get("data")
                 yield f"event: {ev}\ndata: {json.dumps(data)}\n\n"

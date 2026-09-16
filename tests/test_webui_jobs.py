@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 import pytest
 
@@ -32,6 +33,74 @@ def test_submit_and_list_jobs(job_mgr):
 
     assert job_mgr.is_dataset_busy("demo_ds") is True
     assert job_mgr.is_dataset_busy("other_ds") is False
+
+
+def test_job_ids_keep_sweep_short_and_sanitize_regular_dataset(job_mgr):
+    datasets = ",".join(f"very-long-dataset-{n}" for n in range(20))
+    first = job_mgr.submit_job("sweep", datasets, {}, "tester")
+    second = job_mgr.submit_job("sweep", datasets, {}, "tester")
+    assert first.id.startswith("sweep_")
+    assert len(first.id) < 40
+    assert "," not in first.id and "very-long-dataset" not in first.id
+    assert first.id != second.id
+
+    normal = job_mgr.submit_job("eval", "../unsafe name/" + "x" * 100, {}, "tester")
+    assert len(normal.id) < 100
+    assert "/" not in normal.id and "\\" not in normal.id and " " not in normal.id
+
+
+def test_startup_restore_preserves_metadata_and_interrupts_active(tmp_path):
+    settings = Settings(workspace_dir=tmp_path)
+    job_dir = settings.jobs_dir / "sweep_20260101T000000Z_abcdef"
+    job_dir.mkdir(parents=True)
+    meta = {
+        "id": job_dir.name, "type": "sweep", "dataset": "a,b,c",
+        "params": {"model": "keep-me"}, "user": "saved-user", "status": "running",
+        "created_at": "2026-01-01T00:00:00+00:00", "started_at": "2026-01-01T00:01:00+00:00",
+        "finished_at": None, "exit_code": None, "pid": 123, "progress": 0.5,
+        "progress_msg": "halfway", "command": ["saved-command"],
+    }
+    (job_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    manager = JobManager(settings)
+    restored = manager.get_job(meta["id"])
+    assert restored is not None
+    assert restored.status == "interrupted"
+    assert restored.params == {"model": "keep-me"}
+    assert restored.user == "saved-user"
+    assert restored.command == ["saved-command"]
+    persisted = json.loads((job_dir / "meta.json").read_text(encoding="utf-8"))
+    assert persisted["dataset"] == "a,b,c"
+    assert persisted["status"] == "interrupted"
+
+    completed_dir = settings.jobs_dir / "eval_completed"
+    completed_dir.mkdir()
+    completed_meta = {
+        **meta,
+        "id": completed_dir.name,
+        "type": "eval",
+        "dataset": "done-dataset",
+        "status": "succeeded",
+        "finished_at": "2026-01-01T00:02:00+00:00",
+        "exit_code": 0,
+    }
+    (completed_dir / "meta.json").write_text(json.dumps(completed_meta), encoding="utf-8")
+    reloaded = JobManager(settings)
+    completed = reloaded.get_job(completed_dir.name)
+    assert completed is not None
+    assert completed.status == "succeeded"
+    assert completed.exit_code == 0
+    completed_persisted = json.loads((completed_dir / "meta.json").read_text(encoding="utf-8"))
+    assert completed_persisted["status"] == "succeeded"
+
+
+def test_job_frontend_uses_single_flight_polling_and_session_scoped_logs():
+    source = (Path(__file__).parents[1] / "src" / "eval_vlm" / "webui" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "jobLoadPromise" in source
+    assert "updateJobPolling" in source
+    assert "terminalSession" in source
+    assert "const isCurrent" in source
+    assert "await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`)" in source
+    assert "日志流暂时断开" in source
 
 
 @pytest.mark.anyio
@@ -111,6 +180,73 @@ async def test_job_log_streaming_sse(job_mgr):
 
     assert any("line 1" in ev for ev in events)
     assert any("status" in ev for ev in events)
+
+
+@pytest.mark.anyio
+async def test_sse_subscribes_before_terminal_transition_and_cleans_up(job_mgr):
+    from eval_vlm.webui.jobs import Job
+    job = Job("eval_sse_race", "eval", "ds", {}, "tester", job_mgr.settings)
+    job.status = "running"
+    job.log_file.write_text("history\n", encoding="utf-8")
+    job_mgr.jobs[job.id] = job
+    stream = job_mgr.stream_job_logs(job.id)
+    first = await anext(stream)
+    assert "history" in first
+    assert len(job.subscribers) == 1
+    job.status = "succeeded"
+    job.broadcast("status", {"status": "succeeded", "exit_code": 0})
+    events = [first]
+    async for event in stream:
+        events.append(event)
+    assert any("succeeded" in event for event in events)
+    assert job.subscribers == []
+
+
+@pytest.mark.anyio
+async def test_process_exit_finalizes_even_when_stdout_never_reaches_eof(job_mgr, monkeypatch):
+    from eval_vlm.webui.jobs import Job
+
+    class NeverEofStream:
+        async def readline(self):
+            await asyncio.Event().wait()
+
+    class ExitedProcess:
+        pid = 4321
+        stdout = NeverEofStream()
+        returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    async def fake_create(*_args, **_kwargs):
+        return ExitedProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    job = Job("eval_stuck_pipe", "eval", "ds", {}, "tester", job_mgr.settings)
+    job.status = "running"
+    await asyncio.wait_for(job_mgr._execute_job(job), timeout=2)
+    assert job.status == "succeeded"
+    assert job.exit_code == 0
+    assert "任务执行结束" in job.log_file.read_text(encoding="utf-8")
+
+
+def test_list_jobs_reconciles_a_process_that_already_exited(job_mgr):
+    from eval_vlm.webui.jobs import Job
+
+    class ExitedProcess:
+        returncode = 0
+
+    job = Job("eval_finished_before_poll", "eval", "ds", {}, "tester", job_mgr.settings)
+    job.status = "running"
+    job.proc = ExitedProcess()
+    job_mgr.jobs[job.id] = job
+
+    summary = next(item for item in job_mgr.list_jobs() if item.id == job.id)
+    assert summary.status == "succeeded"
+    assert summary.exit_code == 0
+    persisted = json.loads(job.meta_file.read_text(encoding="utf-8"))
+    assert persisted["status"] == "succeeded"
 
 
 def test_job_command_canonical_and_targets(job_mgr):

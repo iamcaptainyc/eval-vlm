@@ -70,6 +70,10 @@ const state = {
   logDrawerOpen: false,
   autoScrollLogs: true,
   eventSource: null,
+  jobLoadPromise: null,
+  jobPollTimer: null,
+  terminalSession: 0,
+  terminalRetryTimer: null,
 
   // 评测结果与指标 (双模态: field-eval / eval)
   runs: [],
@@ -188,8 +192,9 @@ function switchTab(tab, dataset = null, updateHash = true) {
   if (tab === "sweep") loadSweepData();
   if (tab === "jobs") {
     initInlineJobConsole();
-    loadJobs();
+    refreshJobs();
   }
+  updateJobPolling();
   if (tab === "settings") loadSettings();
   if (tab === "gallery") loadSamples(0);
   if (tab === "config") loadConfig();
@@ -1253,9 +1258,9 @@ async function submitSweepJob() {
 
     const job = await res.json();
     showToast(`Sweep 批量扫描任务已成功提交入队 (ID: ${job.id})`, "success");
-    await loadJobs();
     switchTab("jobs");
-    openTerminal(job.id);
+    await refreshJobs();
+    await openTerminal(job.id);
   } catch (err) {
     showToast(`提交 Sweep 任务失败: ${err.message}`, "error");
   }
@@ -2388,14 +2393,47 @@ async function submitInlineJob() {
 // 任务管理与 SSE (Jobs)
 // --------------------------------------------------------------------------
 async function loadJobs() {
-  try {
-    const res = await apiFetch("/api/jobs");
-    state.jobs = await res.json();
-    renderJobs();
-  } catch (err) {
-    console.error(err);
-    showToast(`获取任务队列失败: ${err.message}`, "error");
+  if (state.jobLoadPromise) return state.jobLoadPromise;
+  state.jobLoadPromise = (async () => {
+    try {
+      const res = await apiFetch("/api/jobs");
+      state.jobs = await res.json();
+      renderJobs();
+      updateJobPolling();
+      return state.jobs;
+    } catch (err) {
+      console.error(err);
+      showToast(`获取任务队列失败: ${err.message}`, "error");
+      throw err;
+    } finally {
+      state.jobLoadPromise = null;
+    }
+  })();
+  return state.jobLoadPromise;
+}
+
+function refreshJobs() {
+  return loadJobs().catch(() => state.jobs);
+}
+
+function hasActiveJobs() {
+  return state.jobs.some((job) => job.status === "queued" || job.status === "running");
+}
+
+function updateJobPolling() {
+  const needed = state.activeTab === "jobs" || state.logDrawerOpen || hasActiveJobs();
+  if (needed && !state.jobPollTimer) {
+    state.jobPollTimer = window.setInterval(() => { refreshJobs(); }, 2000);
+  } else if (!needed && state.jobPollTimer) {
+    window.clearInterval(state.jobPollTimer);
+    state.jobPollTimer = null;
   }
+}
+
+function jobDatasetLabel(dataset) {
+  if (!dataset) return "全量";
+  const items = String(dataset).split(",").map((item) => item.trim()).filter(Boolean);
+  return items.length > 1 ? `共 ${items.length} 个数据集` : items[0] || "全量";
 }
 
 function renderJobs() {
@@ -2424,7 +2462,7 @@ function renderJobs() {
       <tr>
         <td class="job-id-cell" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;" title="${escapeHtml(j.id)}"><div class="job-id-text">${escapeHtml(j.id)}</div></td>
         <td><span class="role-badge" style="background:rgba(6,182,212,0.15); color:var(--cyan-500);">${escapeHtml(j.type)}</span></td>
-        <td><strong style="color: var(--text-main);">${escapeHtml(j.dataset || "—")}</strong></td>
+        <td title="${escapeHtml(j.dataset || "全量")}"><strong style="color: var(--text-main);">${escapeHtml(jobDatasetLabel(j.dataset))}</strong></td>
         <td class="job-command-cell" style="max-width: 320px; font-size: 0.76rem; font-family: var(--font-mono); color: var(--text-dim); word-break: break-all;" title="${escapeHtml(cmdText)}">
           <div class="job-command-text">${escapeHtml(cmdText)}</div>
         </td>
@@ -2457,7 +2495,9 @@ function renderJobs() {
     .join("");
 }
 
-function openTerminal(jobId) {
+async function openTerminal(jobId) {
+  const session = ++state.terminalSession;
+  stopTerminalConnection();
   state.currentJobId = jobId;
   state.terminalLogs = "";
   state.logDrawerOpen = true;
@@ -2474,12 +2514,29 @@ function openTerminal(jobId) {
     drawer.setAttribute("aria-expanded", "true");
   }
   if (jobLabel) jobLabel.textContent = `任务: ${jobId}`;
-  if (pre) pre.textContent = "正在连接进程日志输出流...\n";
+  if (pre) pre.textContent = "正在获取任务最新状态...\n";
+  setTerminalConnection("正在获取任务状态...");
 
-  // 读取已缓存的 job 元信息
-  const job = state.jobs.find((j) => j.id === jobId);
+  // Always fetch a fresh snapshot before connecting. A stale queue row must
+  // not leave a completed local process displayed as "connecting".
+  let job;
+  try {
+    const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+    job = await response.json();
+  } catch (err) {
+    if (session === state.terminalSession && pre) pre.textContent = `无法读取任务状态: ${err.message}\n`;
+    return;
+  }
+  if (session !== state.terminalSession || !state.logDrawerOpen || state.currentJobId !== jobId) return;
+  const snapshotIndex = state.jobs.findIndex((item) => item.id === jobId);
+  if (snapshotIndex >= 0) state.jobs[snapshotIndex] = job;
+  else state.jobs.unshift(job);
+  renderJobs();
   if (job) {
-    if (dsLabel) dsLabel.textContent = `数据集: ${job.dataset || "全量"}`;
+    if (dsLabel) {
+      dsLabel.textContent = `数据集: ${jobDatasetLabel(job.dataset)}`;
+      dsLabel.title = job.dataset || "全量";
+    }
     if (cmdDisplay) cmdDisplay.textContent = job.command?.length ? job.command.join(" ") : "—";
     if (logDisplay) logDisplay.textContent = job.log_file || "—";
     if (job.status === "queued") {
@@ -2487,22 +2544,54 @@ function openTerminal(jobId) {
     }
   }
 
-  if (state.eventSource) {
-    state.eventSource.close();
+  connectTerminalStream(jobId, session, 0);
+  updateJobPolling();
+}
+
+function isTerminalJob(status) {
+  return ["succeeded", "failed", "canceled", "interrupted", "deleted"].includes(status);
+}
+
+function setTerminalConnection(message) {
+  const el = document.getElementById("terminal-connection-status");
+  if (el) el.textContent = message;
+}
+
+function stopTerminalConnection() {
+  if (state.terminalRetryTimer) {
+    window.clearTimeout(state.terminalRetryTimer);
+    state.terminalRetryTimer = null;
   }
+  if (state.eventSource) state.eventSource.close();
+  state.eventSource = null;
+}
 
-  state.eventSource = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
+function connectTerminalStream(jobId, session, attempt) {
+  if (session !== state.terminalSession || !state.logDrawerOpen || state.currentJobId !== jobId) return;
+  setTerminalConnection(attempt ? `正在重连日志流（第 ${attempt} 次）...` : "正在连接日志流...");
+  const source = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
+  const cmdDisplay = document.getElementById("terminal-cmd-display");
+  const logDisplay = document.getElementById("terminal-log-display");
+  const pre = document.getElementById("terminal-pre");
+  let terminalReceived = false;
+  state.eventSource = source;
+  const isCurrent = () => session === state.terminalSession && state.eventSource === source && state.currentJobId === jobId && state.logDrawerOpen;
+  const sessionIsCurrent = () => session === state.terminalSession && state.currentJobId === jobId && state.logDrawerOpen;
 
-  state.eventSource.addEventListener("started", (e) => {
+  source.onopen = () => { if (isCurrent()) setTerminalConnection("日志流已连接"); };
+
+  source.addEventListener("started", (e) => {
+    if (!isCurrent()) return;
     try {
       const data = JSON.parse(e.data);
       if (cmdDisplay && data.command) cmdDisplay.textContent = data.command.join(" ");
       if (logDisplay && data.log_file) logDisplay.textContent = data.log_file;
-      loadJobs();
+      refreshJobs();
     } catch (_) {}
   });
 
-  state.eventSource.addEventListener("log", (e) => {
+  source.addEventListener("log", (e) => {
+    if (!isCurrent()) return;
     try {
       const line = JSON.parse(e.data);
       state.terminalLogs += line;
@@ -2513,22 +2602,51 @@ function openTerminal(jobId) {
     } catch (_) {}
   });
 
-  state.eventSource.addEventListener("status", (e) => {
+  source.addEventListener("status", (e) => {
+    if (!isCurrent()) return;
     try {
       const statusData = JSON.parse(e.data);
       const exitInfo = statusData.exit_code !== undefined && statusData.exit_code !== null ? ` (exit_code=${statusData.exit_code})` : "";
       state.terminalLogs += `\n[系统状态更新: ${statusData.status}${exitInfo}]\n`;
       if (pre) pre.textContent = state.terminalLogs;
-      loadJobs();
+      if (isTerminalJob(statusData.status)) {
+        terminalReceived = true;
+        setTerminalConnection(`任务已结束：${statusData.status}`);
+        source.close();
+        if (state.eventSource === source) state.eventSource = null;
+      }
+      refreshJobs();
     } catch (_) {}
   });
 
-  state.eventSource.onerror = () => {
-    state.eventSource.close();
+  source.onerror = async () => {
+    if (terminalReceived || !isCurrent()) return;
+    source.close();
+    let latest = null;
+    try {
+      const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+      latest = await response.json();
+    } catch (_) {}
+    if (!sessionIsCurrent() || state.eventSource !== source) return;
+    if (latest && isTerminalJob(latest.status)) {
+      if (state.eventSource === source) state.eventSource = null;
+      setTerminalConnection(`任务已结束：${latest.status}`);
+      await refreshJobs();
+      return;
+    }
+    if (state.eventSource === source) state.eventSource = null;
+    const nextAttempt = Math.min(attempt + 1, 6);
+    const delay = Math.min(8000, 500 * (2 ** Math.min(nextAttempt, 4)));
+    setTerminalConnection(`日志流暂时断开，将在 ${(delay / 1000).toFixed(1)} 秒后重连...`);
+    state.terminalRetryTimer = window.setTimeout(() => {
+      state.terminalRetryTimer = null;
+      connectTerminalStream(jobId, session, nextAttempt);
+    }, delay);
   };
 }
 
 function closeTerminal() {
+  state.terminalSession += 1;
   state.logDrawerOpen = false;
   const drawer = document.getElementById("terminal-drawer");
   if (drawer) {
@@ -2541,10 +2659,8 @@ function closeTerminal() {
       fullscreenButton.setAttribute("aria-label", "终端全屏");
     }
   }
-  if (state.eventSource) {
-    state.eventSource.close();
-    state.eventSource = null;
-  }
+  stopTerminalConnection();
+  updateJobPolling();
 }
 
 function toggleTerminalFullscreen() {

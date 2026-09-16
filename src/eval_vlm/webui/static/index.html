@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260914ggufui">
+  <link rel="stylesheet" href="styles.css?v=20260916jobs">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260914ggufui" defer></script>
+  <script src="app.js?v=20260916jobs" defer></script>
 </head>
 <body>
 
@@ -2048,6 +2048,7 @@
         <span style="font-weight: 700; color: #fff; font-size: 0.88rem;">🖥️ 任务终端</span>
         <span id="terminal-job-label" class="user-tag" style="background: rgba(99,102,241,0.25); color: #a5b4fc; font-family: var(--font-mono); font-size: 0.75rem;"></span>
         <span id="terminal-dataset-label" class="dataset-active-pill" style="font-size: 0.75rem; padding: 2px 8px;"></span>
+        <span id="terminal-connection-status" class="terminal-connection-status" aria-live="polite">未连接</span>
       </div>
       <div class="terminal-header-actions" style="display: flex; align-items: center; gap: 0.75rem;">
         <label style="font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem;">

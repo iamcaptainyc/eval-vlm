@@ -1756,6 +1756,12 @@ table.ui-table tr:hover {
   word-break: break-word;
 }
 
+.terminal-connection-status {
+  color: #67e8f9;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 .terminal-stream-log {
   flex: 1;
   min-height: 0;

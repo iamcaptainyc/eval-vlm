@@ -145,7 +145,7 @@ inference:
   vllm_offline:
     model_path: null          # 合并后全精度权重目录(传给 LLM(model=...);--vllm-model 永久写回;也用作产物子目录名)
     # --- LLM(...) 引擎参数 ---
-    gpu_memory_utilization: 0.4    # 显存利用率 0~1(--vllm-gpu-util 永久写回);OOM 就调低
+    gpu_memory_utilization: 0.2    # 显存利用率 0~1(--vllm-gpu-util 永久写回);OOM 就调低
     max_model_len: 4096       # 最大序列长度(含输入+生成)(--vllm-max-model-len 永久写回)
     max_num_seqs: 128         # 引擎最大并发序列数
     max_num_batched_tokens: 20480  # 单批最大 token 数
@@ -244,7 +244,7 @@ pred:
 #   --match-mode -> match_mode(field-eval 匹配判定模式:exact/contain)。
 # ---------------------------------------------------------------------------
 label_extract:
-  base_url: https://canghai-agent-api-test.aijidou.com/   # 服务根地址(--label-extract-url 永久写回)
+  base_url: https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/   # 服务根地址(--label-extract-url 永久写回)
   path: api/v1/vlm/label-extract                           # 接口路径(label-extract 命令用,13 类标签)
   # Authorization 头完整值(含 bearer 前缀)。测试 token 会过期,过期后用
   # --label-extract-token 覆盖(永久写回),或直接改这里。
