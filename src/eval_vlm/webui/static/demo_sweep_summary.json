@@ -1,0 +1,7526 @@
+{
+  "datasets": [
+    "4dim_road_v6_desc",
+    "car",
+    "emotion_shujutang_regen_v3",
+    "environment",
+    "final_action_results",
+    "gesture_fixed12150_dataset_regen_v1",
+    "scene_traffic_aopeng",
+    "sign_aigc_desc",
+    "weather",
+    "yang_road_video_frames",
+    "yellow_lane"
+  ],
+  "results": [
+    {
+      "dataset": "4dim_road_v6_desc",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "4dim_road_v6_desc",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "exact",
+        "scored_at": "2026-09-16T06:43:48.881732+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/value-extract",
+        "ref_extract": {
+          "total": 588,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 588,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 588,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 588,
+          "interrupted": false
+        },
+        "fields": [
+          "主辅路",
+          "警示标志",
+          "车道位置",
+          "道路结构"
+        ],
+        "num_samples": 588,
+        "num_scored": 588,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "主辅路": {
+            "total": 580,
+            "correct": 524,
+            "accuracy": 0.9034,
+            "empty_count": 8,
+            "non_empty_count": 580,
+            "non_empty_correct": 524,
+            "non_empty_accuracy": 0.9034,
+            "empty_correct": 0,
+            "empty_incorrect": 8,
+            "empty_accuracy": 0.0,
+            "overall_correct": 524,
+            "overall_total": 588,
+            "overall_accuracy": 0.8912
+          },
+          "警示标志": {
+            "total": 588,
+            "correct": 569,
+            "accuracy": 0.9677,
+            "empty_count": 0,
+            "non_empty_count": 588,
+            "non_empty_correct": 569,
+            "non_empty_accuracy": 0.9677,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 569,
+            "overall_total": 588,
+            "overall_accuracy": 0.9677
+          },
+          "车道位置": {
+            "total": 527,
+            "correct": 398,
+            "accuracy": 0.7552,
+            "empty_count": 61,
+            "non_empty_count": 527,
+            "non_empty_correct": 398,
+            "non_empty_accuracy": 0.7552,
+            "empty_correct": 21,
+            "empty_incorrect": 40,
+            "empty_accuracy": 0.3443,
+            "overall_correct": 419,
+            "overall_total": 588,
+            "overall_accuracy": 0.7126
+          },
+          "道路结构": {
+            "total": 585,
+            "correct": 499,
+            "accuracy": 0.853,
+            "empty_count": 3,
+            "non_empty_count": 585,
+            "non_empty_correct": 499,
+            "non_empty_accuracy": 0.853,
+            "empty_correct": 0,
+            "empty_incorrect": 3,
+            "empty_accuracy": 0.0,
+            "overall_correct": 499,
+            "overall_total": 588,
+            "overall_accuracy": 0.8486
+          }
+        },
+        "per_value": {
+          "主辅路": {
+            "主路": {
+              "correct": 366,
+              "support": 394,
+              "accuracy": 0.9289
+            },
+            "辅路": {
+              "correct": 158,
+              "support": 186,
+              "accuracy": 0.8495
+            }
+          },
+          "警示标志": {
+            "无警示牌": {
+              "correct": 561,
+              "support": 571,
+              "accuracy": 0.9825
+            },
+            "礼让行人": {
+              "correct": 4,
+              "support": 11,
+              "accuracy": 0.3636
+            },
+            "学校路口": {
+              "correct": 4,
+              "support": 5,
+              "accuracy": 0.8
+            },
+            "三角警示牌": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            }
+          },
+          "车道位置": {
+            "第1车道": {
+              "correct": 177,
+              "support": 218,
+              "accuracy": 0.8119
+            },
+            "第2车道": {
+              "correct": 138,
+              "support": 178,
+              "accuracy": 0.7753
+            },
+            "第3车道": {
+              "correct": 64,
+              "support": 95,
+              "accuracy": 0.6737
+            },
+            "第4车道": {
+              "correct": 17,
+              "support": 29,
+              "accuracy": 0.5862
+            },
+            "第5车道": {
+              "correct": 2,
+              "support": 6,
+              "accuracy": 0.3333
+            },
+            "第6车道": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            }
+          },
+          "道路结构": {
+            "地面道路": {
+              "correct": 193,
+              "support": 218,
+              "accuracy": 0.8853
+            },
+            "高架桥上": {
+              "correct": 106,
+              "support": 135,
+              "accuracy": 0.7852
+            },
+            "高架桥下": {
+              "correct": 60,
+              "support": 74,
+              "accuracy": 0.8108
+            },
+            "隧道内": {
+              "correct": 46,
+              "support": 54,
+              "accuracy": 0.8519
+            },
+            "即将驶入隧道": {
+              "correct": 49,
+              "support": 52,
+              "accuracy": 0.9423
+            },
+            "即将驶出隧道": {
+              "correct": 45,
+              "support": 52,
+              "accuracy": 0.8654
+            }
+          }
+        },
+        "confusion_matrices": {
+          "主辅路": {
+            "classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "ref_classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "matrix": [
+              [
+                366,
+                0,
+                28
+              ],
+              [
+                7,
+                0,
+                1
+              ],
+              [
+                28,
+                0,
+                158
+              ]
+            ],
+            "per_class": {
+              "主路": {
+                "precision": 0.9127,
+                "recall": 0.9289,
+                "f1": 0.9207,
+                "support": 394
+              },
+              "无": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 8
+              },
+              "辅路": {
+                "precision": 0.8449,
+                "recall": 0.8495,
+                "f1": 0.8472,
+                "support": 186
+              }
+            },
+            "macro_avg": {
+              "precision": 0.5859,
+              "recall": 0.5928,
+              "f1": 0.5893
+            },
+            "accuracy": 0.8912,
+            "total_samples": 588
+          },
+          "警示标志": {
+            "classes": [
+              "三角警示牌",
+              "学校路口",
+              "无警示牌",
+              "礼让行人",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "三角警示牌",
+              "学校路口",
+              "无警示牌",
+              "礼让行人"
+            ],
+            "matrix": [
+              [
+                0,
+                0,
+                1,
+                0,
+                0
+              ],
+              [
+                0,
+                4,
+                1,
+                0,
+                0
+              ],
+              [
+                6,
+                1,
+                561,
+                2,
+                1
+              ],
+              [
+                0,
+                1,
+                6,
+                4,
+                0
+              ]
+            ],
+            "per_class": {
+              "三角警示牌": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "学校路口": {
+                "precision": 0.6667,
+                "recall": 0.8,
+                "f1": 0.7273,
+                "support": 5
+              },
+              "无警示牌": {
+                "precision": 0.9859,
+                "recall": 0.9825,
+                "f1": 0.9842,
+                "support": 571
+              },
+              "礼让行人": {
+                "precision": 0.6667,
+                "recall": 0.3636,
+                "f1": 0.4706,
+                "support": 11
+              }
+            },
+            "macro_avg": {
+              "precision": 0.5798,
+              "recall": 0.5365,
+              "f1": 0.5455
+            },
+            "accuracy": 0.9677,
+            "total_samples": 588
+          },
+          "车道位置": {
+            "classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道",
+              "第5车道",
+              "第6车道"
+            ],
+            "ref_classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道",
+              "第5车道",
+              "第6车道"
+            ],
+            "matrix": [
+              [
+                21,
+                15,
+                12,
+                12,
+                1,
+                0,
+                0
+              ],
+              [
+                6,
+                177,
+                30,
+                4,
+                1,
+                0,
+                0
+              ],
+              [
+                3,
+                20,
+                138,
+                17,
+                0,
+                0,
+                0
+              ],
+              [
+                3,
+                3,
+                22,
+                64,
+                3,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                11,
+                17,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                3,
+                2,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0
+              ]
+            ],
+            "per_class": {
+              "无": {
+                "precision": 0.6176,
+                "recall": 0.3443,
+                "f1": 0.4421,
+                "support": 61
+              },
+              "第1车道": {
+                "precision": 0.8233,
+                "recall": 0.8119,
+                "f1": 0.8176,
+                "support": 218
+              },
+              "第2车道": {
+                "precision": 0.6832,
+                "recall": 0.7753,
+                "f1": 0.7263,
+                "support": 178
+              },
+              "第3车道": {
+                "precision": 0.5872,
+                "recall": 0.6737,
+                "f1": 0.6275,
+                "support": 95
+              },
+              "第4车道": {
+                "precision": 0.6538,
+                "recall": 0.5862,
+                "f1": 0.6182,
+                "support": 29
+              },
+              "第5车道": {
+                "precision": 1.0,
+                "recall": 0.3333,
+                "f1": 0.5,
+                "support": 6
+              },
+              "第6车道": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              }
+            },
+            "macro_avg": {
+              "precision": 0.6236,
+              "recall": 0.5035,
+              "f1": 0.5331
+            },
+            "accuracy": 0.7126,
+            "total_samples": 588
+          },
+          "道路结构": {
+            "classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "无",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "ref_classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "无",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "matrix": [
+              [
+                49,
+                0,
+                1,
+                0,
+                2,
+                0,
+                0
+              ],
+              [
+                0,
+                45,
+                0,
+                0,
+                6,
+                0,
+                1
+              ],
+              [
+                0,
+                0,
+                193,
+                0,
+                0,
+                19,
+                6
+              ],
+              [
+                0,
+                0,
+                2,
+                0,
+                0,
+                1,
+                0
+              ],
+              [
+                1,
+                5,
+                0,
+                0,
+                46,
+                0,
+                2
+              ],
+              [
+                1,
+                0,
+                27,
+                0,
+                0,
+                106,
+                1
+              ],
+              [
+                0,
+                0,
+                8,
+                0,
+                0,
+                6,
+                60
+              ]
+            ],
+            "per_class": {
+              "即将驶入隧道": {
+                "precision": 0.9608,
+                "recall": 0.9423,
+                "f1": 0.9515,
+                "support": 52
+              },
+              "即将驶出隧道": {
+                "precision": 0.9,
+                "recall": 0.8654,
+                "f1": 0.8824,
+                "support": 52
+              },
+              "地面道路": {
+                "precision": 0.8355,
+                "recall": 0.8853,
+                "f1": 0.8597,
+                "support": 218
+              },
+              "无": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 3
+              },
+              "隧道内": {
+                "precision": 0.8519,
+                "recall": 0.8519,
+                "f1": 0.8519,
+                "support": 54
+              },
+              "高架桥上": {
+                "precision": 0.803,
+                "recall": 0.7852,
+                "f1": 0.794,
+                "support": 135
+              },
+              "高架桥下": {
+                "precision": 0.8571,
+                "recall": 0.8108,
+                "f1": 0.8333,
+                "support": 74
+              }
+            },
+            "macro_avg": {
+              "precision": 0.744,
+              "recall": 0.7344,
+              "f1": 0.739
+            },
+            "accuracy": 0.8486,
+            "total_samples": 588
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.8728,
+          "macro_accuracy": 0.8698,
+          "micro_overall_accuracy": 0.855,
+          "macro_overall_accuracy": 0.855,
+          "exact_match_samples": 343,
+          "exact_match_rate": 0.5833,
+          "strict_exact_match_samples": 307,
+          "strict_exact_match_rate": 0.5221
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/4dim_road_v6_desc/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "car",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "car",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "exact",
+        "scored_at": "2026-09-16T06:46:46.497678+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/vehicle-model-extract",
+        "ref_extract": {
+          "total": 349,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 349,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 349,
+          "newly_completed": 349,
+          "errors": 0,
+          "skipped_already_done": 0,
+          "interrupted": false
+        },
+        "fields": [
+          "品牌",
+          "年款",
+          "车型",
+          "车系"
+        ],
+        "num_samples": 349,
+        "num_scored": 349,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "品牌": {
+            "total": 349,
+            "correct": 348,
+            "accuracy": 0.9971,
+            "empty_count": 0,
+            "non_empty_count": 349,
+            "non_empty_correct": 348,
+            "non_empty_accuracy": 0.9971,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 348,
+            "overall_total": 349,
+            "overall_accuracy": 0.9971
+          },
+          "年款": {
+            "total": 349,
+            "correct": 151,
+            "accuracy": 0.4327,
+            "empty_count": 0,
+            "non_empty_count": 349,
+            "non_empty_correct": 151,
+            "non_empty_accuracy": 0.4327,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 151,
+            "overall_total": 349,
+            "overall_accuracy": 0.4327
+          },
+          "车型": {
+            "total": 349,
+            "correct": 77,
+            "accuracy": 0.2206,
+            "empty_count": 0,
+            "non_empty_count": 349,
+            "non_empty_correct": 77,
+            "non_empty_accuracy": 0.2206,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 77,
+            "overall_total": 349,
+            "overall_accuracy": 0.2206
+          },
+          "车系": {
+            "total": 349,
+            "correct": 325,
+            "accuracy": 0.9312,
+            "empty_count": 0,
+            "non_empty_count": 349,
+            "non_empty_correct": 325,
+            "non_empty_accuracy": 0.9312,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 325,
+            "overall_total": 349,
+            "overall_accuracy": 0.9312
+          }
+        },
+        "per_value": {
+          "品牌": {
+            "宝马": {
+              "correct": 39,
+              "support": 39,
+              "accuracy": 1.0
+            },
+            "长安": {
+              "correct": 36,
+              "support": 37,
+              "accuracy": 0.973
+            },
+            "奇瑞": {
+              "correct": 36,
+              "support": 36,
+              "accuracy": 1.0
+            },
+            "大众": {
+              "correct": 33,
+              "support": 33,
+              "accuracy": 1.0
+            },
+            "吉利": {
+              "correct": 30,
+              "support": 30,
+              "accuracy": 1.0
+            },
+            "奔驰": {
+              "correct": 29,
+              "support": 29,
+              "accuracy": 1.0
+            },
+            "比亚迪": {
+              "correct": 27,
+              "support": 27,
+              "accuracy": 1.0
+            },
+            "丰田": {
+              "correct": 26,
+              "support": 26,
+              "accuracy": 1.0
+            },
+            "福特": {
+              "correct": 26,
+              "support": 26,
+              "accuracy": 1.0
+            },
+            "奥迪": {
+              "correct": 22,
+              "support": 22,
+              "accuracy": 1.0
+            },
+            "捷途": {
+              "correct": 22,
+              "support": 22,
+              "accuracy": 1.0
+            },
+            "本田": {
+              "correct": 22,
+              "support": 22,
+              "accuracy": 1.0
+            }
+          },
+          "年款": {
+            "2024款": {
+              "correct": 44,
+              "support": 80,
+              "accuracy": 0.55
+            },
+            "2025款": {
+              "correct": 28,
+              "support": 52,
+              "accuracy": 0.5385
+            },
+            "2023款": {
+              "correct": 28,
+              "support": 47,
+              "accuracy": 0.5957
+            },
+            "2022款": {
+              "correct": 7,
+              "support": 26,
+              "accuracy": 0.2692
+            },
+            "2021款": {
+              "correct": 5,
+              "support": 25,
+              "accuracy": 0.2
+            },
+            "2019款": {
+              "correct": 7,
+              "support": 23,
+              "accuracy": 0.3043
+            },
+            "2020款": {
+              "correct": 5,
+              "support": 19,
+              "accuracy": 0.2632
+            },
+            "2026款": {
+              "correct": 3,
+              "support": 12,
+              "accuracy": 0.25
+            },
+            "2018款": {
+              "correct": 5,
+              "support": 10,
+              "accuracy": 0.5
+            },
+            "2017款": {
+              "correct": 4,
+              "support": 9,
+              "accuracy": 0.4444
+            },
+            "2011款": {
+              "correct": 3,
+              "support": 8,
+              "accuracy": 0.375
+            },
+            "2016款": {
+              "correct": 2,
+              "support": 8,
+              "accuracy": 0.25
+            },
+            "2012款": {
+              "correct": 3,
+              "support": 7,
+              "accuracy": 0.4286
+            },
+            "2013款": {
+              "correct": 2,
+              "support": 7,
+              "accuracy": 0.2857
+            },
+            "2014款": {
+              "correct": 0,
+              "support": 4,
+              "accuracy": 0.0
+            },
+            "2015款": {
+              "correct": 0,
+              "support": 4,
+              "accuracy": 0.0
+            },
+            "2010款": {
+              "correct": 2,
+              "support": 3,
+              "accuracy": 0.6667
+            },
+            "2007款": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "2006款": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "2008款": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2009款": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            }
+          },
+          "车型": {
+            "1.5T DCT尊贵型": {
+              "correct": 2,
+              "support": 3,
+              "accuracy": 0.6667
+            },
+            "xDrive 25i M运动套装": {
+              "correct": 0,
+              "support": 3,
+              "accuracy": 0.0
+            },
+            "1.5TD DHT 150KM 向湖": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "1.6T DCT影尊版 7座": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "2.0L CVT 精英版": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "2.0T 全轮驱动悦享型": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "3.0T Sportback": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "45 TFSI 臻选型": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "50e": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "525Li 豪华套装": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "740Li 尊享型 M运动套装": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "AMG A 35 L 4MATIC": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "C 260 轿跑车": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "C 350 eL": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "GLA 220": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "GLB 220 动感型": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "Sportback 35 TFSI 飞驰尊享型": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "xDrive40i M运动套装": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "xDrive40i 尊享型 M运动套装": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "xDrive50": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "基本型": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "蓝鲸版 1.5T DCT尊贵型": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "试装车": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "高能版 2.0T DCT御": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "1.0L IMT舒适型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.0L move up!": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.0L 手动活力版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.0L 手动超越型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.0L 手动进取型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.2T S-CVT先锋版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.3L 手动": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.3L 标准型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.3T 手动尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.4T CVT 4G互联豪华型 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.4T CVT豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.4TSI GTI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5G CVT炫动天窗版 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L CVT尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L CVT热爱版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5L CVT舒适版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L 手动新青春版 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L 手动智趣豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L 自动悦享型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5L 自动舒适版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5L 自动质享型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5T 7DCT 至臻澎湃版7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T DCT先锋型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T DCT尊耀型7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T DCT潮Cool 7座": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5T DCT畅行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T E-混动 豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 智慧领航型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 精英型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 自动典雅型星空版 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 自动智享版尊悦型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5T 自动炫智型 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5T 雷神Hi·F油电混动版 Super睿": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TCI 自动特供版 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD DHT 220KM 四驱征服版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD DHT MAX": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "1.5TD DHT PRO": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD DHT 远航版PRO+": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD 两驱 发现PRO": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD 发现": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.5TD 智慧版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6E 手动魅动版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6L CVT百万全球版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6L 手动精英型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6L 手动致诚版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6L 手动进取型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6L 自动乐趣型 国IV": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6T DCT影尊版 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6TD DCT 悦享 MAX 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.6TD 手动 悦享 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8L CVT尚雅型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8L CVT豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8L 手动尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8L 手动豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8L 自动精英型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8T 旗舰型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8T 自动智享版尊雅型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8T 舒适型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8TD DCT两驱亚运版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "1.8TD DCT智联PRO": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "120 长续航版豪华型 磷酸铁锂": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "127 逐风版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "180Turbo CVT乐享版 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "180Turbo CVT豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L CVT 臻选版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L CVT 进取版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L CVT两驱尊享版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L CVT两驱进取版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L GTDi 四驱尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L e:HEV经典版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L 两驱都市版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "2.0L 两驱领先版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L 手动豪华型 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L 舒适版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0L 运动SPORT版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T DCT两驱舒享版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "2.0T DCT两驱豪享版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "2.0T E-混动 运动版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T Shooting Brake R-Line": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T 全球行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T 霄汉版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD DCT EVO两驱长风版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD DCT智驾版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD XWD发现": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD XWD征服": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD 四驱 穿越PRO娱乐版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TD 高功自动四驱东方曜望月版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0TFSI 150kW 豪华型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "2.0TSI 两驱舒适版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T手动两驱柴油精英型长箱": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T柴油多功能商用车中轴中顶6座国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.0T汽油手动挡多功能商用车中轴中顶6座国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.3L 旗舰型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.3T EcoBoost 四驱ST-LINE 6座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.3T EcoBoost 四驱ST-LINE 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.3T 长滩": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.5L 四驱劲擎版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "2.5V 风尚菁英版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "200T DCT缤驰版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "210 奢享型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "210km 熊猫mini 元气熊": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "220i 尊享型运动套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "240 TURBO CVT 舒享版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "240TURBO CVT两驱幻夜版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "240TURBO CVT四驱幻夜版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "240TURBO CVT科技版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "240TURBO 两驱致悦版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "260TURBO 典雅版 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "260TURBO 精英版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "280T DCT尊贵型 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "280TSI DSG R-Line": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "280TSI DSG 时光版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "280TSI 商务版 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "280TSI 星空精英版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "290T 两驱豪华+": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "3.0TSI 锐尊二十周年特别版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "3.6L V6 5座加长商务版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "300 豪华型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "300TSI DSG 辰光版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "320KM 豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "330TSI 炫目版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "370 TURBO 9AT 尊享版 AWD": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "380TSI 四驱尊享豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "380TSI 四驱旗舰胜境版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "390T 两驱天穹版 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "4.0L 中东低配版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "4.0L 自动VX": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "4.3L Royal Saloon VIP": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "40 TFSI 技术型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "40 TFSI 特别版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "40 e-tron 创境版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "40 e-tron 创行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "400出行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "401KM 尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "425i Gran Coupe M运动套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "425i 敞篷M运动曜夜套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "430PHEV 混动精英版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "45 TFSI 豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "450TSI 四驱至尊版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "45TFSI quattro 齐云型 羽林套装 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "510标准版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "520Li 典雅型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "525i M运动套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "530 V6 四驱尊崇豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "530Le 豪华套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "530Li 尊享型 M运动套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "530Li 尊享型 豪华套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "530TSI 四驱旗舰胜境Pro众享款 6座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "55 TFSI quattro 尊享型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "550km 卓越型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "630i M运动套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "630i双门轿跑车": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "700KM 冠军版 尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "740Li 尊享型 豪华套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "740Li 领先型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "740Li豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "9X 2.0T AT前驱尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A 180 L": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A 200 L 动感版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A 200 L 时尚版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A3L Limousine 35 TFSI 豪华运动型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A3L Limousine 35 TFSI 进取运动型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A4L 200万辆悦享版 45 TFSI quattro 臻选动感型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A4L 40 TFSI 豪华动感型 星夜版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Active Wagon": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Avant 40 TFSI时尚动感型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "B 200 动感型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "C 200 L 运动版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "C 260 旅行轿车": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Concept": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "DM-i 100KM 尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "DM-i 125KM豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "DM-i 160KM超越型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "DM-i 冠军版 110KM旗舰PLUS": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "E 260 运动版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "E 300 L 时尚型 轿车": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "E 300 L 时尚型 运动轿车": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "E 350 e L 轿车": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EQB 260": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EQC 350 4MATIC 特别版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EQE 350 先锋版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EQE SUV 350 4MATIC豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EV300 悦享型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EV360 智联领动型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EV460 共享版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EcoBoost 170 尊领型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EcoBoost 170 尊领型PLUS": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EcoBoost 180 舒雅型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EcoBoost 245 两驱耀享款": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EcoBoost 245 四驱纵享款 ST-LINE": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EcoBoost 245 豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "GIF+AT 新前卫": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "GLA 200": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "GLC 260 L 4MATIC 动感型 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "GLC 300 L 4MATIC 动感型 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Hy-Power Concept": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "M4双门轿跑车 雷霆版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "PLUS 1.5L CVT痛快红枣版I型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Pro 1.5L 手动青春版 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Pro 380TSI 两驱智行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Pro 380TSI 四驱R-Line智尊版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "S 450 L 4MATIC": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Sportback e-tron 舒适型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Sportback 典藏版 40 TFSI 时尚动感型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "TRD Pro Concept": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "UP 1.5L CVT豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "X4 M 雷霆版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "concept": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e-Golf": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e:PHEV 尊享版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "e:PHEV 尊贵版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "eDrive 40 L 曜夜运动套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "eDrive 40L M performance Parts": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "eDrive50L 尊享型 M运动套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "sDrive20Li X设计套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "sDrive25Li X设计套装": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "xDrive25i M运动套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "xDrive40i 尊享型M运动套装 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "xDrive40i 领先型豪华套装 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "xDrive60L M运动套装": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 1.3T 手动精英型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 1.5L CVT向上版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 1.5L 手动向上版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 1.5L 手动标准型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 1.6L 手动舒适低碳版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 2.0L 自动豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢 EcoBoost 125 自动锋潮型 国VI": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "三厢百万款 1.5L 手动向上版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "两厢 1.6L 自动风尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "两厢 280TSI DSG豪华版 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "冠军版 290T 两驱闪耀版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "冠军版 鲲鹏290TGDI DCT豪享版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "冠军版 鲲鹏290TGDI DCT豪悦版 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "凌渡L GTS 380TSI DSG凌风百万纪念版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "加长版 2.0TD XWD 7座征服+": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "升级版 高续航版 豪华型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "卓越版 1.5L CVT风尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "卓越版 230TCI 自动豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "四驱高能巅峰版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "改款 1.5L CVT热爱版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款 1.5L 自动精英型 国V": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款 2.0T AT四驱旗舰版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款 380TSI 舒享型 7座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款 EV360 标准型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款两厢 1.6L 手动尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "改款二 众享款 330TSI DSG豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "星领型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "智慧新蓝鲸 125KM 战舰版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智慧新蓝鲸 145KM 高能版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智能电混双擎 1.8L E-CVT先锋版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智能电混双擎 2.5L 两驱舒适版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "智驾版 401KM活力版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智驾版 520KM豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智驾版 DM-i 120KM尊荣型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "智驾版 DM-i 125KM豪华型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "极智长续航版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "标准版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "标准续航 智享版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "梦想版 1.5L 自动时尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "油混 1.5T 星云版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "特装版 1.3L GL-i型尚版 MT": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "第4代 冠军版 1.5L CVT尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "第三代 1.5T 500Bar 卓越型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "第三代 冠军版 1.5T 自动劲航型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "第二代 1.5T DCT轻年版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "第四代 新蓝鲸 1.5T 天枢尊贵型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "精英PRO": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "经典版 两厢 1.6L 自动舒适型智行版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "缤瑞COOL 1.5T DCT风驰版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "致炫X 1.5L CVT领先PLUS版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "节能版 1.5L 手动基本型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "荣耀版 230TCI 自动卓越版 5座": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "荣耀版 420km 自由版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "荣耀版 520KM旗舰型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "荣耀版 DM-i 1.5T 121KM旗舰型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "荣耀版 DM-i 100KM 精英型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "蓝鲸iDD 1.5T 130km卓越型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "超能版 1.5T CVT超能勇士": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "运动系列 锐·T动 260TURBO 舒适版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "进阶版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "途昂X 380TSI 四驱极夜限定版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "钻石版 1.5L CVT3克拉II型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "锐·混动 1.5L 净畅版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "锐·混动 2.0L 两驱豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "锐界L 2.0T EcoBoost E混动两驱七座时尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "锐界L 2.0T EcoBoost 两驱七座时尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "锐界L 2.0T EcoBoost 两驱七座豪华型": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "锐界L 2.0T EcoBoost 四驱七座时尚型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "长续航PRO版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "长续航智驾版 DM-i 245KM尊荣型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "长续航智驾版 DM-i 245KM激光雷达旗舰型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "青春版 1.5T DCT 豪华版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "领界S EcoBoost 145 CVT铂领型": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "首发领航版": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "高能版 2.0T DCT劲": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "高能版 2.0T DCT驰": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "鲲鹏290TGDI DCT 乘势版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "鲲鹏版 390TGDI 自动展翅版": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            }
+          },
+          "车系": {
+            "5系": {
+              "correct": 6,
+              "support": 7,
+              "accuracy": 0.8571
+            },
+            "帝豪": {
+              "correct": 7,
+              "support": 7,
+              "accuracy": 1.0
+            },
+            "7系": {
+              "correct": 5,
+              "support": 5,
+              "accuracy": 1.0
+            },
+            "A3": {
+              "correct": 5,
+              "support": 5,
+              "accuracy": 1.0
+            },
+            "C级": {
+              "correct": 4,
+              "support": 5,
+              "accuracy": 0.8
+            },
+            "旅行者": {
+              "correct": 5,
+              "support": 5,
+              "accuracy": 1.0
+            },
+            "CS55 PLUS": {
+              "correct": 3,
+              "support": 4,
+              "accuracy": 0.75
+            },
+            "X4": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "X6": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "星越L": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "瑞虎8": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "瑞虎9": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "艾瑞泽8": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "锐界": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            },
+            "A4": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "A7": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "A级": {
+              "correct": 2,
+              "support": 3,
+              "accuracy": 0.6667
+            },
+            "CS85 COUPE": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "E级": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "GLA": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "UNI-K": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "X90": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "博越": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "山海T1": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "帕萨特": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "揽境": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "瑞虎3x": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "瑞虎8 PLUS": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "瑞虎8 PRO": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "皓影": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "福克斯": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "艾瑞泽5": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "蒙迪欧": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "途昂": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "4系": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "A级AMG": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "CS75": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "CX30": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "GLB": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "GLC": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "Q4 e-tron": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "Q5": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "S5": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "T-ROC探歌": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "X1": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "X7": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "X70 PRO": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "XM": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "XR-V": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "i3": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "i7": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "iX": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "亚洲龙": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "享域": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "元Pro": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "全顺": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "冠道": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "凌放HARRIER": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "凌轩": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "博瑞": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "卡罗拉": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "卡罗拉锐放": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "大圣": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "威兰达": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "宋PLUS EV": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "护卫舰07": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "捷达": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "探险者": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "汉DM": {
+              "correct": 0,
+              "support": 2,
+              "accuracy": 0.0
+            },
+            "海景": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "海豹": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            },
+            "海豹07 DM": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "熊猫": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "皓影 PHEV": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "睿骋": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "缤瑞": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "英仕派": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "远景": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "途观L": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "逸动EV": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "锐际": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "领睿": {
+              "correct": 2,
+              "support": 2,
+              "accuracy": 1.0
+            },
+            "2系多功能旅行车": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "6系": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "6系GT": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "A3 PHEV(进口)": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "A5": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "A5L": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "A7L": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "Arteon": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Atlas": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "B级": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "C-HR": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "C-HR(海外)": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "CC": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "CLA EV": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "CS15": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "CS55": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "CS55 E-Rock": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "CS75 PHEV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "CS75 PLUS": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "C级PHEV": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "EQB": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EQC": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EQE": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "EQE SUV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "E级PHEV": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "FJ 酷路泽": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "G3": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "G3R": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "ID.6 X": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "ID.Vizzion": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "INSIGHT": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "M4": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Polo": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Q6": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "Q6L e-tron": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "QQ": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "S6": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "SX7": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "S级": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "UNI-K 智电iDD": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "UNI-V": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "UNI-Z PHEV": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "UR-V": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "VOSS": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "X4 M": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "X5 PLUS": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "X7 PLUS": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "X70": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "X70 C-DM": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "X70 Coupe": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "X70 PLUS": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "YARiS L 致享": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "YARiS L 致炫": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "bZ3": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "bZ4X": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e-Golf": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e2": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e3": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e5": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "e:NP2 极湃2": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "up!": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "亚洲龙(海外)": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            },
+            "元EV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "元UP": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "兰德酷路泽": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "凌派": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "凌渡": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "博越L": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "型格": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "夏朗": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "奔奔EV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "奔奔MINI": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "奕泽IZOA": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "威兰达PHEV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "威驰": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "宋L DM": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "宋L EV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "宋PLUS DM": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "宝来": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "山海L6": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "山海L7": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "帝豪GL": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "思迪": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "悦翔V7": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "探索06 C-DM": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "旗云5": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "星瑞": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "朗逸": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "格瑞维亚": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "桑塔纳": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "海豚": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "海豹06": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "海豹DM": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "烈马": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "瑞虎3": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "瑞虎7": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "瑞虎8L": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "皇冠": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "睿骋CC": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "福克斯(进口)": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "福睿斯": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "秦EV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "翼虎": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "自由者": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "自由舰": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "艾力绅": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "艾瑞泽7": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "览拓者": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "辉腾": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "迈特威": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "迈腾": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "远景X6": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "途锐": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "逸动PHEV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "金牛座": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "锐志": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "雅力士": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "雅阁": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "领界": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "领界EV": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "风云A8": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "风云A9": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "风云T10": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "风云T9": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "飞度": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "高尔夫": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "麦柯斯": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            }
+          }
+        },
+        "confusion_matrices": {
+          "品牌": {
+            "classes": [
+              "丰田",
+              "吉利",
+              "大众",
+              "奇瑞",
+              "奔驰",
+              "奥迪",
+              "宝马",
+              "捷途",
+              "本田",
+              "比亚迪",
+              "福特",
+              "长安"
+            ],
+            "ref_classes": [
+              "丰田",
+              "吉利",
+              "大众",
+              "奇瑞",
+              "奔驰",
+              "奥迪",
+              "宝马",
+              "捷途",
+              "本田",
+              "比亚迪",
+              "福特",
+              "长安"
+            ],
+            "matrix": [
+              [
+                26,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                30,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                33,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                36,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                29,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                22,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                39,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                22,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                22,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                27,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                26,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                36
+              ]
+            ],
+            "per_class": {
+              "丰田": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 26
+              },
+              "吉利": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 30
+              },
+              "大众": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 33
+              },
+              "奇瑞": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 36
+              },
+              "奔驰": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 29
+              },
+              "奥迪": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 22
+              },
+              "宝马": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 39
+              },
+              "捷途": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 22
+              },
+              "本田": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 22
+              },
+              "比亚迪": {
+                "precision": 0.9643,
+                "recall": 1.0,
+                "f1": 0.9818,
+                "support": 27
+              },
+              "福特": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 26
+              },
+              "长安": {
+                "precision": 1.0,
+                "recall": 0.973,
+                "f1": 0.9863,
+                "support": 37
+              }
+            },
+            "macro_avg": {
+              "precision": 0.997,
+              "recall": 0.9978,
+              "f1": 0.9973
+            },
+            "accuracy": 0.9971,
+            "total_samples": 349
+          },
+          "年款": {
+            "classes": [
+              "2006款",
+              "2007款",
+              "2008款",
+              "2009款",
+              "2010款",
+              "2011款",
+              "2012款",
+              "2013款",
+              "2014款",
+              "2015款",
+              "2016款",
+              "2017款",
+              "2018款",
+              "2019款",
+              "2020款",
+              "2021款",
+              "2022款",
+              "2023款",
+              "2024款",
+              "2025款",
+              "2026款"
+            ],
+            "ref_classes": [
+              "2006款",
+              "2007款",
+              "2008款",
+              "2009款",
+              "2010款",
+              "2011款",
+              "2012款",
+              "2013款",
+              "2014款",
+              "2015款",
+              "2016款",
+              "2017款",
+              "2018款",
+              "2019款",
+              "2020款",
+              "2021款",
+              "2022款",
+              "2023款",
+              "2024款",
+              "2025款",
+              "2026款"
+            ],
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                1,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                0,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                1,
+                3,
+                4,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                2,
+                0,
+                3,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                1,
+                2,
+                0,
+                2,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                0,
+                1,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                2,
+                3,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                4,
+                2,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                5,
+                2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                3,
+                3,
+                7,
+                3,
+                3,
+                1,
+                1,
+                2,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                3,
+                5,
+                3,
+                1,
+                2,
+                3,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                2,
+                3,
+                3,
+                5,
+                3,
+                4,
+                4,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                5,
+                7,
+                4,
+                6,
+                2,
+                1
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                2,
+                28,
+                9,
+                5,
+                1
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                4,
+                12,
+                44,
+                15,
+                4
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                5,
+                15,
+                28,
+                2
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                6,
+                3
+              ]
+            ],
+            "per_class": {
+              "2006款": {
+                "precision": 0.3333,
+                "recall": 1.0,
+                "f1": 0.5,
+                "support": 1
+              },
+              "2007款": {
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 0.6667,
+                "support": 2
+              },
+              "2008款": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "2009款": {
+                "precision": 0.3333,
+                "recall": 1.0,
+                "f1": 0.5,
+                "support": 1
+              },
+              "2010款": {
+                "precision": 0.3333,
+                "recall": 0.6667,
+                "f1": 0.4444,
+                "support": 3
+              },
+              "2011款": {
+                "precision": 0.6,
+                "recall": 0.375,
+                "f1": 0.4615,
+                "support": 8
+              },
+              "2012款": {
+                "precision": 0.4286,
+                "recall": 0.4286,
+                "f1": 0.4286,
+                "support": 7
+              },
+              "2013款": {
+                "precision": 0.25,
+                "recall": 0.2857,
+                "f1": 0.2667,
+                "support": 7
+              },
+              "2014款": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 4
+              },
+              "2015款": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 4
+              },
+              "2016款": {
+                "precision": 0.2857,
+                "recall": 0.25,
+                "f1": 0.2667,
+                "support": 8
+              },
+              "2017款": {
+                "precision": 0.2667,
+                "recall": 0.4444,
+                "f1": 0.3333,
+                "support": 9
+              },
+              "2018款": {
+                "precision": 0.3125,
+                "recall": 0.5,
+                "f1": 0.3846,
+                "support": 10
+              },
+              "2019款": {
+                "precision": 0.4375,
+                "recall": 0.3043,
+                "f1": 0.3589,
+                "support": 23
+              },
+              "2020款": {
+                "precision": 0.3571,
+                "recall": 0.2632,
+                "f1": 0.303,
+                "support": 19
+              },
+              "2021款": {
+                "precision": 0.2941,
+                "recall": 0.2,
+                "f1": 0.2381,
+                "support": 25
+              },
+              "2022款": {
+                "precision": 0.3333,
+                "recall": 0.2692,
+                "f1": 0.2978,
+                "support": 26
+              },
+              "2023款": {
+                "precision": 0.4912,
+                "recall": 0.5957,
+                "f1": 0.5384,
+                "support": 47
+              },
+              "2024款": {
+                "precision": 0.5238,
+                "recall": 0.55,
+                "f1": 0.5366,
+                "support": 80
+              },
+              "2025款": {
+                "precision": 0.5,
+                "recall": 0.5385,
+                "f1": 0.5185,
+                "support": 52
+              },
+              "2026款": {
+                "precision": 0.2727,
+                "recall": 0.25,
+                "f1": 0.2609,
+                "support": 12
+              }
+            },
+            "macro_avg": {
+              "precision": 0.3501,
+              "recall": 0.401,
+              "f1": 0.3478
+            },
+            "accuracy": 0.4327,
+            "total_samples": 349
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.6454,
+          "macro_accuracy": 0.6454,
+          "micro_overall_accuracy": 0.6454,
+          "macro_overall_accuracy": 0.6454,
+          "exact_match_samples": 48,
+          "exact_match_rate": 0.1375,
+          "strict_exact_match_samples": 48,
+          "strict_exact_match_rate": 0.1375
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/car/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "emotion_shujutang_regen_v3",
+      "method": "eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "emotion_shujutang_regen_v3",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "scored_at": "2026-09-16T06:48:41.809506+00:00",
+        "eval_targets": "all",
+        "eval_context": "rollout",
+        "num_samples": 347,
+        "num_targets": 694,
+        "overall_mean_score": 0.3948,
+        "num_failed_samples": 347,
+        "num_failed_targets": 420,
+        "failures_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/emotion_shujutang_regen_v3/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.md",
+        "failures_html_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/emotion_shujutang_regen_v3/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.html",
+        "per_turn": {
+          "turn_0": {
+            "scorer": "exact_match",
+            "num_total": 347,
+            "num_scored": 347,
+            "num_skipped": 0,
+            "accuracy": 0.0,
+            "contains_rate": 0.0
+          },
+          "turn_1": {
+            "scorer": "exact_match",
+            "num_total": 347,
+            "num_scored": 347,
+            "num_skipped": 0,
+            "accuracy": 0.7896,
+            "contains_rate": 0.7896,
+            "confusion_matrix": {
+              "classes": [
+                "中性",
+                "厌恶",
+                "害怕",
+                "快乐",
+                "悲伤",
+                "惊讶",
+                "生气"
+              ],
+              "ref_classes": [
+                "中性",
+                "厌恶",
+                "害怕",
+                "快乐",
+                "悲伤",
+                "惊讶",
+                "生气"
+              ],
+              "matrix": [
+                [
+                  73,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  6,
+                  13,
+                  0,
+                  0,
+                  2,
+                  0,
+                  1
+                ],
+                [
+                  6,
+                  2,
+                  5,
+                  0,
+                  0,
+                  6,
+                  3
+                ],
+                [
+                  2,
+                  0,
+                  0,
+                  79,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  11,
+                  0,
+                  0,
+                  19,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  78,
+                  0
+                ],
+                [
+                  4,
+                  15,
+                  2,
+                  0,
+                  2,
+                  0,
+                  7
+                ]
+              ],
+              "per_class": {
+                "中性": {
+                  "precision": 0.7157,
+                  "recall": 1.0,
+                  "f1": 0.8343,
+                  "support": 73
+                },
+                "厌恶": {
+                  "precision": 0.3171,
+                  "recall": 0.5909,
+                  "f1": 0.4127,
+                  "support": 22
+                },
+                "害怕": {
+                  "precision": 0.7143,
+                  "recall": 0.2273,
+                  "f1": 0.3449,
+                  "support": 22
+                },
+                "快乐": {
+                  "precision": 1.0,
+                  "recall": 0.9753,
+                  "f1": 0.9875,
+                  "support": 81
+                },
+                "悲伤": {
+                  "precision": 0.8261,
+                  "recall": 0.475,
+                  "f1": 0.6032,
+                  "support": 40
+                },
+                "惊讶": {
+                  "precision": 0.9286,
+                  "recall": 0.9873,
+                  "f1": 0.9571,
+                  "support": 79
+                },
+                "生气": {
+                  "precision": 0.6364,
+                  "recall": 0.2333,
+                  "f1": 0.3414,
+                  "support": 30
+                }
+              },
+              "macro_avg": {
+                "precision": 0.734,
+                "recall": 0.6413,
+                "f1": 0.6402
+              },
+              "accuracy": 0.7896,
+              "total_samples": 347
+            }
+          }
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/emotion_shujutang_regen_v3/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "environment",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "environment",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "contain",
+        "scored_at": "2026-09-16T06:52:21.294459+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/env-extract",
+        "ref_extract": {
+          "total": 502,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 502,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 502,
+          "newly_completed": 502,
+          "errors": 0,
+          "skipped_already_done": 0,
+          "interrupted": false
+        },
+        "fields": [
+          "环境"
+        ],
+        "num_samples": 502,
+        "num_scored": 502,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "环境": {
+            "total": 502,
+            "correct": 457,
+            "accuracy": 0.9104,
+            "empty_count": 0,
+            "non_empty_count": 502,
+            "non_empty_correct": 457,
+            "non_empty_accuracy": 0.9104,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 457,
+            "overall_total": 502,
+            "overall_accuracy": 0.9104
+          }
+        },
+        "per_value": {
+          "环境": {
+            "城市": {
+              "correct": 146,
+              "support": 150,
+              "accuracy": 0.9733
+            },
+            "海洋": {
+              "correct": 44,
+              "support": 45,
+              "accuracy": 0.9778
+            },
+            "山脉": {
+              "correct": 39,
+              "support": 39,
+              "accuracy": 1.0
+            },
+            "田野": {
+              "correct": 33,
+              "support": 38,
+              "accuracy": 0.8684
+            },
+            "海滩": {
+              "correct": 30,
+              "support": 31,
+              "accuracy": 0.9677
+            },
+            "湖泊": {
+              "correct": 30,
+              "support": 30,
+              "accuracy": 1.0
+            },
+            "雪地": {
+              "correct": 26,
+              "support": 27,
+              "accuracy": 0.963
+            },
+            "森林": {
+              "correct": 25,
+              "support": 26,
+              "accuracy": 0.9615
+            },
+            "欧式": {
+              "correct": 13,
+              "support": 20,
+              "accuracy": 0.65
+            },
+            "古镇": {
+              "correct": 7,
+              "support": 19,
+              "accuracy": 0.3684
+            },
+            "沙漠": {
+              "correct": 17,
+              "support": 18,
+              "accuracy": 0.9444
+            },
+            "河岸": {
+              "correct": 7,
+              "support": 15,
+              "accuracy": 0.4667
+            },
+            "夜空": {
+              "correct": 8,
+              "support": 10,
+              "accuracy": 0.8
+            },
+            "瀑布": {
+              "correct": 9,
+              "support": 10,
+              "accuracy": 0.9
+            },
+            "河流": {
+              "correct": 8,
+              "support": 9,
+              "accuracy": 0.8889
+            },
+            "岛屿": {
+              "correct": 6,
+              "support": 6,
+              "accuracy": 1.0
+            },
+            "乡村": {
+              "correct": 5,
+              "support": 5,
+              "accuracy": 1.0
+            },
+            "峡谷": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            },
+            "极光": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            }
+          }
+        },
+        "confusion_matrices": {
+          "环境": {
+            "classes": [
+              "乡村",
+              "古镇",
+              "城市",
+              "夜空",
+              "山脉",
+              "岛屿",
+              "峡谷",
+              "极光",
+              "森林",
+              "欧式",
+              "沙漠",
+              "河岸",
+              "河流",
+              "海洋",
+              "海滩",
+              "湖泊",
+              "瀑布",
+              "田野",
+              "雪地",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "乡村",
+              "古镇",
+              "城市",
+              "夜空",
+              "山脉",
+              "岛屿",
+              "峡谷",
+              "极光",
+              "森林",
+              "欧式",
+              "沙漠",
+              "河岸",
+              "河流",
+              "海洋",
+              "海滩",
+              "湖泊",
+              "瀑布",
+              "田野",
+              "雪地"
+            ],
+            "matrix": [
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                5
+              ],
+              [
+                0,
+                1,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                16
+              ],
+              [
+                0,
+                0,
+                126,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                24
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                9
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                39
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                6
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                3
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                7,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                18
+              ],
+              [
+                0,
+                0,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                17
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                4,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                14
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                15
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                9
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                44
+              ],
+              [
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                30
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                30
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                10
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                0,
+                36
+              ],
+              [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                27
+              ]
+            ],
+            "per_class": {
+              "乡村": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 5
+              },
+              "古镇": {
+                "precision": 1.0,
+                "recall": 0.0526,
+                "f1": 0.0999,
+                "support": 19
+              },
+              "城市": {
+                "precision": 0.9474,
+                "recall": 0.84,
+                "f1": 0.8905,
+                "support": 150
+              },
+              "夜空": {
+                "precision": 1.0,
+                "recall": 0.1,
+                "f1": 0.1818,
+                "support": 10
+              },
+              "山脉": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 39
+              },
+              "岛屿": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 6
+              },
+              "峡谷": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 3
+              },
+              "极光": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "森林": {
+                "precision": 1.0,
+                "recall": 0.2692,
+                "f1": 0.4242,
+                "support": 26
+              },
+              "欧式": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 20
+              },
+              "沙漠": {
+                "precision": 1.0,
+                "recall": 0.2222,
+                "f1": 0.3636,
+                "support": 18
+              },
+              "河岸": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 15
+              },
+              "河流": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 9
+              },
+              "海洋": {
+                "precision": 1.0,
+                "recall": 0.0222,
+                "f1": 0.0434,
+                "support": 45
+              },
+              "海滩": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 31
+              },
+              "湖泊": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 30
+              },
+              "瀑布": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 10
+              },
+              "田野": {
+                "precision": 1.0,
+                "recall": 0.0526,
+                "f1": 0.0999,
+                "support": 38
+              },
+              "雪地": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 27
+              }
+            },
+            "macro_avg": {
+              "precision": 0.3657,
+              "recall": 0.082,
+              "f1": 0.1107
+            },
+            "accuracy": 0.2829,
+            "total_samples": 502
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.9104,
+          "macro_accuracy": 0.9104,
+          "micro_overall_accuracy": 0.9104,
+          "macro_overall_accuracy": 0.9104,
+          "exact_match_samples": 457,
+          "exact_match_rate": 0.9104,
+          "strict_exact_match_samples": 457,
+          "strict_exact_match_rate": 0.9104
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/environment/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "final_action_results",
+      "method": "eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "final_action_results",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "scored_at": "2026-09-16T06:53:06.938249+00:00",
+        "eval_targets": "all",
+        "eval_context": "rollout",
+        "num_samples": 129,
+        "num_targets": 258,
+        "overall_mean_score": 0.8415,
+        "num_failed_samples": 1,
+        "num_failed_targets": 1,
+        "failures_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/final_action_results/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.md",
+        "failures_html_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/final_action_results/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.html",
+        "per_turn": {
+          "turn_0": {
+            "scorer": "token_f1",
+            "num_total": 129,
+            "num_scored": 129,
+            "num_skipped": 0,
+            "f1": 0.6907,
+            "precision": 0.701,
+            "recall": 0.689
+          },
+          "turn_1": {
+            "scorer": "exact_match",
+            "num_total": 129,
+            "num_scored": 129,
+            "num_skipped": 0,
+            "accuracy": 0.9922,
+            "contains_rate": 0.9922,
+            "confusion_matrix": {
+              "classes": [
+                "抽烟",
+                "玩手机"
+              ],
+              "ref_classes": [
+                "抽烟",
+                "玩手机"
+              ],
+              "matrix": [
+                [
+                  71,
+                  0
+                ],
+                [
+                  1,
+                  57
+                ]
+              ],
+              "per_class": {
+                "抽烟": {
+                  "precision": 0.9861,
+                  "recall": 1.0,
+                  "f1": 0.993,
+                  "support": 71
+                },
+                "玩手机": {
+                  "precision": 1.0,
+                  "recall": 0.9828,
+                  "f1": 0.9913,
+                  "support": 58
+                }
+              },
+              "macro_avg": {
+                "precision": 0.993,
+                "recall": 0.9914,
+                "f1": 0.9921
+              },
+              "accuracy": 0.9922,
+              "total_samples": 129
+            }
+          }
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/final_action_results/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "gesture_fixed12150_dataset_regen_v1",
+      "method": "eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "gesture_fixed12150_dataset_regen_v1",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "scored_at": "2026-09-16T06:53:54.926788+00:00",
+        "eval_targets": "all",
+        "eval_context": "rollout",
+        "num_samples": 608,
+        "num_targets": 1216,
+        "overall_mean_score": 0.8607,
+        "num_failed_samples": 25,
+        "num_failed_targets": 25,
+        "failures_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/gesture_fixed12150_dataset_regen_v1/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.md",
+        "failures_html_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/gesture_fixed12150_dataset_regen_v1/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.html",
+        "per_turn": {
+          "turn_0": {
+            "scorer": "token_f1",
+            "num_total": 608,
+            "num_scored": 608,
+            "num_skipped": 0,
+            "f1": 0.7625,
+            "precision": 0.7876,
+            "recall": 0.7659
+          },
+          "turn_1": {
+            "scorer": "exact_match",
+            "num_total": 608,
+            "num_scored": 608,
+            "num_skipped": 0,
+            "accuracy": 0.9589,
+            "contains_rate": 0.9589,
+            "confusion_matrix": {
+              "classes": [
+                "ok",
+                "“v”字手势",
+                "五指张开",
+                "停止",
+                "打电话",
+                "拇指向下",
+                "握拳",
+                "摇滚",
+                "竖起大拇指",
+                "静音或安静",
+                "食指向上"
+              ],
+              "ref_classes": [
+                "ok",
+                "“v”字手势",
+                "五指张开",
+                "停止",
+                "打电话",
+                "拇指向下",
+                "握拳",
+                "摇滚",
+                "竖起大拇指",
+                "静音或安静",
+                "食指向上"
+              ],
+              "matrix": [
+                [
+                  48,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  3,
+                  48,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  3,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  59,
+                  2,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  65,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  34,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  42,
+                  1,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  44,
+                  0,
+                  0,
+                  0,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  69,
+                  0,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  72,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  41,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  3,
+                  0,
+                  0,
+                  61
+                ]
+              ],
+              "per_class": {
+                "ok": {
+                  "precision": 0.9057,
+                  "recall": 0.9796,
+                  "f1": 0.9412,
+                  "support": 49
+                },
+                "“v”字手势": {
+                  "precision": 0.9796,
+                  "recall": 0.8889,
+                  "f1": 0.932,
+                  "support": 54
+                },
+                "五指张开": {
+                  "precision": 0.9833,
+                  "recall": 0.9516,
+                  "f1": 0.9672,
+                  "support": 62
+                },
+                "停止": {
+                  "precision": 0.9559,
+                  "recall": 1.0,
+                  "f1": 0.9775,
+                  "support": 65
+                },
+                "打电话": {
+                  "precision": 0.9714,
+                  "recall": 0.9714,
+                  "f1": 0.9714,
+                  "support": 35
+                },
+                "拇指向下": {
+                  "precision": 0.9333,
+                  "recall": 0.9767,
+                  "f1": 0.9545,
+                  "support": 43
+                },
+                "握拳": {
+                  "precision": 0.9778,
+                  "recall": 0.9565,
+                  "f1": 0.967,
+                  "support": 46
+                },
+                "摇滚": {
+                  "precision": 0.92,
+                  "recall": 0.9452,
+                  "f1": 0.9324,
+                  "support": 73
+                },
+                "竖起大拇指": {
+                  "precision": 0.9863,
+                  "recall": 0.973,
+                  "f1": 0.9796,
+                  "support": 74
+                },
+                "静音或安静": {
+                  "precision": 0.9762,
+                  "recall": 0.9762,
+                  "f1": 0.9762,
+                  "support": 42
+                },
+                "食指向上": {
+                  "precision": 0.9683,
+                  "recall": 0.9385,
+                  "f1": 0.9532,
+                  "support": 65
+                }
+              },
+              "macro_avg": {
+                "precision": 0.9598,
+                "recall": 0.9598,
+                "f1": 0.9593
+              },
+              "accuracy": 0.9589,
+              "total_samples": 608
+            }
+          }
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/gesture_fixed12150_dataset_regen_v1/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "scene_traffic_aopeng",
+      "method": "eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "scene_traffic_aopeng",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "scored_at": "2026-09-16T06:55:04.679784+00:00",
+        "eval_targets": "all",
+        "eval_context": "rollout",
+        "num_samples": 237,
+        "num_targets": 474,
+        "overall_mean_score": 0.8386,
+        "num_failed_samples": 1,
+        "num_failed_targets": 1,
+        "failures_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/scene_traffic_aopeng/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.md",
+        "failures_html_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/scene_traffic_aopeng/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.html",
+        "per_turn": {
+          "turn_0": {
+            "scorer": "token_f1",
+            "num_total": 237,
+            "num_scored": 237,
+            "num_skipped": 0,
+            "f1": 0.6815,
+            "precision": 0.6773,
+            "recall": 0.6885
+          },
+          "turn_1": {
+            "scorer": "exact_match",
+            "num_total": 237,
+            "num_scored": 237,
+            "num_skipped": 0,
+            "accuracy": 0.9958,
+            "contains_rate": 1.0,
+            "confusion_matrix": {
+              "classes": [
+                "三角形警示牌",
+                "停车场出入口",
+                "学校路口",
+                "礼让行人",
+                "高速人工出入口",
+                "(其他)"
+              ],
+              "ref_classes": [
+                "三角形警示牌",
+                "停车场出入口",
+                "学校路口",
+                "礼让行人",
+                "高速人工出入口"
+              ],
+              "matrix": [
+                [
+                  16,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  90,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  13,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  7,
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  110,
+                  0
+                ]
+              ],
+              "per_class": {
+                "三角形警示牌": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 16
+                },
+                "停车场出入口": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 90
+                },
+                "学校路口": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 13
+                },
+                "礼让行人": {
+                  "precision": 1.0,
+                  "recall": 0.875,
+                  "f1": 0.9333,
+                  "support": 8
+                },
+                "高速人工出入口": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 110
+                }
+              },
+              "macro_avg": {
+                "precision": 1.0,
+                "recall": 0.975,
+                "f1": 0.9867
+              },
+              "accuracy": 0.9958,
+              "total_samples": 237
+            }
+          }
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/scene_traffic_aopeng/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "sign_aigc_desc",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "sign_aigc_desc",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "exact",
+        "scored_at": "2026-09-16T06:56:30.369972+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/value-extract",
+        "ref_extract": {
+          "total": 120,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 120,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 120,
+          "newly_completed": 120,
+          "errors": 0,
+          "skipped_already_done": 0,
+          "interrupted": false
+        },
+        "fields": [
+          "主辅路",
+          "警示标志",
+          "车道位置",
+          "道路结构"
+        ],
+        "num_samples": 120,
+        "num_scored": 120,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "主辅路": {
+            "total": 119,
+            "correct": 93,
+            "accuracy": 0.7815,
+            "empty_count": 1,
+            "non_empty_count": 119,
+            "non_empty_correct": 93,
+            "non_empty_accuracy": 0.7815,
+            "empty_correct": 0,
+            "empty_incorrect": 1,
+            "empty_accuracy": 0.0,
+            "overall_correct": 93,
+            "overall_total": 120,
+            "overall_accuracy": 0.775
+          },
+          "警示标志": {
+            "total": 120,
+            "correct": 92,
+            "accuracy": 0.7667,
+            "empty_count": 0,
+            "non_empty_count": 120,
+            "non_empty_correct": 92,
+            "non_empty_accuracy": 0.7667,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 92,
+            "overall_total": 120,
+            "overall_accuracy": 0.7667
+          },
+          "车道位置": {
+            "total": 102,
+            "correct": 64,
+            "accuracy": 0.6275,
+            "empty_count": 18,
+            "non_empty_count": 102,
+            "non_empty_correct": 64,
+            "non_empty_accuracy": 0.6275,
+            "empty_correct": 7,
+            "empty_incorrect": 11,
+            "empty_accuracy": 0.3889,
+            "overall_correct": 71,
+            "overall_total": 120,
+            "overall_accuracy": 0.5917
+          },
+          "道路结构": {
+            "total": 120,
+            "correct": 114,
+            "accuracy": 0.95,
+            "empty_count": 0,
+            "non_empty_count": 120,
+            "non_empty_correct": 114,
+            "non_empty_accuracy": 0.95,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 114,
+            "overall_total": 120,
+            "overall_accuracy": 0.95
+          }
+        },
+        "per_value": {
+          "主辅路": {
+            "主路": {
+              "correct": 81,
+              "support": 90,
+              "accuracy": 0.9
+            },
+            "辅路": {
+              "correct": 12,
+              "support": 29,
+              "accuracy": 0.4138
+            }
+          },
+          "警示标志": {
+            "三角警示牌": {
+              "correct": 57,
+              "support": 64,
+              "accuracy": 0.8906
+            },
+            "学校路口": {
+              "correct": 47,
+              "support": 47,
+              "accuracy": 1.0
+            },
+            "礼让行人": {
+              "correct": 28,
+              "support": 39,
+              "accuracy": 0.7179
+            }
+          },
+          "车道位置": {
+            "第1车道": {
+              "correct": 21,
+              "support": 37,
+              "accuracy": 0.5676
+            },
+            "第2车道": {
+              "correct": 23,
+              "support": 36,
+              "accuracy": 0.6389
+            },
+            "第3车道": {
+              "correct": 16,
+              "support": 24,
+              "accuracy": 0.6667
+            },
+            "第4车道": {
+              "correct": 4,
+              "support": 5,
+              "accuracy": 0.8
+            }
+          },
+          "道路结构": {
+            "地面道路": {
+              "correct": 90,
+              "support": 92,
+              "accuracy": 0.9783
+            },
+            "高架桥上": {
+              "correct": 5,
+              "support": 8,
+              "accuracy": 0.625
+            },
+            "即将驶入隧道": {
+              "correct": 7,
+              "support": 7,
+              "accuracy": 1.0
+            },
+            "即将驶出隧道": {
+              "correct": 5,
+              "support": 5,
+              "accuracy": 1.0
+            },
+            "高架桥下": {
+              "correct": 4,
+              "support": 5,
+              "accuracy": 0.8
+            },
+            "隧道内": {
+              "correct": 3,
+              "support": 3,
+              "accuracy": 1.0
+            }
+          }
+        },
+        "confusion_matrices": {
+          "主辅路": {
+            "classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "ref_classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "matrix": [
+              [
+                81,
+                0,
+                9
+              ],
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                17,
+                0,
+                12
+              ]
+            ],
+            "per_class": {
+              "主路": {
+                "precision": 0.8182,
+                "recall": 0.9,
+                "f1": 0.8572,
+                "support": 90
+              },
+              "无": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "辅路": {
+                "precision": 0.5714,
+                "recall": 0.4138,
+                "f1": 0.48,
+                "support": 29
+              }
+            },
+            "macro_avg": {
+              "precision": 0.4632,
+              "recall": 0.4379,
+              "f1": 0.4457
+            },
+            "accuracy": 0.775,
+            "total_samples": 120
+          },
+          "警示标志": {
+            "classes": [
+              "三角警示牌",
+              "三角警示牌、学校路口",
+              "三角警示牌、礼让行人",
+              "学校路口",
+              "学校路口、礼让行人",
+              "礼让行人",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "三角警示牌",
+              "三角警示牌、学校路口",
+              "三角警示牌、礼让行人",
+              "学校路口",
+              "学校路口、礼让行人",
+              "礼让行人"
+            ],
+            "matrix": [
+              [
+                34,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                19,
+                0,
+                5,
+                1,
+                0,
+                0
+              ],
+              [
+                3,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0
+              ],
+              [
+                0,
+                7,
+                0,
+                13,
+                1,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0
+              ],
+              [
+                6,
+                0,
+                1,
+                0,
+                0,
+                26,
+                1
+              ]
+            ],
+            "per_class": {
+              "三角警示牌": {
+                "precision": 0.7907,
+                "recall": 0.9714,
+                "f1": 0.8718,
+                "support": 35
+              },
+              "三角警示牌、学校路口": {
+                "precision": 0.7308,
+                "recall": 0.76,
+                "f1": 0.7451,
+                "support": 25
+              },
+              "三角警示牌、礼让行人": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 4
+              },
+              "学校路口": {
+                "precision": 0.6842,
+                "recall": 0.619,
+                "f1": 0.65,
+                "support": 21
+              },
+              "学校路口、礼让行人": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "礼让行人": {
+                "precision": 0.963,
+                "recall": 0.7647,
+                "f1": 0.8525,
+                "support": 34
+              }
+            },
+            "macro_avg": {
+              "precision": 0.5281,
+              "recall": 0.5192,
+              "f1": 0.5199
+            },
+            "accuracy": 0.7667,
+            "total_samples": 120
+          },
+          "车道位置": {
+            "classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道"
+            ],
+            "matrix": [
+              [
+                7,
+                4,
+                4,
+                2,
+                1,
+                0
+              ],
+              [
+                5,
+                21,
+                10,
+                0,
+                0,
+                1
+              ],
+              [
+                3,
+                5,
+                23,
+                5,
+                0,
+                0
+              ],
+              [
+                0,
+                2,
+                2,
+                16,
+                4,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                4,
+                0
+              ]
+            ],
+            "per_class": {
+              "无": {
+                "precision": 0.4667,
+                "recall": 0.3889,
+                "f1": 0.4243,
+                "support": 18
+              },
+              "第1车道": {
+                "precision": 0.6562,
+                "recall": 0.5676,
+                "f1": 0.6087,
+                "support": 37
+              },
+              "第2车道": {
+                "precision": 0.5897,
+                "recall": 0.6389,
+                "f1": 0.6133,
+                "support": 36
+              },
+              "第3车道": {
+                "precision": 0.6667,
+                "recall": 0.6667,
+                "f1": 0.6667,
+                "support": 24
+              },
+              "第4车道": {
+                "precision": 0.4444,
+                "recall": 0.8,
+                "f1": 0.5714,
+                "support": 5
+              }
+            },
+            "macro_avg": {
+              "precision": 0.5647,
+              "recall": 0.6124,
+              "f1": 0.5769
+            },
+            "accuracy": 0.5917,
+            "total_samples": 120
+          },
+          "道路结构": {
+            "classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "ref_classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "matrix": [
+              [
+                7,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                5,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                90,
+                0,
+                1,
+                1
+              ],
+              [
+                0,
+                0,
+                0,
+                3,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                2,
+                0,
+                5,
+                1
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                0,
+                4
+              ]
+            ],
+            "per_class": {
+              "即将驶入隧道": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 7
+              },
+              "即将驶出隧道": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "support": 5
+              },
+              "地面道路": {
+                "precision": 0.9783,
+                "recall": 0.9783,
+                "f1": 0.9783,
+                "support": 92
+              },
+              "隧道内": {
+                "precision": 0.75,
+                "recall": 1.0,
+                "f1": 0.8571,
+                "support": 3
+              },
+              "高架桥上": {
+                "precision": 0.8333,
+                "recall": 0.625,
+                "f1": 0.7143,
+                "support": 8
+              },
+              "高架桥下": {
+                "precision": 0.6667,
+                "recall": 0.8,
+                "f1": 0.7273,
+                "support": 5
+              }
+            },
+            "macro_avg": {
+              "precision": 0.8714,
+              "recall": 0.9005,
+              "f1": 0.8795
+            },
+            "accuracy": 0.95,
+            "total_samples": 120
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.7874,
+          "macro_accuracy": 0.7814,
+          "micro_overall_accuracy": 0.7708,
+          "macro_overall_accuracy": 0.7709,
+          "exact_match_samples": 55,
+          "exact_match_rate": 0.4583,
+          "strict_exact_match_samples": 49,
+          "strict_exact_match_rate": 0.4083
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/sign_aigc_desc/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "weather",
+      "method": "eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "weather",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "scored_at": "2026-09-16T06:57:14.909104+00:00",
+        "eval_targets": "all",
+        "eval_context": "rollout",
+        "num_samples": 35,
+        "num_targets": 105,
+        "overall_mean_score": 0.7536,
+        "num_failed_samples": 0,
+        "num_failed_targets": 0,
+        "failures_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/weather/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.md",
+        "failures_html_path": "/root/autodl-tmp/capt/code/eval-vlm-runs/weather/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/failures.html",
+        "per_turn": {
+          "turn_0": {
+            "scorer": "token_f1",
+            "num_total": 35,
+            "num_scored": 35,
+            "num_skipped": 0,
+            "f1": 0.6642,
+            "precision": 0.6997,
+            "recall": 0.6481
+          },
+          "turn_1": {
+            "scorer": "token_f1",
+            "num_total": 35,
+            "num_scored": 35,
+            "num_skipped": 0,
+            "f1": 0.5965,
+            "precision": 0.6135,
+            "recall": 0.5984
+          },
+          "turn_2": {
+            "scorer": "exact_match",
+            "num_total": 35,
+            "num_scored": 35,
+            "num_skipped": 0,
+            "accuracy": 1.0,
+            "contains_rate": 1.0,
+            "confusion_matrix": {
+              "classes": [
+                "雨天",
+                "雪天",
+                "雾天"
+              ],
+              "ref_classes": [
+                "雨天",
+                "雪天",
+                "雾天"
+              ],
+              "matrix": [
+                [
+                  12,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  11,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  12
+                ]
+              ],
+              "per_class": {
+                "雨天": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 12
+                },
+                "雪天": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 11
+                },
+                "雾天": {
+                  "precision": 1.0,
+                  "recall": 1.0,
+                  "f1": 1.0,
+                  "support": 12
+                }
+              },
+              "macro_avg": {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0
+              },
+              "accuracy": 1.0,
+              "total_samples": 35
+            }
+          }
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/weather/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "yang_road_video_frames",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "yang_road_video_frames",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "exact",
+        "scored_at": "2026-09-16T06:57:15.104427+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/value-extract",
+        "ref_extract": {
+          "total": 171,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 171,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 171,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 171,
+          "interrupted": false
+        },
+        "fields": [
+          "主辅路",
+          "警示标志",
+          "车道位置",
+          "道路结构"
+        ],
+        "num_samples": 171,
+        "num_scored": 171,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "主辅路": {
+            "total": 171,
+            "correct": 150,
+            "accuracy": 0.8772,
+            "empty_count": 0,
+            "non_empty_count": 171,
+            "non_empty_correct": 150,
+            "non_empty_accuracy": 0.8772,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 150,
+            "overall_total": 171,
+            "overall_accuracy": 0.8772
+          },
+          "警示标志": {
+            "total": 171,
+            "correct": 169,
+            "accuracy": 0.9883,
+            "empty_count": 0,
+            "non_empty_count": 171,
+            "non_empty_correct": 169,
+            "non_empty_accuracy": 0.9883,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 169,
+            "overall_total": 171,
+            "overall_accuracy": 0.9883
+          },
+          "车道位置": {
+            "total": 167,
+            "correct": 132,
+            "accuracy": 0.7904,
+            "empty_count": 4,
+            "non_empty_count": 167,
+            "non_empty_correct": 132,
+            "non_empty_accuracy": 0.7904,
+            "empty_correct": 3,
+            "empty_incorrect": 1,
+            "empty_accuracy": 0.75,
+            "overall_correct": 135,
+            "overall_total": 171,
+            "overall_accuracy": 0.7895
+          },
+          "道路结构": {
+            "total": 171,
+            "correct": 158,
+            "accuracy": 0.924,
+            "empty_count": 0,
+            "non_empty_count": 171,
+            "non_empty_correct": 158,
+            "non_empty_accuracy": 0.924,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 158,
+            "overall_total": 171,
+            "overall_accuracy": 0.924
+          }
+        },
+        "per_value": {
+          "主辅路": {
+            "主路": {
+              "correct": 150,
+              "support": 168,
+              "accuracy": 0.8929
+            },
+            "辅路": {
+              "correct": 0,
+              "support": 3,
+              "accuracy": 0.0
+            }
+          },
+          "警示标志": {
+            "无警示牌": {
+              "correct": 169,
+              "support": 171,
+              "accuracy": 0.9883
+            }
+          },
+          "车道位置": {
+            "第1车道": {
+              "correct": 57,
+              "support": 68,
+              "accuracy": 0.8382
+            },
+            "第2车道": {
+              "correct": 53,
+              "support": 59,
+              "accuracy": 0.8983
+            },
+            "第3车道": {
+              "correct": 21,
+              "support": 34,
+              "accuracy": 0.6176
+            },
+            "第4车道": {
+              "correct": 1,
+              "support": 5,
+              "accuracy": 0.2
+            },
+            "第6车道": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            }
+          },
+          "道路结构": {
+            "高架桥下": {
+              "correct": 80,
+              "support": 83,
+              "accuracy": 0.9639
+            },
+            "地面道路": {
+              "correct": 43,
+              "support": 49,
+              "accuracy": 0.8776
+            },
+            "高架桥上": {
+              "correct": 26,
+              "support": 29,
+              "accuracy": 0.8966
+            },
+            "隧道内": {
+              "correct": 7,
+              "support": 8,
+              "accuracy": 0.875
+            },
+            "即将驶入隧道": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            },
+            "即将驶出隧道": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            }
+          }
+        },
+        "confusion_matrices": {
+          "主辅路": {
+            "classes": [
+              "主路",
+              "辅路"
+            ],
+            "ref_classes": [
+              "主路",
+              "辅路"
+            ],
+            "matrix": [
+              [
+                150,
+                18
+              ],
+              [
+                3,
+                0
+              ]
+            ],
+            "per_class": {
+              "主路": {
+                "precision": 0.9804,
+                "recall": 0.8929,
+                "f1": 0.9346,
+                "support": 168
+              },
+              "辅路": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 3
+              }
+            },
+            "macro_avg": {
+              "precision": 0.4902,
+              "recall": 0.4465,
+              "f1": 0.4673
+            },
+            "accuracy": 0.8772,
+            "total_samples": 171
+          },
+          "车道位置": {
+            "classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道",
+              "第6车道"
+            ],
+            "ref_classes": [
+              "无",
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "第4车道",
+              "第6车道"
+            ],
+            "matrix": [
+              [
+                3,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                57,
+                10,
+                1,
+                0,
+                0
+              ],
+              [
+                1,
+                4,
+                53,
+                1,
+                0,
+                0
+              ],
+              [
+                1,
+                1,
+                11,
+                21,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                3,
+                1,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                1,
+                0,
+                0
+              ]
+            ],
+            "per_class": {
+              "无": {
+                "precision": 0.5,
+                "recall": 0.75,
+                "f1": 0.6,
+                "support": 4
+              },
+              "第1车道": {
+                "precision": 0.9048,
+                "recall": 0.8382,
+                "f1": 0.8702,
+                "support": 68
+              },
+              "第2车道": {
+                "precision": 0.7162,
+                "recall": 0.8983,
+                "f1": 0.797,
+                "support": 59
+              },
+              "第3车道": {
+                "precision": 0.7778,
+                "recall": 0.6176,
+                "f1": 0.6885,
+                "support": 34
+              },
+              "第4车道": {
+                "precision": 1.0,
+                "recall": 0.2,
+                "f1": 0.3333,
+                "support": 5
+              },
+              "第6车道": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              }
+            },
+            "macro_avg": {
+              "precision": 0.6498,
+              "recall": 0.5507,
+              "f1": 0.5482
+            },
+            "accuracy": 0.7895,
+            "total_samples": 171
+          },
+          "道路结构": {
+            "classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "ref_classes": [
+              "即将驶入隧道",
+              "即将驶出隧道",
+              "地面道路",
+              "隧道内",
+              "高架桥上",
+              "高架桥下"
+            ],
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                43,
+                0,
+                6,
+                0
+              ],
+              [
+                0,
+                1,
+                0,
+                7,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                3,
+                0,
+                26,
+                0
+              ],
+              [
+                1,
+                0,
+                2,
+                0,
+                0,
+                80
+              ]
+            ],
+            "per_class": {
+              "即将驶入隧道": {
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 0.6667,
+                "support": 1
+              },
+              "即将驶出隧道": {
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 0.6667,
+                "support": 1
+              },
+              "地面道路": {
+                "precision": 0.8958,
+                "recall": 0.8776,
+                "f1": 0.8866,
+                "support": 49
+              },
+              "隧道内": {
+                "precision": 1.0,
+                "recall": 0.875,
+                "f1": 0.9333,
+                "support": 8
+              },
+              "高架桥上": {
+                "precision": 0.8125,
+                "recall": 0.8966,
+                "f1": 0.8525,
+                "support": 29
+              },
+              "高架桥下": {
+                "precision": 1.0,
+                "recall": 0.9639,
+                "f1": 0.9816,
+                "support": 83
+              }
+            },
+            "macro_avg": {
+              "precision": 0.7847,
+              "recall": 0.9355,
+              "f1": 0.8312
+            },
+            "accuracy": 0.924,
+            "total_samples": 171
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.8956,
+          "macro_accuracy": 0.895,
+          "micro_overall_accuracy": 0.8947,
+          "macro_overall_accuracy": 0.8947,
+          "exact_match_samples": 111,
+          "exact_match_rate": 0.6491,
+          "strict_exact_match_samples": 111,
+          "strict_exact_match_rate": 0.6491
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/yang_road_video_frames/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    },
+    {
+      "dataset": "yellow_lane",
+      "method": "field-eval",
+      "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+      "backend": "vllm_offline",
+      "metrics": {
+        "run_name": "yellow_lane",
+        "model": "train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all",
+        "backend": "vllm_offline",
+        "match_mode": "exact",
+        "scored_at": "2026-09-16T06:58:44.549063+00:00",
+        "endpoint": "https://u301450-kg0f-526c4a7a.westd.seetacloud.com:8443/api/v1/vlm/value-extract",
+        "ref_extract": {
+          "total": 131,
+          "newly_completed": 0,
+          "errors": 0,
+          "skipped_already_done": 131,
+          "interrupted": false
+        },
+        "pred_extract": {
+          "total": 131,
+          "newly_completed": 131,
+          "errors": 0,
+          "skipped_already_done": 0,
+          "interrupted": false
+        },
+        "fields": [
+          "主辅路",
+          "警示标志",
+          "车道位置",
+          "道路结构"
+        ],
+        "num_samples": 131,
+        "num_scored": 131,
+        "num_pred_missing": 0,
+        "skipped_ref": 0,
+        "skipped_pred_error": 0,
+        "per_field": {
+          "主辅路": {
+            "total": 130,
+            "correct": 128,
+            "accuracy": 0.9846,
+            "empty_count": 1,
+            "non_empty_count": 130,
+            "non_empty_correct": 128,
+            "non_empty_accuracy": 0.9846,
+            "empty_correct": 0,
+            "empty_incorrect": 1,
+            "empty_accuracy": 0.0,
+            "overall_correct": 128,
+            "overall_total": 131,
+            "overall_accuracy": 0.9771
+          },
+          "警示标志": {
+            "total": 131,
+            "correct": 118,
+            "accuracy": 0.9008,
+            "empty_count": 0,
+            "non_empty_count": 131,
+            "non_empty_correct": 118,
+            "non_empty_accuracy": 0.9008,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 118,
+            "overall_total": 131,
+            "overall_accuracy": 0.9008
+          },
+          "车道位置": {
+            "total": 131,
+            "correct": 125,
+            "accuracy": 0.9542,
+            "empty_count": 0,
+            "non_empty_count": 131,
+            "non_empty_correct": 125,
+            "non_empty_accuracy": 0.9542,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 125,
+            "overall_total": 131,
+            "overall_accuracy": 0.9542
+          },
+          "道路结构": {
+            "total": 131,
+            "correct": 127,
+            "accuracy": 0.9695,
+            "empty_count": 0,
+            "non_empty_count": 131,
+            "non_empty_correct": 127,
+            "non_empty_accuracy": 0.9695,
+            "empty_correct": 0,
+            "empty_incorrect": 0,
+            "empty_accuracy": 0.0,
+            "overall_correct": 127,
+            "overall_total": 131,
+            "overall_accuracy": 0.9695
+          }
+        },
+        "per_value": {
+          "主辅路": {
+            "主路": {
+              "correct": 128,
+              "support": 129,
+              "accuracy": 0.9922
+            },
+            "辅路": {
+              "correct": 0,
+              "support": 1,
+              "accuracy": 0.0
+            }
+          },
+          "警示标志": {
+            "无警示牌": {
+              "correct": 98,
+              "support": 101,
+              "accuracy": 0.9703
+            },
+            "三角警示牌": {
+              "correct": 17,
+              "support": 26,
+              "accuracy": 0.6538
+            },
+            "礼让行人": {
+              "correct": 4,
+              "support": 4,
+              "accuracy": 1.0
+            }
+          },
+          "车道位置": {
+            "第1车道": {
+              "correct": 89,
+              "support": 92,
+              "accuracy": 0.9674
+            },
+            "第2车道": {
+              "correct": 35,
+              "support": 38,
+              "accuracy": 0.9211
+            },
+            "第3车道": {
+              "correct": 1,
+              "support": 1,
+              "accuracy": 1.0
+            }
+          },
+          "道路结构": {
+            "地面道路": {
+              "correct": 126,
+              "support": 129,
+              "accuracy": 0.9767
+            },
+            "高架桥上": {
+              "correct": 1,
+              "support": 2,
+              "accuracy": 0.5
+            }
+          }
+        },
+        "confusion_matrices": {
+          "主辅路": {
+            "classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "ref_classes": [
+              "主路",
+              "无",
+              "辅路"
+            ],
+            "matrix": [
+              [
+                128,
+                1,
+                0
+              ],
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0
+              ]
+            ],
+            "per_class": {
+              "主路": {
+                "precision": 0.9846,
+                "recall": 0.9922,
+                "f1": 0.9884,
+                "support": 129
+              },
+              "无": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              },
+              "辅路": {
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "support": 1
+              }
+            },
+            "macro_avg": {
+              "precision": 0.3282,
+              "recall": 0.3307,
+              "f1": 0.3295
+            },
+            "accuracy": 0.9771,
+            "total_samples": 131
+          },
+          "警示标志": {
+            "classes": [
+              "三角警示牌",
+              "无警示牌",
+              "礼让行人",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "三角警示牌",
+              "无警示牌",
+              "礼让行人"
+            ],
+            "matrix": [
+              [
+                17,
+                8,
+                1,
+                0
+              ],
+              [
+                2,
+                98,
+                0,
+                1
+              ],
+              [
+                0,
+                0,
+                3,
+                1
+              ]
+            ],
+            "per_class": {
+              "三角警示牌": {
+                "precision": 0.8947,
+                "recall": 0.6538,
+                "f1": 0.7555,
+                "support": 26
+              },
+              "无警示牌": {
+                "precision": 0.9245,
+                "recall": 0.9703,
+                "f1": 0.9468,
+                "support": 101
+              },
+              "礼让行人": {
+                "precision": 0.75,
+                "recall": 0.75,
+                "f1": 0.75,
+                "support": 4
+              }
+            },
+            "macro_avg": {
+              "precision": 0.8564,
+              "recall": 0.7914,
+              "f1": 0.8174
+            },
+            "accuracy": 0.9008,
+            "total_samples": 131
+          },
+          "车道位置": {
+            "classes": [
+              "第1车道",
+              "第2车道",
+              "第3车道",
+              "(其他)"
+            ],
+            "ref_classes": [
+              "第1车道",
+              "第2车道",
+              "第3车道"
+            ],
+            "matrix": [
+              [
+                89,
+                1,
+                1,
+                1
+              ],
+              [
+                3,
+                35,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                1,
+                0
+              ]
+            ],
+            "per_class": {
+              "第1车道": {
+                "precision": 0.9674,
+                "recall": 0.9674,
+                "f1": 0.9674,
+                "support": 92
+              },
+              "第2车道": {
+                "precision": 0.9722,
+                "recall": 0.9211,
+                "f1": 0.946,
+                "support": 38
+              },
+              "第3车道": {
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 0.6667,
+                "support": 1
+              }
+            },
+            "macro_avg": {
+              "precision": 0.8132,
+              "recall": 0.9628,
+              "f1": 0.86
+            },
+            "accuracy": 0.9542,
+            "total_samples": 131
+          },
+          "道路结构": {
+            "classes": [
+              "地面道路",
+              "高架桥上"
+            ],
+            "ref_classes": [
+              "地面道路",
+              "高架桥上"
+            ],
+            "matrix": [
+              [
+                126,
+                3
+              ],
+              [
+                1,
+                1
+              ]
+            ],
+            "per_class": {
+              "地面道路": {
+                "precision": 0.9921,
+                "recall": 0.9767,
+                "f1": 0.9843,
+                "support": 129
+              },
+              "高架桥上": {
+                "precision": 0.25,
+                "recall": 0.5,
+                "f1": 0.3333,
+                "support": 2
+              }
+            },
+            "macro_avg": {
+              "precision": 0.621,
+              "recall": 0.7384,
+              "f1": 0.6588
+            },
+            "accuracy": 0.9695,
+            "total_samples": 131
+          }
+        },
+        "overall": {
+          "micro_accuracy": 0.9522,
+          "macro_accuracy": 0.9523,
+          "micro_overall_accuracy": 0.9504,
+          "macro_overall_accuracy": 0.9504,
+          "exact_match_samples": 106,
+          "exact_match_rate": 0.8092,
+          "strict_exact_match_samples": 105,
+          "strict_exact_match_rate": 0.8015
+        }
+      },
+      "report": "/root/autodl-tmp/capt/code/eval-vlm-runs/yellow_lane/train_2026-09-13-16-07-21_Qwen3_5_0_8B_Instruct_all/vllm_offline/field_summary.md",
+      "status": "ok"
+    }
+  ],
+  "num_ok": 11,
+  "num_error": 0
+}

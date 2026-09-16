@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -509,6 +510,67 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             params=body.params or {},
             user="local",
         )
+
+    @app.get("/api/sweep/runs")
+    def api_list_sweep_runs(
+        st: Settings = Depends(get_settings),
+    ) -> list[dict[str, Any]]:
+        sweep_base = st.workspace / "_sweep"
+        if not sweep_base.is_dir():
+            return []
+
+        runs: list[dict[str, Any]] = []
+        for summary_file in sorted(sweep_base.rglob("summary.json")):
+            try:
+                rel = summary_file.relative_to(st.workspace).as_posix()
+                parts = summary_file.relative_to(sweep_base).parts
+                model = parts[0] if len(parts) > 1 else ""
+                backend = parts[1] if len(parts) > 2 else ""
+
+                content = json.loads(summary_file.read_text(encoding="utf-8"))
+                mtime = datetime.fromtimestamp(summary_file.stat().st_mtime, tz=timezone.utc).isoformat()
+                first_res = content.get("results", [{}])[0] if content.get("results") else {}
+
+                runs.append({
+                    "path": rel,
+                    "model": first_res.get("model", model),
+                    "backend": first_res.get("backend", backend),
+                    "mtime": mtime,
+                    "datasets_count": len(content.get("datasets", [])),
+                    "num_ok": content.get("num_ok", 0),
+                    "num_error": content.get("num_error", 0),
+                    "size_bytes": summary_file.stat().st_size,
+                })
+            except Exception:
+                continue
+
+        runs.sort(key=lambda x: x.get("mtime", ""), reverse=True)
+        return runs
+
+    @app.get("/api/sweep/summary")
+    def api_get_sweep_summary(
+        path: Optional[str] = None,
+        model: Optional[str] = None,
+        backend: Optional[str] = None,
+        st: Settings = Depends(get_settings),
+    ) -> dict[str, Any]:
+        target: Optional[Path] = None
+        if path:
+            candidate = (st.workspace / path).resolve()
+            if not str(candidate).startswith(str(st.workspace.resolve())):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="路径越界")
+            target = candidate
+        elif model and backend:
+            from ..config import safe_model_dirname
+            target = st.workspace / "_sweep" / safe_model_dirname(model) / backend / "summary.json"
+
+        if not target or not target.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到指定的 sweep summary.json")
+
+        try:
+            return json.loads(target.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"解析 summary.json 失败: {e}")
 
     @app.post("/api/jobs")
     async def api_create_job(

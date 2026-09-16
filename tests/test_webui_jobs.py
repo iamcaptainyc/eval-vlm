@@ -95,11 +95,16 @@ def test_startup_restore_preserves_metadata_and_interrupts_active(tmp_path):
 
 def test_job_frontend_uses_single_flight_polling_and_session_scoped_logs():
     source = (Path(__file__).parents[1] / "src" / "eval_vlm" / "webui" / "static" / "app.js").read_text(encoding="utf-8")
+    open_terminal = source.split("async function openTerminal(jobId)", 1)[1].split("function isTerminalJob", 1)[0]
     assert "jobLoadPromise" in source
     assert "updateJobPolling" in source
     assert "terminalSession" in source
     assert "const isCurrent" in source
-    assert "await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`)" in source
+    assert "AbortController" in source
+    assert "controller.abort(), 3000" in source
+    assert "connectTerminalStream(jobId, session, 0);" in open_terminal
+    assert "void refreshTerminalSnapshot(jobId, session);" in open_terminal
+    assert open_terminal.index("connectTerminalStream(jobId, session, 0);") < open_terminal.index("void refreshTerminalSnapshot(jobId, session);")
     assert "日志流暂时断开" in source
 
 

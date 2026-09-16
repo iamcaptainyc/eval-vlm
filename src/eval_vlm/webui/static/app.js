@@ -58,6 +58,20 @@ const state = {
     dryRun: false,
   },
 
+  // Sweep 结果多维可视化看板
+  sweepResults: {
+    data: null,
+    activeRunPath: "",
+    runsList: [],
+    selectedDatasetName: null,
+    activeHeatmapField: null,
+    filterMethod: "all",
+    filterSearch: "",
+    filterStatus: "all",
+    sortBy: "default",
+    subView: "cm", // "cm" | "pv"
+  },
+
   // 可视化配置工坊
   configSubTab: "inference",
   configDirty: false,
@@ -190,6 +204,7 @@ function switchTab(tab, dataset = null, updateHash = true) {
   // 触发对应 Tab 数据获取
   if (tab === "datasets") loadDatasets();
   if (tab === "sweep") loadSweepData();
+  if (tab === "sweep-results") loadSweepResultsData();
   if (tab === "jobs") {
     initInlineJobConsole();
     refreshJobs();
@@ -209,7 +224,7 @@ function handleHash() {
   let tab = parts[0] || "datasets";
   if (tab === "global-config") tab = "settings";
   const ds = parts[1] ? decodeURIComponent(parts[1]) : state.currentDataset;
-  if (["datasets", "sweep", "jobs", "settings", "gallery", "config", "runs", "trash", "health"].includes(tab)) {
+  if (["datasets", "sweep", "sweep-results", "jobs", "settings", "gallery", "config", "runs", "trash", "health"].includes(tab)) {
     switchTab(tab, ds, false);
   }
 }
@@ -2514,38 +2529,61 @@ async function openTerminal(jobId) {
     drawer.setAttribute("aria-expanded", "true");
   }
   if (jobLabel) jobLabel.textContent = `任务: ${jobId}`;
-  if (pre) pre.textContent = "正在获取任务最新状态...\n";
-  setTerminalConnection("正在获取任务状态...");
+  if (pre) pre.textContent = "正在连接进程日志输出流...\n";
 
-  // Always fetch a fresh snapshot before connecting. A stale queue row must
-  // not leave a completed local process displayed as "connecting".
-  let job;
-  try {
-    const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-    job = await response.json();
-  } catch (err) {
-    if (session === state.terminalSession && pre) pre.textContent = `无法读取任务状态: ${err.message}\n`;
-    return;
-  }
-  if (session !== state.terminalSession || !state.logDrawerOpen || state.currentJobId !== jobId) return;
-  const snapshotIndex = state.jobs.findIndex((item) => item.id === jobId);
-  if (snapshotIndex >= 0) state.jobs[snapshotIndex] = job;
-  else state.jobs.unshift(job);
-  renderJobs();
-  if (job) {
-    if (dsLabel) {
-      dsLabel.textContent = `数据集: ${jobDatasetLabel(job.dataset)}`;
-      dsLabel.title = job.dataset || "全量";
-    }
-    if (cmdDisplay) cmdDisplay.textContent = job.command?.length ? job.command.join(" ") : "—";
-    if (logDisplay) logDisplay.textContent = job.log_file || "—";
-    if (job.status === "queued") {
-      pre.textContent = `[调度队列] 任务已进入等待执行队列 (ID: ${job.id})\n即将执行: ${job.command?.length ? job.command.join(" ") : "—"}\n正在连接调度器并等待拉起进程...\n\n`;
-    }
-  }
-
+  // The stream replays the persisted log file, including for completed jobs.
+  // Do not make that replay depend on the separate status endpoint: a slow
+  // status query previously left this drawer permanently at the placeholder.
   connectTerminalStream(jobId, session, 0);
+  void refreshTerminalSnapshot(jobId, session);
   updateJobPolling();
+}
+
+async function getJobSnapshot(jobId) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`, { signal: controller.signal });
+    return await response.json();
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function renderTerminalSnapshot(job, { showQueueMessage = false } = {}) {
+  const dsLabel = document.getElementById("terminal-dataset-label");
+  const cmdDisplay = document.getElementById("terminal-cmd-display");
+  const logDisplay = document.getElementById("terminal-log-display");
+  const pre = document.getElementById("terminal-pre");
+  if (dsLabel) {
+    dsLabel.textContent = `数据集: ${jobDatasetLabel(job.dataset)}`;
+    dsLabel.title = job.dataset || "全量";
+  }
+  if (cmdDisplay) cmdDisplay.textContent = job.command?.length ? job.command.join(" ") : "—";
+  if (logDisplay) logDisplay.textContent = job.log_file || "—";
+  if (pre && showQueueMessage && job.status === "queued" && !state.terminalLogs) {
+    pre.textContent = `[调度队列] 任务已进入等待执行队列 (ID: ${job.id})\n即将执行: ${job.command?.length ? job.command.join(" ") : "—"}\n正在连接调度器并等待拉起进程...\n\n`;
+  }
+}
+
+async function refreshTerminalSnapshot(jobId, session) {
+  try {
+    const job = await getJobSnapshot(jobId);
+    if (session !== state.terminalSession || !state.logDrawerOpen || state.currentJobId !== jobId) return;
+    const snapshotIndex = state.jobs.findIndex((item) => item.id === jobId);
+    if (snapshotIndex >= 0) state.jobs[snapshotIndex] = job;
+    else state.jobs.unshift(job);
+    renderJobs();
+    // Only a still-empty terminal may show the queue hint. Never overwrite
+    // log text that has already been replayed from the stream.
+    renderTerminalSnapshot(job, { showQueueMessage: true });
+  } catch (err) {
+    if (session !== state.terminalSession || !state.logDrawerOpen || state.currentJobId !== jobId) return;
+    // The stream remains the source of truth for log replay. A status failure
+    // is intentionally non-fatal and must not replace terminal output.
+    const detail = err?.name === "AbortError" ? "状态同步超时" : "状态同步失败";
+    if (state.eventSource) setTerminalConnection(`${detail}，日志流仍在显示`);
+  }
 }
 
 function isTerminalJob(status) {
@@ -2624,8 +2662,7 @@ function connectTerminalStream(jobId, session, attempt) {
     source.close();
     let latest = null;
     try {
-      const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-      latest = await response.json();
+      latest = await getJobSnapshot(jobId);
     } catch (_) {}
     if (!sessionIsCurrent() || state.eventSource !== source) return;
     if (latest && isTerminalJob(latest.status)) {

@@ -3641,3 +3641,664 @@ table.ui-table tr:hover {
   background: #f8fafc !important;
   color: #1e293b !important;
 }
+
+
+/* ==========================================================================
+   13. Sweep 批量评测结果多维可视化看板 (Sweep Results Studio)
+   ========================================================================== */
+
+/* Dropzone 拖拽与空状态卡片 */
+.sr-dropzone {
+  background: var(--bg-surface-elevated);
+  border: 2px dashed var(--border-card);
+  border-radius: var(--radius-lg);
+  padding: 2.25rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-bottom: 1.25rem;
+}
+
+.sr-dropzone:hover, .sr-dropzone.dragover {
+  border-color: var(--primary-500);
+  background: rgba(99, 102, 241, 0.05);
+  box-shadow: var(--primary-glow);
+}
+
+.sr-dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sr-dropzone-icon {
+  font-size: 2.5rem;
+}
+
+.sr-dropzone-text {
+  font-size: 0.95rem;
+  color: var(--text-main);
+}
+
+.sr-link-text {
+  color: var(--cyan-500);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sr-dropzone-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+/* 1. Hero 关键指标网格 (Executive Summary) */
+.sr-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 1200px) {
+  .sr-hero-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .sr-hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sr-metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--shadow-card);
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sr-metric-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-card);
+}
+
+.sr-metric-model {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(6, 182, 212, 0.08) 100%);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.sr-metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.sr-metric-tag {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sr-metric-icon {
+  font-size: 1.25rem;
+}
+
+.sr-hero-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.sr-metric-val {
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 1.2;
+  font-family: var(--font-mono);
+}
+
+.sr-metric-subtext {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  margin-top: 0.35rem;
+}
+
+/* 2. 横向对比总览表 */
+.sr-overview-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+}
+
+.sr-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.sr-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.sr-table tr {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.sr-table tr:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.sr-table tr.selected {
+  background: rgba(99, 102, 241, 0.12) !important;
+  border-left: 3px solid var(--primary-500);
+}
+
+.sr-progress-bar-wrap {
+  position: relative;
+  height: 22px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+}
+
+.sr-progress-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width 0.4s ease;
+}
+
+.sr-progress-bar-text {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+/* 3. 详细审查下钻工作台 (Drilldown) */
+.sr-drilldown-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-lg);
+}
+
+.sr-drilldown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1.15rem;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.sr-extract-stats-bar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.sr-extract-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.sr-extract-pill strong {
+  font-family: var(--font-mono);
+  color: #fff;
+}
+
+.sr-metrics-pills-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.85rem;
+}
+
+.sr-metric-pill {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  text-align: center;
+}
+
+.sr-metric-pill .title {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.sr-metric-pill .val {
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.sr-per-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.85rem;
+}
+
+.sr-field-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.sr-field-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sr-field-card-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.sr-field-meta-line {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* 子视图切换选项卡 */
+.sr-subview-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.5rem;
+}
+
+.sr-subview-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sr-subview-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sr-subview-tab.active {
+  color: #fff;
+  background: var(--primary-500);
+}
+
+/* 混淆矩阵与字段选择器 */
+.sr-field-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.sr-field-pills-wrap {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.sr-field-pill-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sr-field-pill-btn:hover {
+  border-color: var(--border-card);
+  color: #fff;
+}
+
+.sr-field-pill-btn.active {
+  background: rgba(6, 182, 212, 0.18);
+  border-color: var(--cyan-500);
+  color: var(--cyan-500);
+  font-weight: 700;
+}
+
+/* 混淆矩阵工作区双栏 */
+.sr-cm-workspace-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .sr-cm-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sr-cm-heatmap-container, .sr-cm-metrics-container {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.sr-cm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sr-cm-legend {
+  display: flex;
+  gap: 0.85rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.sr-cm-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sr-cm-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.sr-cm-table-scroll {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+/* 混淆矩阵表格结构 */
+.confusion-matrix-table {
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  width: auto;
+  min-width: 100%;
+}
+
+.confusion-matrix-table th {
+  padding: 6px 10px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.confusion-matrix-table th.cm-corner {
+  background: transparent;
+  color: var(--text-dim);
+  text-align: right;
+  font-style: italic;
+}
+
+.confusion-matrix-table td.cm-row-label {
+  padding: 6px 10px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.cm-cell {
+  padding: 8px 12px;
+  text-align: center;
+  border-radius: 4px;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  position: relative;
+  cursor: default;
+}
+
+.cm-cell:hover {
+  transform: scale(1.08);
+  z-index: 10;
+  filter: brightness(1.2);
+}
+
+.cm-cell.cm-zero {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-dim);
+}
+
+.cm-cell.cm-diag {
+  font-weight: 700;
+  color: #ecfdf5;
+}
+
+.cm-cell.cm-error {
+  font-weight: 700;
+  color: #fff1f2;
+}
+
+/* 逐类别指标表 */
+.sr-cm-perclass-scroll {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.sr-perclass-table {
+  width: 100%;
+  font-size: 0.78rem;
+  border-collapse: collapse;
+}
+
+.sr-perclass-table th {
+  padding: 6px 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.sr-perclass-table th:first-child {
+  text-align: left;
+}
+
+.sr-perclass-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.sr-perclass-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-main);
+  font-family: var(--font-sans);
+}
+
+/* 逐取值分布卡片网格 */
+.sr-per-value-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.sr-pv-field-card {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.sr-pv-field-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--cyan-500);
+  margin-bottom: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+}
+
+.sr-pv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.sr-pv-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+}
+
+.sr-pv-item-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+}
+
+.sr-pv-val-name {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sr-pv-val-stats {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+.sr-pv-bar {
+  height: 6px;
+  background: var(--bg-input);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.sr-pv-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+}
+
+/* ==========================================================================
+   浅色模式 (Light Theme) 适配
+   ========================================================================== */
+[data-theme="light"] .sr-dropzone {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .sr-metric-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-theme="light"] .sr-metric-model {
+  background: linear-gradient(135deg, #eef2ff 0%, #ecfeff 100%) !important;
+  border-color: #c7d2fe !important;
+}
+
+[data-theme="light"] .sr-hero-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .sr-overview-card,
+[data-theme="light"] .sr-drilldown-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-table tr.selected {
+  background: #e0e7ff !important;
+}
+
+[data-theme="light"] .sr-cm-heatmap-container,
+[data-theme="light"] .sr-cm-metrics-container,
+[data-theme="light"] .sr-extract-stats-bar,
+[data-theme="light"] .sr-pv-field-card {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .confusion-matrix-table th,
+[data-theme="light"] .confusion-matrix-table td.cm-row-label,
+[data-theme="light"] .sr-perclass-table th {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] .sr-field-card,
+[data-theme="light"] .sr-metric-pill,
+[data-theme="light"] .sr-pv-item {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .sr-field-card-title {
+  color: #0f172a !important;
+}

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>eval_vlm Web UI — VLM 测试集可视化评测平台</title>
-  <link rel="stylesheet" href="styles.css?v=20260916jobs">
+  <link rel="stylesheet" href="styles.css?v=20260916sweep">
   <script>
     // Apply the stored preference before CSS paints to avoid a theme flash.
     (() => {
@@ -13,7 +13,7 @@
       if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
     })();
   </script>
-  <script src="app.js?v=20260916jobs" defer></script>
+  <script src="app.js?v=20260916sweep" defer></script>
 </head>
 <body>
 
@@ -67,6 +67,10 @@
         <button class="nav-tab-btn" data-tab="sweep" onclick="switchTab('sweep')" title="多数据集批量扫描与横向评测">
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
           <span>批量评测</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="sweep-results" onclick="switchTab('sweep-results')" title="浏览与多维审查 Sweep 批量评测的 JSON 结果看板">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 20V10"></path><path d="M12 20V4"></path><path d="M6 20v-6"></path></svg>
+          <span>Sweep 结果</span>
         </button>
         <button class="nav-tab-btn" data-tab="jobs" onclick="switchTab('jobs')" title="异步任务调度队列">
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -271,6 +275,279 @@
           <button class="btn btn-primary" style="padding: 0.85rem 2rem; font-size: 1.05rem; font-weight: 700; background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);" onclick="submitSweepJob()">
             🌐 立即启动批量 Sweep 任务
           </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2.5. Sweep 批量评测结果多维可视化看板 (Sweep Results Studio) -->
+    <section id="view-sweep-results" class="view-panel">
+      <!-- 顶部控制栏 -->
+      <div class="control-bar">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <h2 class="section-title">📊 Sweep 批量评测多维结果看板</h2>
+            <span class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">JSON 可视化</span>
+          </div>
+          <p class="section-subtitle">将批量扫描产生的 summary.json 转化为直观可读的业务总览、指标卡片、逐字段下钻与混淆矩阵热力图</p>
+        </div>
+        <div class="control-bar-right" style="flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.4rem;">
+            <span style="font-size: 0.8rem; color: var(--text-muted);">本地记录:</span>
+            <select id="sr-run-select" class="select" style="min-width: 230px; font-size: 0.8rem;" onchange="onSweepRunSelect(this.value)">
+              <option value="">(探测本地 _sweep/ 运行记录...)</option>
+            </select>
+          </div>
+          <button class="btn btn-sm" onclick="loadSweepRunsList(true)" title="重新扫描工作区 _sweep 目录">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+            <span>刷新</span>
+          </button>
+          <button class="btn btn-sm" onclick="loadDemoSweepJson()" title="载入预置真实 11 数据集评测数据示例">
+            🧪 示例 Benchmark
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="openSweepPasteModal()" title="手动粘贴或上传外部 summary.json 文件">
+            📥 导入 / 粘贴 JSON
+          </button>
+          <div style="display: flex; gap: 0.35rem;">
+            <button class="btn btn-sm" onclick="exportSweepMarkdown()" title="导出格式化 Markdown 评测总结报告">
+              📝 导出 MD
+            </button>
+            <button class="btn btn-sm" onclick="exportSweepCsv()" title="导出各数据集指标横向对比 CSV 表格">
+              📊 导出 CSV
+            </button>
+            <button class="btn btn-sm" onclick="openSweepRawJsonModal()" title="审查当前原始 JSON 结构">
+              📄 查看原始 JSON
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 隐藏的文件选择器 -->
+      <input type="file" id="sr-file-input" accept=".json" style="display: none;" onchange="handleSweepFileSelected(event)">
+
+      <!-- 空状态与拖拽注入卡片 (当未载入数据或想要切换数据时可直接拖入) -->
+      <div id="sr-dropzone" class="sr-dropzone" onclick="document.getElementById('sr-file-input').click()" ondragover="handleSweepDragOver(event)" ondragleave="handleSweepDragLeave(event)" ondrop="handleSweepDrop(event)">
+        <div class="sr-dropzone-inner">
+          <div class="sr-dropzone-icon">📥</div>
+          <div class="sr-dropzone-text">
+            <strong>拖拽 summary.json 文件到此处</strong>，或 <span class="sr-link-text">点击选择本地文件</span>、<button type="button" class="btn btn-sm" style="margin-left: 0.5rem;" onclick="event.stopPropagation(); openSweepPasteModal();">粘贴 JSON</button>、<button type="button" class="btn btn-sm" style="margin-left: 0.3rem;" onclick="event.stopPropagation(); loadDemoSweepJson();">载入演示样例</button>
+          </div>
+          <div class="sr-dropzone-hint">支持包含 datasets、results、metrics 的标准 eval_vlm 批量评测报告 JSON</div>
+        </div>
+      </div>
+
+      <!-- 核心看板容器 (载入数据后展示) -->
+      <div id="sr-dashboard" style="display: none; flex-direction: column; gap: 1.5rem;">
+        <!-- 1. Hero 关键指标看板 (Executive Summary) -->
+        <div class="sr-hero-grid">
+          <div class="sr-metric-card sr-metric-model" style="grid-column: span 2;">
+            <div class="sr-metric-header">
+              <span class="sr-metric-tag">评估对象</span>
+              <span id="sr-hero-backend-badge" class="role-badge" style="background: rgba(6,182,212,0.18); color: var(--cyan-500);">vllm_offline</span>
+            </div>
+            <div id="sr-hero-model-name" class="sr-hero-title" title="模型权重标识">Qwen3_5_0_8B_Instruct_all</div>
+            <div id="sr-hero-meta-desc" class="sr-metric-subtext">批量运行时间: 2026-09-16 06:43 ~ 06:58 UTC</div>
+          </div>
+
+          <div class="sr-metric-card">
+            <div class="sr-metric-header">
+              <span class="sr-metric-tag">覆盖数据集</span>
+              <span class="sr-metric-icon">📚</span>
+            </div>
+            <div id="sr-hero-datasets-count" class="sr-metric-val" style="color: #a5b4fc;">11</div>
+            <div id="sr-hero-status-pill" class="sr-metric-subtext" style="color: var(--emerald-500);">11 正常 / 0 异常</div>
+          </div>
+
+          <div class="sr-metric-card">
+            <div class="sr-metric-header">
+              <span class="sr-metric-tag">总评测样本量</span>
+              <span class="sr-metric-icon">🎯</span>
+            </div>
+            <div id="sr-hero-total-samples" class="sr-metric-val" style="color: var(--cyan-500);">3,248</div>
+            <div class="sr-metric-subtext">全部跨集样本汇总计</div>
+          </div>
+
+          <div class="sr-metric-card">
+            <div class="sr-metric-header">
+              <span class="sr-metric-tag">平均综合准确率</span>
+              <span class="sr-metric-icon">⚡</span>
+            </div>
+            <div id="sr-hero-avg-accuracy" class="sr-metric-val" style="color: var(--emerald-500);">85.2%</div>
+            <div class="sr-metric-subtext">各数据集指标均值</div>
+          </div>
+
+          <div class="sr-metric-card">
+            <div class="sr-metric-header">
+              <span class="sr-metric-tag">平均精确匹配率 (EM)</span>
+              <span class="sr-metric-icon">🏆</span>
+            </div>
+            <div id="sr-hero-avg-em" class="sr-metric-val" style="color: var(--amber-500);">58.3%</div>
+            <div class="sr-metric-subtext">多字段完全一致率</div>
+          </div>
+        </div>
+
+        <!-- 2. 横向对比总览表 (Overview Table) -->
+        <div class="dataset-card sr-overview-card">
+          <div class="sr-section-header">
+            <div>
+              <h3 style="font-size: 1.05rem; color: #fff; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <span>📋 跨数据集横向评测指标矩阵</span>
+                <span id="sr-table-count-badge" class="global-ds-count">11 个数据集</span>
+              </h3>
+              <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem;">点击任意行可立即在下方展开该数据集的逐字段精度、逐取值支持度分布与混淆矩阵热力图</p>
+            </div>
+
+            <!-- 表格过滤条 -->
+            <div class="sr-filter-bar">
+              <input type="text" id="sr-filter-search" class="input" style="width: 210px; height: 32px; font-size: 0.78rem;" placeholder="🔍 检索数据集名称..." oninput="onSweepFilterChange()">
+              <select id="sr-filter-method" class="select" style="height: 32px; font-size: 0.78rem;" onchange="onSweepFilterChange()">
+                <option value="all">全部评测模式</option>
+                <option value="field-eval">字段抽取 (field-eval)</option>
+                <option value="eval">通用/对话 (eval)</option>
+              </select>
+              <select id="sr-filter-status" class="select" style="height: 32px; font-size: 0.78rem;" onchange="onSweepFilterChange()">
+                <option value="all">全部状态</option>
+                <option value="ok">正常完成 (ok)</option>
+                <option value="error">异常失败 (error)</option>
+              </select>
+              <select id="sr-filter-sort" class="select" style="height: 32px; font-size: 0.78rem;" onchange="onSweepFilterChange()">
+                <option value="default">默认顺序</option>
+                <option value="score_desc">得分/准确率从高到低</option>
+                <option value="score_asc">得分/准确率从低到高</option>
+                <option value="samples_desc">样本数从多到少</option>
+                <option value="name_asc">按名称 A-Z</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="data-table-container" style="margin-top: 0.75rem; max-height: 480px; overflow-y: auto;">
+            <table class="ui-table sr-table">
+              <thead>
+                <tr>
+                  <th style="width: 36px; text-align: center;">#</th>
+                  <th style="min-width: 180px;">数据集名称</th>
+                  <th style="width: 110px;">评测模式</th>
+                  <th style="width: 90px; text-align: right;">样本量</th>
+                  <th style="min-width: 220px;">核心准确率 / 综合得分</th>
+                  <th style="width: 120px; text-align: right;">严格匹配 (EM)</th>
+                  <th style="min-width: 140px;">字段 / 轮次</th>
+                  <th style="width: 80px; text-align: center;">状态</th>
+                  <th style="width: 90px; text-align: center;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="sr-overview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 3. 单数据集精细化审查与混淆矩阵工作台 (Drilldown Panel) -->
+        <div id="sr-drilldown-panel" class="dataset-card sr-drilldown-card" style="display: none;">
+          <div class="sr-drilldown-header">
+            <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+              <span style="font-size: 1.4rem;">🔬</span>
+              <div>
+                <div style="display: flex; align-items: center; gap: 0.6rem;">
+                  <h3 id="sr-detail-ds-name" style="font-size: 1.15rem; color: #fff; margin: 0;">4dim_road_v6_desc</h3>
+                  <span id="sr-detail-method-badge" class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc;">field-eval</span>
+                  <span id="sr-detail-matchmode-badge" class="config-key-badge">exact 匹配</span>
+                </div>
+                <div id="sr-detail-submeta" style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">588 样本 · 4 个目标字段 · 耗时报告已落盘</div>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <button class="btn btn-sm" onclick="navigateSweepDetail(-1)" title="切换到上一个数据集">&larr; 上一个</button>
+              <span id="sr-detail-idx-counter" style="font-size: 0.8rem; color: var(--text-dim); min-width: 50px; text-align: center;">1 / 11</span>
+              <button class="btn btn-sm" onclick="navigateSweepDetail(1)" title="切换到下一个数据集">下一个 &rarr;</button>
+              <button class="btn btn-sm btn-secondary" id="sr-detail-report-btn" onclick="openSelectedRunReport()" style="margin-left: 0.5rem;" title="打开此数据集报告">
+                📑 报告链接
+              </button>
+            </div>
+          </div>
+
+          <!-- 模式 A: field-eval 专属内容区 -->
+          <div id="sr-field-eval-content" style="display: none; margin-top: 1.25rem;">
+            <!-- 缓存命中与抽取统计条 -->
+            <div id="sr-extract-stats-bar" class="sr-extract-stats-bar"></div>
+
+            <!-- 整体指标卡片组 -->
+            <div class="sr-metrics-pills-row" id="sr-field-overall-pills"></div>
+
+            <!-- 逐字段概览卡片网格 -->
+            <div style="margin-top: 1.25rem;">
+              <h4 style="font-size: 0.92rem; color: var(--text-secondary); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+                <span>🏷️ 各目标字段准确率看板</span>
+                <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: normal;">(包含非空准确率与空值判定分析)</span>
+              </h4>
+              <div id="sr-per-field-grid" class="sr-per-field-grid"></div>
+            </div>
+
+            <!-- 下钻子视图切换选项卡: 逐取值分布 vs 混淆矩阵热力图 -->
+            <div class="sr-subview-tabs" style="margin-top: 1.75rem;">
+              <button class="sr-subview-tab active" id="sr-subtab-cm-btn" onclick="switchSweepSubView('cm')">
+                🔥 交互式混淆矩阵热力图 (Confusion Matrix)
+              </button>
+              <button class="sr-subview-tab" id="sr-subtab-pv-btn" onclick="switchSweepSubView('pv')">
+                📊 逐取值准确率与支持度分布 (Per-Value Breakdown)
+              </button>
+            </div>
+
+            <!-- 子视图 1: 混淆矩阵热力图板块 -->
+            <div id="sr-subview-cm" class="sr-subview-content">
+              <!-- 字段选择药丸按钮组 -->
+              <div class="sr-field-picker-bar">
+                <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">选择查看字段:</span>
+                <div id="sr-cm-field-pills" class="sr-field-pills-wrap"></div>
+              </div>
+
+              <!-- 混淆矩阵与分类指标双栏展示网格 -->
+              <div class="sr-cm-workspace-grid">
+                <!-- 左侧/上方: 混淆矩阵热力图主视图 -->
+                <div class="sr-cm-heatmap-container">
+                  <div class="sr-cm-header">
+                    <div style="font-size: 0.86rem; font-weight: 600; color: #fff;">
+                      混淆矩阵：<span id="sr-cm-active-field-name" style="color: var(--cyan-500);">主辅路</span>
+                    </div>
+                    <div class="sr-cm-legend">
+                      <span class="sr-cm-legend-item"><span class="sr-cm-legend-swatch" style="background: rgba(16, 185, 129, 0.45); border: 1px solid var(--emerald-500);"></span>对角预测命中</span>
+                      <span class="sr-cm-legend-item"><span class="sr-cm-legend-swatch" style="background: rgba(244, 63, 94, 0.35); border: 1px solid var(--rose-500);"></span>偏离预测失配</span>
+                    </div>
+                  </div>
+                  <div class="sr-cm-table-scroll" id="sr-cm-table-container"></div>
+                </div>
+
+                <!-- 右侧/下方: 逐类别 Precision / Recall / F1-score 指标表 -->
+                <div class="sr-cm-metrics-container">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+                    <div style="font-size: 0.86rem; font-weight: 600; color: #fff;">逐类别精确率 / 召回率 / F1 矩阵</div>
+                    <div id="sr-cm-macro-avg-badge" class="role-badge" style="background: rgba(16,185,129,0.15); color: var(--emerald-500);">Macro F1: 0.589</div>
+                  </div>
+                  <div class="sr-cm-perclass-scroll" id="sr-cm-perclass-container"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 子视图 2: 逐取值支持度列表板块 -->
+            <div id="sr-subview-pv" class="sr-subview-content" style="display: none;">
+              <div id="sr-per-value-content" class="sr-per-value-grid"></div>
+            </div>
+          </div>
+
+          <!-- 模式 B: eval (对话/通用评测) 专属内容区 -->
+          <div id="sr-eval-content" style="display: none; margin-top: 1.25rem;">
+            <!-- 关键指标行 -->
+            <div class="sr-metrics-pills-row" id="sr-eval-overall-pills"></div>
+
+            <!-- 逐轮次 (Turns) 展示 -->
+            <div style="margin-top: 1.25rem;">
+              <h4 style="font-size: 0.92rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                🔄 逐轮打分表现 (Per-Turn Breakdown)
+              </h4>
+              <div id="sr-eval-turns-container" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+            </div>
+
+            <!-- 坏例与失败报告链接 -->
+            <div id="sr-eval-failures-box" style="margin-top: 1.25rem; display: none;" class="dataset-card"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -2068,6 +2345,49 @@
 
     <pre id="terminal-pre" class="terminal-stream-log"></pre>
   </div>
+
+  <!-- Sweep JSON 导入 / 粘贴模态框 -->
+  <dialog id="sr-paste-modal" class="custom-modal modal-card" style="max-width: 620px; width: 92vw;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 0.65rem;">
+        <span style="font-size: 1.35rem;">📥</span>
+        <h3 class="modal-title">导入 Sweep 评测结果 JSON</h3>
+      </div>
+      <button class="modal-close" onclick="closeSweepPasteModal()" title="关闭">&times;</button>
+    </div>
+    <div style="font-size: 0.84rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+      可直接将批量扫描产生的 <code>summary.json</code> 文件的完整文本粘贴到下方文本框中，或点击直接选择本地文件。
+    </div>
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+      <button class="btn btn-sm btn-primary" onclick="document.getElementById('sr-modal-file-input').click()">📁 从本地文件载入</button>
+      <button class="btn btn-sm" onclick="loadDemoSweepJson(); closeSweepPasteModal();">🧪 载入示例 Benchmark 数据</button>
+      <input type="file" id="sr-modal-file-input" accept=".json" style="display: none;" onchange="handleSweepFileSelected(event); closeSweepPasteModal();">
+    </div>
+    <textarea id="sr-paste-textarea" class="textarea" rows="12" style="width: 100%; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.45;" placeholder='粘贴 {"datasets": [...], "results": [...]} 内容...'></textarea>
+    <div class="modal-footer" style="margin-top: 1rem;">
+      <button class="btn" onclick="closeSweepPasteModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmPasteSweepJson()">解析并渲染看板</button>
+    </div>
+  </dialog>
+
+  <!-- Sweep 原始 JSON 查看器模态框 -->
+  <dialog id="sr-raw-json-modal" class="custom-modal modal-card" style="max-width: 800px; width: 92vw;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 0.65rem;">
+        <span style="font-size: 1.35rem;">📄</span>
+        <h3 class="modal-title">当前 Sweep 原始 JSON 内容</h3>
+      </div>
+      <button class="modal-close" onclick="closeSweepRawJsonModal()" title="关闭">&times;</button>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+      <span style="font-size: 0.78rem; color: var(--text-muted);">已格式化排版 (只读审查)</span>
+      <button class="btn btn-sm" onclick="copySweepRawJson()">📋 复制 JSON 到剪贴板</button>
+    </div>
+    <pre id="sr-raw-json-pre" style="max-height: 520px; overflow: auto; background: #060a12; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1rem; font-family: var(--font-mono); font-size: 0.75rem; color: #a5b4fc; line-height: 1.45;"></pre>
+    <div class="modal-footer" style="margin-top: 1rem;">
+      <button class="btn" onclick="closeSweepRawJsonModal()">关闭</button>
+    </div>
+  </dialog>
 
   <!-- Toast 提示容器 -->
   <div id="toast-shelf"></div>
