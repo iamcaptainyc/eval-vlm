@@ -139,7 +139,26 @@ eval-vlm eval --dataset emo_v4 --base-url http://localhost:8000/v1 --model train
 | `onnx-precision --dataset <名\|路径>` | 已存在数据集 | **逐层数值级**校验 torch(safetensors) vs ONNX(probe 模式,ViT+LLM)→ `<数据集>/<模型>/onnx-precision/onnx_precision.{json,md}`(需 torch+onnx+onnxruntime) |
 | `quant-precision --dataset <名\|路径>` | 已存在数据集 | 模拟 MNN 权重量化(仿射/HQQ),**逐层**比 float 权重 vs 反量化权重的激活 → `<数据集>/<模型>/quant-precision/quant_precision.{json,md}`(定位量化崩点;仅需 torch) |
 | `report --dataset <名\|路径>` | 已存在数据集 | **跨格式合并报告**:扫描该数据集下**全部已跑格式**(HF/各 MNN 变体),出质量并排 + 净质量Δ + 诊断 → `<数据集>/report.{json,md}`(纯读取,不跑模型) |
+| `compare --dataset <名\|路径> --runs A/hf B/mnn` | 已存在数据集 | **样本级多模型对比**:原图、上下文、真值与预测并排；默认仅差异样本，可生成离线 HTML 报告 |
 | `eval-vlm-webui` | — | **可视化 Web UI 平台**: 启动单页应用，提供测试集图片画廊浏览、坏样本审查/删除/恢复、配置在线编辑、任务排队与 SSE 实时日志推流 |
+
+### 多模型样本级对比（原图 / 真值 / 预测）
+
+当同一数据集已经有至少两个模型的 `predictions.jsonl`（可选 `scored.jsonl`）时，可直接只读这些结果进行人工审核：默认仅展示模型预测不同、缺失或报错的样本。每条记录按 `(id, turn)` 对齐，报告将原图、完整对话上下文和真值置于上方，模型预测卡片并排置于下方。
+
+```bash
+eval-vlm compare --dataset emo_v4 \
+  --runs baseline/hf candidate/vllm_offline \
+  --baseline baseline/hf --output ./comparison-output
+
+# 只看基准正确而候选错误的回归样本
+eval-vlm compare --dataset emo_v4 --runs baseline/hf candidate/vllm_offline \
+  --filter regression --sort priority
+```
+
+`--output` 会生成 `comparison.json`（摘要）、`comparison_samples.jsonl`（当前筛选的逐样本记录）和可离线打开的 `comparison.html`。`--include-agreements` 可包含预测一致的样本；`--allow-mixed-dataset` 仅用于有意比较不同 test SHA 的历史结果，默认会拒绝这种可能错误的对齐。
+
+Web UI 的“模型对比”页可多选 Run、指定 baseline、按回归/改进/正确性分歧筛选并分页浏览；图片继续通过既有安全图片服务提供，点击可放大。
 
 > `pred` 用 `--dataset` 与 `--datadir` **二选一**(互斥,必填其一):前者预测已分割数据集的 `test.json`,后者描述一整个无标注图片文件夹。
 

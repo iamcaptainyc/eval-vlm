@@ -98,6 +98,10 @@
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
           <span>评测指标</span>
         </button>
+        <button class="nav-tab-btn" data-tab="comparison" onclick="switchTab('comparison')" title="原图、真值与多模型预测并排对比">
+          <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"></path><path d="M8 12h8M12 8v8"></path></svg>
+          <span>模型对比</span>
+        </button>
         <button class="nav-tab-btn" data-tab="health" onclick="switchTab('health')" title="坏例与缺失体检">
           <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
           <span>健康体检</span>
@@ -1507,7 +1511,107 @@
       </div>
     </section>
 
-    <!-- 5. 评测结果视图 (Runs) -->
+    <!-- 5. 多模型样本级对比 -->
+    <section id="view-comparison" class="view-panel">
+      <div class="control-bar" style="margin-bottom: 0.85rem;">
+        <div>
+          <h2 class="section-title">多模型样本级对比 (Model Comparison)</h2>
+          <p class="section-subtitle">原图、上下文、标注真值与多模型预测横向并排对比，聚焦模型回归、改进与多模型分歧样本</p>
+        </div>
+        <div class="control-bar-right" style="display: flex; gap: 0.5rem; align-items: center;">
+          <button class="btn btn-primary" id="comparison-refresh-btn" onclick="loadComparison(0)">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:15px;height:15px;display:inline-block;vertical-align:middle;margin-right:4px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            <span>开始对比</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 控制面板卡片 (双层布局: 范围配置 + 过滤检索) -->
+      <div class="dataset-card cmp-toolbar-card">
+        <!-- 第一行: 对比范围配置 -->
+        <div class="cmp-config-row">
+          <div class="cmp-control-item" style="min-width: 170px;">
+            <label class="cmp-control-label">📁 目标数据集</label>
+            <select id="comparison-dataset-select" class="select" onchange="selectDatasetAndNavigate(this.value, 'comparison')"></select>
+          </div>
+
+          <div class="cmp-control-item" style="flex: 1; min-width: 320px;">
+            <div class="cmp-control-header">
+              <label class="cmp-control-label">🤖 对比 Runs (<span id="comparison-runs-count">已选 0 个</span>)</label>
+              <div class="cmp-chips-actions">
+                <button type="button" class="btn btn-sm cmp-btn-subtle" onclick="selectAllComparisonRuns(true)">全选</button>
+                <button type="button" class="btn btn-sm cmp-btn-subtle" onclick="selectAllComparisonRuns(false)">清空</button>
+              </div>
+            </div>
+            <!-- 现代化芯片选择容器 -->
+            <div id="comparison-runs-chips" class="cmp-chips-container">
+              <span class="cmp-chips-empty">正在检测可用 Runs...</span>
+            </div>
+            <!-- 保持后备兼容的隐藏 select -->
+            <select id="comparison-runs-select" class="select" multiple style="display: none;" onchange="comparisonRunsChanged()"></select>
+          </div>
+
+          <div class="cmp-control-item" style="min-width: 190px;">
+            <label class="cmp-control-label">⭐ 基准模型 (Baseline)</label>
+            <select id="comparison-baseline-select" class="select" onchange="onComparisonBaselineChange()"></select>
+          </div>
+        </div>
+
+        <!-- 第二行: 过滤、排序与关键字检索 -->
+        <div class="cmp-filter-row">
+          <div class="cmp-control-item" style="min-width: 220px;">
+            <label class="cmp-control-label">🎯 分歧类型筛选</label>
+            <select id="comparison-filter" class="select" onchange="loadComparison(0)">
+              <option value="">🌟 仅预测不同 (默认全部差异)</option>
+              <option value="regression">🔴 回归 (Baseline对 / 候选错)</option>
+              <option value="improvement">🟢 改进 (Baseline错 / 候选对)</option>
+              <option value="correctness_disagreement">🟡 正确性分歧 (模型间判错不一致)</option>
+              <option value="field_disagreement">🔷 字段分歧 (结构化属性不同)</option>
+              <option value="all_wrong">⚠️ 全错 (所有模型均错误)</option>
+              <option value="missing_or_error">❌ 异常/缺失 (未输出或报错)</option>
+            </select>
+          </div>
+
+          <div class="cmp-control-item" style="min-width: 160px;">
+            <label class="cmp-control-label">📶 排序规则</label>
+            <select id="comparison-sort" class="select" onchange="loadComparison(0)">
+              <option value="priority">🔥 审核优先级</option>
+              <option value="score_delta">📊 得分差距优先</option>
+              <option value="id">🆔 样本 ID 顺序</option>
+            </select>
+          </div>
+
+          <div class="cmp-control-item" style="flex: 1; min-width: 240px;">
+            <label class="cmp-control-label">🔍 关键词搜索</label>
+            <div class="cmp-search-wrapper">
+              <input id="comparison-query" class="input cmp-search-input" placeholder="输入 ID / 标注真值 / 预测文本 (Enter 检索)..." onkeydown="if(event.key==='Enter')loadComparison(0)">
+              <button class="cmp-search-clear-btn" type="button" onclick="document.getElementById('comparison-query').value=''; loadComparison(0);" title="清空搜索">✕</button>
+            </div>
+          </div>
+
+          <div class="cmp-control-item cmp-control-checkbox">
+            <label class="cmp-toggle-label" title="当不同 Run 运行时的 test.json SHA 校验码不一致时，依然强制比对">
+              <input id="comparison-allow-mixed" type="checkbox" onchange="loadComparison(0)">
+              <span>强制比对不同版本</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 结构化统计与战绩看板 -->
+      <div id="comparison-summary" class="cmp-summary-section"></div>
+
+      <!-- 告警区 -->
+      <div id="comparison-warnings"></div>
+
+      <!-- 样本对比流 -->
+      <div id="comparison-records" class="cmp-records-container"></div>
+
+      <!-- 优雅分页条 -->
+      <div id="comparison-pagination" class="cmp-pagination-bar"></div>
+    </section>
+
+    <!-- 6. 评测结果视图 (Runs) -->
     <section id="view-runs" class="view-panel">
       <div class="control-bar">
         <div class="control-bar-left">
@@ -1882,12 +1986,16 @@
   </main>
 
   <!-- 原生大图灯箱 Lightbox 模态框 -->
-  <dialog id="lightbox-modal" class="lightbox-dialog" onclick="if(event.target===this) closeLightbox()">
-    <div class="lightbox-wrapper">
-      <button class="lightbox-close-btn" onclick="closeLightbox()">&times;</button>
+  <dialog id="lightbox-modal" class="lightbox-dialog" onclick="if(event.target===this) closeLightbox()" oncancel="closeLightbox()">
+    <button class="lightbox-close-btn lightbox-btn-close" onclick="closeLightbox()" title="关闭 (Esc)">&times;</button>
+    <div class="lightbox-stage lightbox-wrapper">
+      <div id="lightbox-loading" class="lightbox-loading">
+        <div class="lightbox-spinner"></div>
+        <span style="font-size: 0.85rem; color: var(--text-muted);">正在加载高清大图...</span>
+      </div>
       <img id="lightbox-img" src="" alt="放大图">
-      <div id="lightbox-cap" class="lightbox-caption"></div>
     </div>
+    <div id="lightbox-cap" class="lightbox-caption"></div>
   </dialog>
 
   <!-- 样本删除确认模态框 -->

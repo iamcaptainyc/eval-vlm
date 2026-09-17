@@ -1,0 +1,355 @@
+"""Read-only, sample-first comparison of two or more completed evaluation runs.
+
+This module deliberately does not reuse ``compare.py``: that module is the
+small two-run quality crosstab used by precision/report.  Here the unit of
+work is a reviewable sample turn, with the source image, conversation, gold
+answer and every model output kept together.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from html import escape
+import json
+from pathlib import Path
+from statistics import mean
+from typing import Any, Iterable, Optional
+
+from .compare import _is_binary, _is_correct
+from .config import Config
+from .data.loader import load_samples
+from .results.store import discover_run_dirs
+
+
+def normalize_text(value: Any) -> str:
+    """Comparison normalization is intentionally conservative and visible."""
+    return str(value or "").strip()
+
+
+def _jsonl(path: Path, warnings: list[str], label: str) -> dict[tuple[str, int], dict[str, Any]]:
+    rows: dict[tuple[str, int], dict[str, Any]] = {}
+    if not path.exists():
+        return rows
+    with path.open("r", encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+                if "id" not in row:
+                    raise ValueError("missing id")
+                rows[(str(row["id"]), int(row.get("turn", -1)))] = row
+            except Exception as exc:  # malformed rows must never hide the rest
+                warnings.append(f"{label} 第 {number} 行已忽略: {exc}")
+    return rows
+
+
+def _run_id(model: str, backend: str) -> str:
+    return f"{model}/{backend}"
+
+
+def _parse_run_spec(spec: str) -> tuple[str, str]:
+    clean = str(spec).replace("\\", "/").strip("/")
+    if clean.count("/") != 1:
+        raise ValueError(f"Run 必须是 model/backend: {spec!r}")
+    model, backend = clean.split("/", 1)
+    if not model or not backend or any(part in {".", ".."} for part in (model, backend)):
+        raise ValueError(f"非法 Run: {spec!r}")
+    return model, backend
+
+
+def available_run_ids(cfg: Config) -> list[str]:
+    return [_run_id(model, backend) for model, backend, _ in discover_run_dirs(cfg.dataset_dir)]
+
+
+def _field_rows(
+    run_dir: Path,
+    warnings: list[str],
+    target_turn_by_id: dict[str, int],
+    dataset_dir: Optional[Path] = None,
+) -> dict[tuple[str, int], dict[str, Any]]:
+    path = run_dir / "field_mismatches.json"
+    rows_dict: dict[tuple[str, int], dict[str, Any]] = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            rows = data if isinstance(data, list) else data.get("rows", [])
+            # field-eval historically stores one description result per id and
+            # omits turn.  It evaluates the first selected target, so restore that
+            # key from current test.json rather than losing the field comparison.
+            for row in rows:
+                if "id" in row:
+                    sid = str(row["id"])
+                    turn = int(row.get("turn", target_turn_by_id.get(sid, -1)))
+                    rows_dict[(sid, turn)] = row
+        except Exception as exc:
+            warnings.append(f"{path.name} 无法读取: {exc}")
+
+    # If fields_pred.jsonl exists, complement with all_correct samples that were omitted from mismatches
+    pred_path = run_dir / "fields_pred.jsonl"
+    ref_path = (dataset_dir / "fields_ref.jsonl") if dataset_dir else None
+    if pred_path.exists():
+        try:
+            from .field_eval import load_fields
+            pred_data = load_fields(pred_path)
+            ref_data = load_fields(ref_path) if (ref_path and ref_path.exists()) else {}
+            for sid, pred_fields in pred_data.items():
+                turn = target_turn_by_id.get(sid, -1)
+                key = (sid, turn)
+                if key not in rows_dict:
+                    ref_fields = ref_data.get(sid, {})
+                    all_fields = sorted(set(ref_fields.keys()) | set(pred_fields.keys()))
+                    field_rows = [
+                        {
+                            "field": f,
+                            "ref": ref_fields.get(f, []),
+                            "pred": pred_fields.get(f, []),
+                            "correct": True,
+                            "is_empty_ref": len(ref_fields.get(f, [])) == 0,
+                        }
+                        for f in all_fields
+                    ]
+                    rows_dict[key] = {
+                        "id": sid,
+                        "turn": turn,
+                        "state": "all_correct",
+                        "fields": field_rows,
+                    }
+        except Exception as exc:
+            warnings.append(f"{pred_path.name} 补充字段失败: {exc}")
+
+    return rows_dict
+
+
+def _details(sample, target) -> dict[str, Any]:
+    return {
+        "id": sample.id,
+        "turn": target.turn_index,
+        "images": list(sample.images),
+        "turns": [{"role": t.role, "content": t.content} for t in sample.turns],
+        "reference": target.reference,
+        "meta": sample.meta,
+    }
+
+
+def _record_for_run(run: dict[str, Any], key: tuple[str, int]) -> dict[str, Any]:
+    pred = run["predictions"].get(key)
+    scored = run["scored"].get(key)
+    # score owns scorer/reference/detail; prediction owns latency/error/output.
+    output = (pred or {}).get("prediction")
+    error = (pred or {}).get("error")
+    score = (scored or {}).get("score")
+    scorer = (scored or {}).get("scorer")
+    if error:
+        status = "error"
+    elif pred is None:
+        status = "missing"
+    elif scored is None:
+        status = "unscored"
+    elif _is_binary(scorer):
+        status = "correct" if _is_correct(score) else "wrong"
+    else:
+        status = "scored"
+    return {
+        "run": run["id"], "model": run["model"], "backend": run["backend"],
+        "prediction": output, "normalized_prediction": normalize_text(output),
+        "latency": (pred or {}).get("latency"), "error": error,
+        "score": score, "scorer": scorer, "detail": (scored or {}).get("detail"),
+        "status": status, "field": run["fields"].get(key),
+    }
+
+
+def _categorize(outputs: list[dict[str, Any]], baseline_index: int) -> list[str]:
+    categories: list[str] = []
+    if any(x["status"] in {"missing", "error"} for x in outputs):
+        categories.append("missing_or_error")
+    if len({x["normalized_prediction"] for x in outputs}) > 1:
+        categories.append("text_disagreement")
+    fields = [json.dumps(x.get("field"), ensure_ascii=False, sort_keys=True, default=str) for x in outputs]
+    if any(x.get("field") is not None for x in outputs) and len(set(fields)) > 1:
+        categories.append("field_disagreement")
+    comparable = [x for x in outputs if x["status"] in {"correct", "wrong"}]
+    correctness = {x["status"] for x in comparable}
+    if len(comparable) == len(outputs) and len(correctness) > 1:
+        categories.append("correctness_disagreement")
+    if comparable and len(comparable) == len(outputs) and all(x["status"] == "wrong" for x in comparable):
+        categories.append("all_wrong")
+    baseline = outputs[baseline_index]
+    if baseline["status"] == "correct" and any(x["status"] == "wrong" for x in outputs):
+        categories.append("regression")
+    if baseline["status"] == "wrong" and any(x["status"] == "correct" for x in outputs):
+        categories.append("improvement")
+    return categories
+
+
+def _summary(records: Iterable[dict[str, Any]], run_ids: list[str]) -> dict[str, Any]:
+    all_records = list(records)
+    cats = Counter(category for row in all_records for category in row["categories"])
+    runs: dict[str, Any] = {}
+    for idx, run_id in enumerate(run_ids):
+        output = [row["outputs"][idx] for row in all_records]
+        scores = [float(x["score"]) for x in output if isinstance(x.get("score"), (int, float))]
+        latency = [float(x["latency"]) for x in output if isinstance(x.get("latency"), (int, float))]
+        runs[run_id] = {
+            "mean_score": round(mean(scores), 4) if scores else None,
+            "coverage": sum(x["status"] not in {"missing", "error"} for x in output),
+            "missing_or_error": sum(x["status"] in {"missing", "error"} for x in output),
+            "correct": sum(x["status"] == "correct" for x in output),
+            "wrong": sum(x["status"] == "wrong" for x in output),
+            "mean_latency": round(mean(latency), 4) if latency else None,
+        }
+    return {"aligned_total": len(all_records), "categories": dict(cats), "runs": runs}
+
+
+def compare_dataset(
+    cfg: Config,
+    run_specs: list[str],
+    baseline: Optional[str] = None,
+    *, allow_mixed_dataset: bool = False,
+) -> dict[str, Any]:
+    """Load, align and classify comparison records.  This is read-only."""
+    if len(run_specs) < 2:
+        raise ValueError("至少选择两个 Run")
+    if len(set(run_specs)) != len(run_specs):
+        raise ValueError("Run 不能重复")
+    available = set(available_run_ids(cfg))
+    missing = [spec for spec in run_specs if spec not in available]
+    if missing:
+        raise ValueError(f"未找到 Run: {', '.join(missing)}")
+    baseline = baseline or run_specs[0]
+    if baseline not in run_specs:
+        raise ValueError("baseline 必须位于 --runs 中")
+    warnings: list[str] = []
+    current_sha = _sha(cfg.test_path)
+    # Comparison must follow the current test split, never the original source
+    # JSON.  Field-eval's legacy mismatch artifact has no turn, so map it to
+    # its first selected target (the same description target field-eval uses).
+    samples = load_samples(cfg, cfg.test_path)
+    target_turn_by_id = {sample.id: sample.targets[0].turn_index for sample in samples if sample.targets}
+    runs: list[dict[str, Any]] = []
+    sha_values: set[str] = set()
+    for spec in run_specs:
+        model, backend = _parse_run_spec(spec)
+        run_dir = cfg.dataset_dir / model / backend
+        meta: dict[str, Any] = {}
+        try:
+            meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            warnings.append(f"{spec} 缺少 run_meta.json，无法验证数据版本")
+        except Exception as exc:
+            warnings.append(f"{spec} 的 run_meta.json 无法读取: {exc}")
+        run_sha = meta.get("test_sha256")
+        if run_sha:
+            sha_values.add(str(run_sha))
+            if current_sha and run_sha != current_sha:
+                warnings.append(f"{spec} 的 test SHA 与当前数据集不一致")
+        if (run_dir / "dataset_dirty.json").exists():
+            warnings.append(f"{spec} 已标记为 stale")
+        runs.append({"id": spec, "model": model, "backend": backend, "dir": run_dir,
+                     "predictions": _jsonl(run_dir / "predictions.jsonl", warnings, f"{spec}/predictions"),
+                     "scored": _jsonl(run_dir / "scored.jsonl", warnings, f"{spec}/scored"),
+                     "fields": _field_rows(run_dir, warnings, target_turn_by_id, dataset_dir=cfg.dataset_dir)})
+    if len(sha_values) > 1 or any("不一致" in w for w in warnings):
+        if not allow_mixed_dataset:
+            raise ValueError("Run 使用的数据集版本不一致；如确认需要强制比较，请传 --allow-mixed-dataset")
+    records: list[dict[str, Any]] = []
+    known_keys: set[tuple[str, int]] = set()
+    for sample in samples:
+        for target in sample.targets:
+            key = (sample.id, target.turn_index)
+            known_keys.add(key)
+            outputs = [_record_for_run(run, key) for run in runs]
+            records.append({**_details(sample, target), "outputs": outputs,
+                            "categories": _categorize(outputs, run_specs.index(baseline))})
+    # Surface prediction rows which no longer correspond to test.json rather than silently losing them.
+    extras = sorted(set().union(*(set(r["predictions"]) | set(r["scored"]) for r in runs)) - known_keys)
+    for sid, turn in extras:
+        outputs = [_record_for_run(run, (sid, turn)) for run in runs]
+        records.append({"id": sid, "turn": turn, "images": [], "turns": [], "reference": None, "meta": {},
+                        "outputs": outputs, "categories": list(dict.fromkeys(
+                            ["missing_or_error", "orphan_result"] + _categorize(outputs, run_specs.index(baseline))
+                        ))})
+        warnings.append(f"结果中有不在当前 test.json 的记录: {sid}/{turn}")
+    return {"dataset": cfg.dataset_dir.name, "runs": run_specs, "baseline": baseline,
+            "warnings": list(dict.fromkeys(warnings)), "records": records,
+            "summary": _summary(records, run_specs), "normalization": "prediction.strip()"}
+
+
+def _sha(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def filter_records(records: Iterable[dict[str, Any]], *, category: Optional[str] = None,
+                   query: Optional[str] = None, include_agreements: bool = False) -> list[dict[str, Any]]:
+    needle = (query or "").strip().lower()
+    filtered: list[dict[str, Any]] = []
+    for record in records:
+        categories = record["categories"]
+        if category and category not in categories:
+            continue
+        if not include_agreements and not category:
+            # ``all_wrong`` alone describes a hard sample, not a disagreement:
+            # do not flood the default reviewer queue with identical failures.
+            meaningful = {"text_disagreement", "field_disagreement", "correctness_disagreement",
+                          "missing_or_error", "regression", "improvement", "orphan_result"}
+            if not meaningful.intersection(categories):
+                continue
+        if needle:
+            text = " ".join([str(record.get("id", "")), str(record.get("reference", ""))] +
+                            [str(x.get("prediction", "")) for x in record["outputs"]]).lower()
+            if needle not in text:
+                continue
+        filtered.append(record)
+    return filtered
+
+
+def sort_records(records: list[dict[str, Any]], sort: str = "priority", descending: bool = False) -> list[dict[str, Any]]:
+    priority = {"regression": 0, "correctness_disagreement": 1, "improvement": 2,
+                "missing_or_error": 3, "text_disagreement": 4, "all_wrong": 5}
+    if sort == "score_delta":
+        def key(row: dict[str, Any]):
+            scorers = {x.get("scorer") for x in row["outputs"]}
+            if len(scorers) != 1 or None in scorers:
+                return -1  # scores from different scorers are not comparable
+            values = [x.get("score") for x in row["outputs"] if isinstance(x.get("score"), (int, float))]
+            return max(values) - min(values) if len(values) > 1 else -1
+    elif sort == "id":
+        def key(row: dict[str, Any]): return (str(row["id"]), row["turn"])
+    else:
+        def key(row: dict[str, Any]): return (min((priority.get(c, 99) for c in row["categories"]), default=99), str(row["id"]), row["turn"])
+    return sorted(records, key=key, reverse=descending)
+
+
+def _highlight(text: Any, others: list[str]) -> str:
+    value = str(text or "")
+    # Safe but intentionally simple: whole prediction is highlighted when unique.
+    klass = " diff-text" if normalize_text(value) not in {normalize_text(x) for x in others} else ""
+    return f'<pre class="prediction{klass}">{escape(value)}</pre>'
+
+
+def render_html(comparison: dict[str, Any], records: list[dict[str, Any]], image_url=None) -> str:
+    """Self-contained offline report. ``image_url`` may map a source ref to an API URL."""
+    rows: list[str] = []
+    for record in records:
+        images = []
+        for ref in record.get("images", []):
+            source = image_url(ref) if image_url else (Path(ref).resolve().as_uri() if not str(ref).startswith(("http://", "https://", "data:")) else ref)
+            images.append(f'<img src="{escape(source, quote=True)}" alt="source image">')
+        cards = []
+        for output in record["outputs"]:
+            others = [x.get("prediction", "") for x in record["outputs"] if x is not output]
+            cards.append("<article class='output-card'><h3>%s</h3><small>%s · score=%s · latency=%s</small>%s%s%s</article>" % (
+                escape(output["run"]), escape(output["status"]), escape(str(output.get("score", "—"))),
+                escape(str(output.get("latency", "—"))), _highlight(output.get("prediction"), others),
+                f"<p class='error'>{escape(str(output['error']))}</p>" if output.get("error") else "",
+                (f"<details><summary>field-eval 字段结果</summary><pre>{escape(json.dumps(output['field'], ensure_ascii=False, indent=2, default=str))}</pre></details>" if output.get("field") is not None else "") +
+                (f"<details><summary>scorer detail</summary><pre>{escape(json.dumps(output['detail'], ensure_ascii=False, indent=2, default=str))}</pre></details>" if output.get("detail") is not None else "")))
+        context = "".join(f"<p><b>{escape(t['role'])}:</b> {escape(t['content'])}</p>" for t in record.get("turns", []))
+        rows.append("<section class='sample'><header><b>%s / turn %s</b><span>%s</span></header><div class='images'>%s</div><div class='context'>%s<h3>真值</h3><pre>%s</pre></div><div class='outputs'>%s</div></section>" % (
+            escape(str(record["id"])), record["turn"], escape(", ".join(record["categories"]) or "一致"), "".join(images), context,
+            escape(str(record.get("reference") or "")), "".join(cards)))
+    return """<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>模型样本对比</title><style>
+body{font:14px system-ui;margin:24px;background:#101827;color:#e5e7eb} .sample{border:1px solid #344155;border-radius:10px;padding:16px;margin:18px 0;background:#172033}.sample header{display:flex;justify-content:space-between;color:#7dd3fc}.images img{max-width:360px;max-height:300px;margin:10px 10px 10px 0}.outputs{display:flex;gap:12px;overflow-x:auto}.output-card{min-width:300px;flex:1;border:1px solid #40506a;border-radius:7px;padding:10px}.prediction{white-space:pre-wrap}.diff-text{background:#3b2734;border-left:3px solid #fb7185;padding-left:8px}.error{color:#fda4af}.context pre,details pre{white-space:pre-wrap}small{color:#a5b4fc}</style><body><h1>模型样本级对比</h1><p>数据集: %s；Baseline: %s；仅含当前筛选的 %s 条。文本比较规范化: %s。</p>%s</body></html>""" % (
+        escape(comparison["dataset"]), escape(comparison["baseline"]), len(records), escape(comparison["normalization"]), "".join(rows))

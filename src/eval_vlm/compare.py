@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 # 二值(命中/未命中)scorer 的基名;其余(如 token_f1)视为连续。
-_BINARY_SCORERS = {"exact_match", "prefix_match"}
+_BINARY_SCORERS = {"exact_match", "prefix_match", "contain_acc"}
 _CORRECT_EPS = 1e-9
 
 

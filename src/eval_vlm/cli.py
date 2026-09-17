@@ -46,13 +46,14 @@ from .predict import predict_folder
 from .label_extract import run_label_extract
 from .field_eval import run_field_eval
 from .evaluate import score_predictions
-from .data.loader import load_samples
+from .data.loader import load_samples, resolve_image_path
 from .precision import compare_precision
 from .report import build_report, render_report_md
 from .results import store
 from .scoring import available_scorers
 from . import workspace
 from .sweep import run_sweep
+from .comparison import compare_dataset, filter_records, render_html, sort_records
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,51 @@ def _cmd_config(args: argparse.Namespace) -> int:
             value = None
         path = workspace.set_global_value(args.key, value)
         print(f"[config] {args.key} = {value!r} -> {path}")
+    return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    """Generate a review-first, offline comparison report without rerunning models."""
+    folder = _resolve_folder(args)
+    cfg = load_dataset_config(folder)
+    run_specs = [item for group in args.runs for item in group]
+    comparison = compare_dataset(
+        cfg, run_specs, args.baseline,
+        allow_mixed_dataset=args.allow_mixed_dataset,
+    )
+    records = filter_records(comparison["records"], category=args.filter,
+                             query=args.query, include_agreements=args.include_agreements)
+    records = sort_records(records, args.sort, args.descending)
+    if args.offset:
+        records = records[args.offset:]
+    if args.limit is not None and args.limit > 0:
+        records = records[:args.limit]
+    summary = comparison["summary"]
+    print(f"[compare] 对齐 {summary['aligned_total']} 条；当前筛选 {len(records)} 条；baseline={comparison['baseline']}")
+    print("[compare] 差异分类: " + ", ".join(f"{k}={v}" for k, v in sorted(summary["categories"].items())))
+    for run, value in summary["runs"].items():
+        print(f"  {run}: score={value['mean_score']} correct/wrong={value['correct']}/{value['wrong']} "
+              f"missing/error={value['missing_or_error']}")
+    for warning in comparison["warnings"]:
+        print(f"[compare] 警告: {warning}", file=sys.stderr)
+    if args.output:
+        output = Path(args.output)
+        output.mkdir(parents=True, exist_ok=True)
+        public = {key: value for key, value in comparison.items() if key != "records"}
+        public["filtered_total"] = len(records)
+        (output / "comparison.json").write_text(json.dumps(public, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        with (output / "comparison_samples.jsonl").open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        def report_image_url(ref: str) -> str:
+            if str(ref).startswith(("http://", "https://", "data:")):
+                return str(ref)
+            try:
+                return resolve_image_path(str(ref), cfg).resolve().as_uri()
+            except Exception:
+                return str(ref)
+        (output / "comparison.html").write_text(render_html(comparison, records, report_image_url), encoding="utf-8")
+        print(f"[compare] 报告 -> {output.resolve()}")
     return 0
 
 
@@ -916,6 +962,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
     _add_workspace_arg(p_report)
     p_report.set_defaults(func=_cmd_report)
+
+    # compare: review source images/gold/model outputs side-by-side.  Unlike
+    # report it never writes into a run directory or invokes inference/scoring.
+    p_compare = sub.add_parser("compare", help="多模型样本级对比：默认只导出预测有差异的样本")
+    p_compare.add_argument("--dataset", "-d", required=True, help="数据集名(或文件夹路径)")
+    p_compare.add_argument("--runs", required=True, nargs="+", action="append", help="两个或更多 Run，格式 model/backend；可重复传入")
+    p_compare.add_argument("--baseline", default=None, help="基准 Run，默认 --runs 的第一个")
+    p_compare.add_argument("--filter", choices=["regression", "improvement", "correctness_disagreement", "text_disagreement", "field_disagreement", "all_wrong", "missing_or_error"], default=None)
+    p_compare.add_argument("--sort", choices=["priority", "score_delta", "id"], default="priority")
+    p_compare.add_argument("--descending", action="store_true", help="反向排序")
+    p_compare.add_argument("--include-agreements", action="store_true", help="包含所有模型预测一致的样本")
+    p_compare.add_argument("--query", default=None, help="按 sample id、真值或预测全文搜索")
+    p_compare.add_argument("--limit", type=int, default=None)
+    p_compare.add_argument("--offset", type=int, default=0)
+    p_compare.add_argument("--output", default=None, help="输出 comparison.json/jsonl/html 的目录")
+    p_compare.add_argument("--allow-mixed-dataset", action="store_true", help="允许 Run 的 test SHA 与当前数据集不一致")
+    _add_workspace_arg(p_compare)
+    p_compare.set_defaults(func=_cmd_compare)
 
     # infer(单图推理:mnn 后端,只打印结果不落盘)
     p_infer = sub.add_parser(

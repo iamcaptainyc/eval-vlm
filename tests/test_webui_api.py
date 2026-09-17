@@ -111,6 +111,11 @@ def test_api_samples_and_image_stream(api_client):
     assert thumb_resp.status_code == 200
     assert thumb_resp.headers["content-type"] == "image/jpeg"
 
+    # 1K 适配大图模式 (max_dim)
+    max_dim_resp = client.get(f"{img_url}&max_dim=1280")
+    assert max_dim_resp.status_code == 200
+    assert max_dim_resp.headers["content-type"] == "image/jpeg"
+
 
 def test_api_samples_uses_offset_limit_and_filter_total(api_client):
     """The samples endpoint reports the complete match count but returns one page."""
@@ -353,3 +358,31 @@ def test_api_rejects_unknown_job_type(api_client):
     client, _, _, _ = api_client
     resp = client.post("/api/jobs", json={"type": "shell", "params": {}})
     assert resp.status_code == 422
+
+
+def test_api_multirun_comparison_is_paginated_and_returns_images(api_client):
+    client, ds_name, cfg, _ = api_client
+    record = [{
+        "messages": [
+            {"role": "user", "content": "<image> question"},
+            {"role": "assistant", "content": "gold"},
+        ],
+        "images": ["sample.jpg"],
+    }]
+    cfg.test_path.write_text(json.dumps(record), encoding="utf-8")
+    from eval_vlm.data.loader import _stable_id
+    import hashlib
+    sid = _stable_id(0, record[0])
+    sha = hashlib.sha256(cfg.test_path.read_bytes()).hexdigest()
+    for model, prediction, score in (("baseline", "gold", 1.0), ("candidate", "other", 0.0)):
+        rdir = cfg.dataset_dir / model / "hf"
+        rdir.mkdir(parents=True)
+        (rdir / "run_meta.json").write_text(json.dumps({"test_sha256": sha}), encoding="utf-8")
+        (rdir / "predictions.jsonl").write_text(json.dumps({"id": sid, "turn": 1, "prediction": prediction, "latency": 0.1}) + "\n", encoding="utf-8")
+        (rdir / "scored.jsonl").write_text(json.dumps({"id": sid, "turn": 1, "scorer": "exact_match", "score": score}) + "\n", encoding="utf-8")
+    resp = client.get(f"/api/datasets/{ds_name}/comparison", params=[("runs", "baseline/hf"), ("runs", "candidate/hf"), ("baseline", "baseline/hf"), ("limit", "1")])
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert "regression" in body["records"][0]["categories"]
+    assert body["records"][0]["image_urls"][0].startswith(f"/api/datasets/{ds_name}/image")

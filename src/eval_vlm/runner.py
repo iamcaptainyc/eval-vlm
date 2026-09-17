@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 
 from tqdm import tqdm
 
@@ -190,6 +191,18 @@ def run_inference(cfg: Config, limit: Optional[int] = None) -> dict:
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "split_source": meta.get("source"),
         "split_source_sha256": meta.get("source_sha256"),
+        # Snapshot the actual evaluated split.  WebUI stale detection and
+        # multi-run comparison use this to reject accidental cross-version
+        # alignment after test.json has been edited.
+        "test_sha256": _file_sha256(cfg.test_path),
     }
     store.write_json(cfg.run_meta_path, stats)
     return stats
+
+
+def _file_sha256(path: Path) -> str | None:
+    """Return a small dependency-free content fingerprint for run metadata."""
+    if not path.exists():
+        return None
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()

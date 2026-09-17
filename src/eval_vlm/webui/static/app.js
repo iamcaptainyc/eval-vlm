@@ -99,6 +99,9 @@ const state = {
   selectedRun: null,
   activeRunMethod: "field-eval", // "field-eval" | "eval"
 
+  // 样本级模型对比（默认只看预测不同）
+  comparison: { runs: [], baseline: "", records: [], total: 0, offset: 0, limit: 10, summary: null, warnings: [] },
+
   // eval 模式数据
   runMetrics: null,
   scoredRecords: [],
@@ -174,7 +177,7 @@ async function apiFetch(url, options) {
 // --------------------------------------------------------------------------
 // 路由与 Tab 切换 (两层架构：全局视图 vs 数据集专属视图)
 // --------------------------------------------------------------------------
-const DATASET_SCOPED_TABS = ["gallery", "config", "runs", "health", "trash"];
+const DATASET_SCOPED_TABS = ["gallery", "config", "runs", "comparison", "health", "trash"];
 
 function switchTab(tab, dataset = null, updateHash = true) {
   state.activeTab = tab;
@@ -218,6 +221,7 @@ function switchTab(tab, dataset = null, updateHash = true) {
   if (tab === "gallery") loadSamples(0);
   if (tab === "config") loadConfig();
   if (tab === "runs") loadRuns();
+  if (tab === "comparison") loadComparisonRuns();
   if (tab === "trash") loadTrash();
   if (tab === "health") loadHealth();
 }
@@ -228,7 +232,7 @@ function handleHash() {
   let tab = parts[0] || "datasets";
   if (tab === "global-config") tab = "settings";
   const ds = parts[1] ? decodeURIComponent(parts[1]) : state.currentDataset;
-  if (["datasets", "sweep", "sweep-results", "jobs", "settings", "gallery", "config", "runs", "trash", "health"].includes(tab)) {
+  if (["datasets", "sweep", "sweep-results", "jobs", "settings", "gallery", "config", "runs", "comparison", "trash", "health"].includes(tab)) {
     switchTab(tab, ds, false);
   }
 }
@@ -321,6 +325,8 @@ function updateHeaderDatasetDropdown() {
   if (galleryDs && galleryDs.value !== state.currentDataset) galleryDs.value = state.currentDataset;
   const runsDs = document.getElementById("runs-dataset-select");
   if (runsDs && runsDs.value !== state.currentDataset) runsDs.value = state.currentDataset;
+  const comparisonDs = document.getElementById("comparison-dataset-select");
+  if (comparisonDs && comparisonDs.value !== state.currentDataset) comparisonDs.value = state.currentDataset;
   const inlineDs = document.getElementById("job-inline-dataset");
   if (inlineDs && inlineDs.value !== state.currentDataset) inlineDs.value = state.currentDataset;
   const cfgBadge = document.getElementById("cfg-active-dataset-badge");
@@ -453,7 +459,12 @@ function selectDatasetAndNavigate(name, tab) {
 // --------------------------------------------------------------------------
 // 样本画廊 (Gallery)
 // --------------------------------------------------------------------------
-async function loadSamples(offset = 0) {
+async function loadSamples(offset = 0, options = {}) {
+  const opts = typeof options === "boolean" ? { silent: options } : (options || {});
+  const silent = Boolean(opts.silent);
+  const preserveScroll = opts.preserveScroll !== undefined ? opts.preserveScroll : null;
+  const targetScrollY = preserveScroll !== null ? preserveScroll : (window.scrollY || document.documentElement.scrollTop || 0);
+
   if (!state.currentDataset) {
     const container = document.getElementById("gallery-grid");
     if (container) {
@@ -478,7 +489,10 @@ async function loadSamples(offset = 0) {
   }
 
   const container = document.getElementById("gallery-grid");
-  if (container) {
+  // 关键优化：仅在非静默加载时才展示大块“加载中”骨架；
+  // 在删除或局部同步等静默场景下，严禁清空 container.innerHTML，
+  // 彻底避免 DOM 高度瞬时塌缩为数十像素导致浏览器滚动条强制回滚到页面最顶部 (scrollTop = 0)
+  if (container && !silent) {
     container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 4rem; color: var(--text-dim);">加载样本数据中...</div>`;
   }
 
@@ -491,9 +505,20 @@ async function loadSamples(offset = 0) {
     state.testSha = data.test_sha256;
     updateHeaderDatasetDropdown();
     renderGallery();
+
+    // 如果处于静默更新或指定保留滚动位置，精准复位滚动高度，消除页面视口跳动与重新滑动定位
+    if (silent || preserveScroll !== null) {
+      window.scrollTo({ top: targetScrollY, behavior: "instant" });
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: targetScrollY, behavior: "instant" });
+      });
+      setTimeout(() => {
+        window.scrollTo({ top: targetScrollY, behavior: "instant" });
+      }, 50);
+    }
   } catch (err) {
     showToast("加载测试样本失败", "error");
-    if (container) {
+    if (container && !silent) {
       container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 4rem; color: #fb7185;">加载失败: ${escapeHtml(err.message)}</div>`;
     }
   }
@@ -623,7 +648,7 @@ function renderGallery() {
         .join("");
 
       return `
-      <div class="sample-card ${hasMissing ? "has-missing-img" : ""}">
+      <div class="sample-card ${hasMissing ? "has-missing-img" : ""}" data-sample-id="${escapeHtml(s.id)}" id="sample-card-${escapeHtml(s.id)}">
         <div class="sample-card-head">
           <div class="sample-card-head-main">
             <div class="sample-card-id-row">
@@ -658,17 +683,79 @@ function openLightbox(url, ref) {
   const modal = document.getElementById("lightbox-modal");
   const imgEl = document.getElementById("lightbox-img");
   const capEl = document.getElementById("lightbox-cap");
-  if (modal && imgEl && capEl) {
-    imgEl.src = url;
-    capEl.textContent = ref;
+  const loadingEl = document.getElementById("lightbox-loading");
+
+  if (!modal || !imgEl) return;
+
+  // 1. 构建 1K 规格的高清大图 URL (~1280px，仅约 150KB，比数十兆原图秒级打开)
+  const highResUrl = url.includes("?") ? `${url}&max_dim=1280` : `${url}?max_dim=1280`;
+  const thumbUrl = url.includes("?") ? `${url}&thumb=1` : `${url}?thumb=1`;
+
+  // 2. 渐进式展示：立即使用浏览器已缓存的 768px 缩略图作为即时底图（0 延迟即开即看）
+  imgEl.src = thumbUrl;
+  imgEl.style.display = "block";
+  imgEl.style.opacity = "0.85";
+  imgEl.style.filter = "blur(1.5px)";
+
+  if (loadingEl) {
+    loadingEl.style.display = "flex";
+  }
+  if (capEl) {
+    capEl.innerHTML = `
+      <span>${escapeHtml(ref || "")}</span>
+      <span style="opacity: 0.4; margin: 0 6px;">|</span>
+      <span style="font-size: 0.76rem; color: var(--cyan-500);">1K 高清适配</span>
+      <a href="${escapeHtml(url)}" target="_blank" style="margin-left: 8px; color: var(--text-dim); text-decoration: underline; font-size: 0.74rem;" title="在新标签页查看未经压缩的原始大图">查看原始原图 ↗</a>
+    `;
+  }
+
+  // 3. 异步预加载 1K 高清大图，就绪后无缝锐化替换
+  const loader = new Image();
+  loader.onload = () => {
+    if (state.lightbox.open && state.lightbox.url === url) {
+      imgEl.src = highResUrl;
+      imgEl.style.filter = "none";
+      imgEl.style.opacity = "1";
+      if (loadingEl) {
+        loadingEl.style.display = "none";
+      }
+    }
+  };
+  loader.onerror = () => {
+    if (state.lightbox.open && state.lightbox.url === url) {
+      imgEl.style.filter = "none";
+      imgEl.style.opacity = "1";
+      if (loadingEl) {
+        loadingEl.style.display = "none";
+      }
+    }
+  };
+  loader.src = highResUrl;
+
+  if (!modal.open) {
     modal.showModal();
   }
 }
 
 function closeLightbox() {
   state.lightbox.open = false;
+  state.lightbox.url = "";
   const modal = document.getElementById("lightbox-modal");
-  if (modal) modal.close();
+  const imgEl = document.getElementById("lightbox-img");
+  const loadingEl = document.getElementById("lightbox-loading");
+
+  if (imgEl) {
+    imgEl.src = "";
+    imgEl.style.filter = "none";
+    imgEl.style.opacity = "0";
+    imgEl.style.display = "none";
+  }
+  if (loadingEl) {
+    loadingEl.style.display = "none";
+  }
+  if (modal && modal.open) {
+    modal.close();
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -681,6 +768,7 @@ function promptDelete(sampleId, mode = "record", imageIndex = null) {
     mode,
     imageIndex,
     reason: "",
+    scrollY: window.scrollY || document.documentElement.scrollTop || 0,
   };
   const modal = document.getElementById("delete-modal");
   const idEl = document.getElementById("del-target-id");
@@ -698,15 +786,36 @@ function promptDelete(sampleId, mode = "record", imageIndex = null) {
 }
 
 function closeDeleteModal() {
+  const currentY = state.deleteModal?.scrollY ?? (window.scrollY || document.documentElement.scrollTop || 0);
   state.deleteModal.open = false;
   const modal = document.getElementById("delete-modal");
-  if (modal) modal.close();
+  if (modal) {
+    try {
+      if (document.activeElement && modal.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+    } catch (_) {}
+    modal.close();
+  }
+  // 保持当前视口位置不变，防止 dialog 原生 close() 焦点回退时页面发生滚动跳跃
+  window.scrollTo({ top: currentY, behavior: "instant" });
 }
 
 async function confirmDelete() {
   const { sampleId, mode, imageIndex } = state.deleteModal;
   const reasonInput = document.getElementById("del-reason-input");
   const reason = reasonInput ? reasonInput.value.trim() : "";
+
+  // 记录当前页面视口绝对滚动位置
+  const savedScrollY = state.deleteModal?.scrollY ?? (window.scrollY || document.documentElement.scrollTop || 0);
+  const targetCard = document.querySelector(`[data-sample-id="${CSS.escape(sampleId)}"]`);
+
+  // 视觉即刻平滑淡出，给予用户无感的流畅响应
+  if (targetCard && mode === "record") {
+    targetCard.style.transition = "opacity 0.2s ease, transform 0.2s ease";
+    targetCard.style.opacity = "0.35";
+    targetCard.style.pointerEvents = "none";
+  }
 
   try {
     const res = await fetch(
@@ -726,19 +835,34 @@ async function confirmDelete() {
     if (res.status === 409) {
       showToast("test.json 已被其他操作修改，正在同步最新数据...", "warning");
       closeDeleteModal();
-      await loadSamples(state.samplesOffset);
+      await loadSamples(state.samplesOffset, { silent: true, preserveScroll: savedScrollY });
       return;
     }
 
     if (!res.ok) {
+      if (targetCard && mode === "record") {
+        targetCard.style.opacity = "1";
+        targetCard.style.pointerEvents = "auto";
+      }
       const err = await res.json();
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
 
+    const data = await res.json();
+    if (data && data.new_sha256) {
+      state.testSha = data.new_sha256;
+    }
+
     closeDeleteModal();
     showToast(`样本 ${sampleId} 已成功删除，已进入回收站`, "success");
-    await loadSamples(state.samplesOffset);
+
+    // 静默刷新：不销毁画廊清空骨架，保持用户原视口滚动位置不变，无需重新滚动寻找
+    await loadSamples(state.samplesOffset, { silent: true, preserveScroll: savedScrollY });
   } catch (err) {
+    if (targetCard && mode === "record") {
+      targetCard.style.opacity = "1";
+      targetCard.style.pointerEvents = "auto";
+    }
     showToast(`删除失败: ${err.message}`, "error");
   }
 }
@@ -3179,6 +3303,667 @@ function closeHtmlPreview() {
 // --------------------------------------------------------------------------
 // field-eval 专属数据加载与看板渲染
 // --------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// 多模型样本级对比：原图 / 上下文 / 真值固定在预测卡片上方。
+// --------------------------------------------------------------------------
+// 多模型样本级对比：原图 / 上下文 / 真值与多模型预测并排审查
+// --------------------------------------------------------------------------
+const COMPARISON_CATEGORY_CONFIG = {
+  regression: { label: "回归 (Regression)", icon: "🔴", cls: "cmp-cat-regression" },
+  improvement: { label: "改进 (Improvement)", icon: "🟢", cls: "cmp-cat-improvement" },
+  correctness_disagreement: { label: "结果分歧", icon: "🟡", cls: "cmp-cat-correctness" },
+  text_disagreement: { label: "表达不同", icon: "🟣", cls: "cmp-cat-text" },
+  field_disagreement: { label: "字段分歧", icon: "🔷", cls: "cmp-cat-field" },
+  all_wrong: { label: "全错", icon: "⚠️", cls: "cmp-cat-all-wrong" },
+  missing_or_error: { label: "异常/缺失", icon: "❌", cls: "cmp-cat-error" },
+};
+
+async function loadComparisonRuns() {
+  if (!state.currentDataset) return;
+  const ds = document.getElementById("comparison-dataset-select");
+  if (ds) {
+    ds.innerHTML = state.datasets.map(x => `<option value="${escapeHtml(x.name)}">${escapeHtml(x.name)}</option>`).join("");
+    ds.value = state.currentDataset;
+  }
+  try {
+    const data = await (await apiFetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/runs`)).json();
+    const ids = data.map(r => `${r.model}/${r.backend}`);
+    state.comparison.availableRuns = ids;
+    state.comparison.runs = state.comparison.runs.filter(id => ids.includes(id));
+    if (state.comparison.runs.length < 2) {
+      state.comparison.runs = ids.slice(0, Math.min(2, ids.length));
+    }
+    renderRunChips(ids);
+    syncBaselineOptions();
+    if (state.comparison.runs.length >= 2) {
+      loadComparison(0);
+    } else {
+      renderComparisonEmpty("当前数据集可用评测 Run 不足两个，请先运行评测产出结果后再进行对比。");
+    }
+  } catch (err) {
+    showToast(`读取可对比 Run 失败: ${err.message}`, "error");
+  }
+}
+
+function renderRunChips(availableIds) {
+  const container = document.getElementById("comparison-runs-chips");
+  const countEl = document.getElementById("comparison-runs-count");
+  const select = document.getElementById("comparison-runs-select");
+  if (countEl) {
+    countEl.textContent = `已选 ${state.comparison.runs.length} / ${availableIds.length} 个`;
+  }
+  if (select) {
+    select.innerHTML = availableIds.map(id => `<option value="${escapeHtml(id)}" ${state.comparison.runs.includes(id) ? "selected" : ""}>${escapeHtml(id)}</option>`).join("");
+  }
+  if (!container) return;
+  if (!availableIds.length) {
+    container.innerHTML = `<span class="cmp-chips-empty">当前数据集暂无可对比的评测 Run</span>`;
+    return;
+  }
+  container.innerHTML = availableIds.map(id => {
+    const isSelected = state.comparison.runs.includes(id);
+    const isBaseline = state.comparison.baseline === id;
+    const parts = id.split("/");
+    const model = parts[0] || id;
+    const backend = parts[1] || "";
+    return `
+      <div class="cmp-chip ${isSelected ? "active" : ""}" onclick="toggleComparisonRunChip('${escapeHtml(id)}')" title="点击切换对比 Run: ${escapeHtml(id)}">
+        <span class="cmp-chip-check">${isSelected ? "✓" : ""}</span>
+        <span class="cmp-chip-model">${escapeHtml(model)}</span>
+        <span class="cmp-chip-backend">${escapeHtml(backend)}</span>
+        ${isBaseline ? `<span class="cmp-chip-star" title="当前基准模型 (Baseline)">⭐</span>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+function toggleComparisonRunChip(runId) {
+  const runs = state.comparison.runs;
+  const idx = runs.indexOf(runId);
+  if (idx >= 0) {
+    runs.splice(idx, 1);
+  } else {
+    runs.push(runId);
+  }
+  syncBaselineOptions();
+  renderRunChips(state.comparison.availableRuns || []);
+  if (runs.length >= 2) {
+    loadComparison(0);
+  } else {
+    showToast("请至少勾选两个 Run 以便开始对比", "warning");
+    renderComparisonEmpty("已选择少于 2 个 Run，无法对比。请在上方点击勾选至少两个评测 Run。");
+  }
+}
+
+function selectAllComparisonRuns(selectAll) {
+  const available = state.comparison.availableRuns || [];
+  if (selectAll) {
+    state.comparison.runs = [...available];
+  } else {
+    state.comparison.runs = [];
+  }
+  syncBaselineOptions();
+  renderRunChips(available);
+  if (state.comparison.runs.length >= 2) {
+    loadComparison(0);
+  } else {
+    renderComparisonEmpty("请勾选至少两个评测 Run 以执行多模型样本对比。");
+  }
+}
+
+function syncBaselineOptions() {
+  const baseSelect = document.getElementById("comparison-baseline-select");
+  const runs = state.comparison.runs;
+  if (!runs.includes(state.comparison.baseline)) {
+    state.comparison.baseline = runs[0] || "";
+  }
+  if (baseSelect) {
+    if (!runs.length) {
+      baseSelect.innerHTML = `<option value="">(无可选 Run)</option>`;
+    } else {
+      baseSelect.innerHTML = runs.map(id => `
+        <option value="${escapeHtml(id)}" ${id === state.comparison.baseline ? "selected" : ""}>
+          ${escapeHtml(id)} ${id === state.comparison.baseline ? "⭐ (当前基准)" : ""}
+        </option>
+      `).join("");
+    }
+    baseSelect.value = state.comparison.baseline;
+  }
+}
+
+function onComparisonBaselineChange() {
+  const baseSelect = document.getElementById("comparison-baseline-select");
+  if (!baseSelect) return;
+  state.comparison.baseline = baseSelect.value;
+  renderRunChips(state.comparison.availableRuns || []);
+  if (state.comparison.runs.length >= 2) {
+    loadComparison(0);
+  }
+}
+
+function comparisonRunsChanged(reload = true) {
+  const select = document.getElementById("comparison-runs-select");
+  if (select) {
+    state.comparison.runs = Array.from(select.selectedOptions).map(x => x.value);
+  }
+  syncBaselineOptions();
+  renderRunChips(state.comparison.availableRuns || []);
+  if (reload && state.comparison.runs.length >= 2) {
+    loadComparison(0);
+  }
+}
+
+async function loadComparison(offset = 0) {
+  const c = state.comparison;
+  const baseEl = document.getElementById("comparison-baseline-select");
+  if (baseEl && baseEl.value) c.baseline = baseEl.value;
+  if (c.runs.length < 2) {
+    showToast("请至少选择两个 Run 进行对比", "warning");
+    renderComparisonEmpty("对比功能需要至少选择 2 个已完成的评测 Run。");
+    return;
+  }
+
+  const refreshBtn = document.getElementById("comparison-refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("is-loading");
+  }
+
+  const target = document.getElementById("comparison-records");
+  if (target) {
+    target.innerHTML = `
+      <div class="cmp-sample-card" style="opacity:0.6; pointer-events:none; min-height:220px; display:flex; flex-direction:column; justify-content:center; align-items:center;">
+        <div class="spinner" style="margin-bottom:0.75rem;"></div>
+        <div style="color:var(--text-muted); font-size:0.85rem;">正在拉取并横向比对模型预测数据...</div>
+      </div>
+    `;
+  }
+
+  const sortVal = document.getElementById("comparison-sort")?.value || "priority";
+  const filterVal = document.getElementById("comparison-filter")?.value;
+  const queryVal = document.getElementById("comparison-query")?.value;
+  const allowMixed = document.getElementById("comparison-allow-mixed")?.checked;
+
+  const params = new URLSearchParams({
+    baseline: c.baseline,
+    offset: String(offset),
+    limit: String(c.limit),
+    sort: sortVal,
+  });
+  c.runs.forEach(run => params.append("runs", run));
+  if (allowMixed) params.set("allow_mixed_dataset", "true");
+  if (filterVal) params.set("filter", filterVal);
+  if (queryVal && queryVal.trim()) params.set("query", queryVal.trim());
+
+  try {
+    const resp = await apiFetch(`/api/datasets/${encodeURIComponent(state.currentDataset)}/comparison?${params}`);
+    if (!resp.ok) {
+      const errJson = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(errJson.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    c.records = data.records || [];
+    c.total = data.total || 0;
+    c.offset = data.offset || 0;
+    c.summary = data.summary || null;
+    c.warnings = data.warnings || [];
+    renderComparison();
+  } catch (err) {
+    showToast(`模型对比失败: ${err.message}`, "error");
+    if (target) {
+      target.innerHTML = `
+        <div class="cmp-empty-card">
+          <div class="cmp-empty-icon">⚠️</div>
+          <div class="cmp-empty-title">模型对比读取失败</div>
+          <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
+          <button class="btn btn-primary" onclick="loadComparison(0)">重试</button>
+        </div>
+      `;
+    }
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove("is-loading");
+    }
+  }
+}
+
+function renderComparisonSummary(summary, filteredTotal) {
+  const container = document.getElementById("comparison-summary");
+  if (!container) return;
+  if (!summary) {
+    container.innerHTML = "";
+    return;
+  }
+  const alignedTotal = summary.aligned_total ?? 0;
+  const categories = summary.categories || {};
+  const runsStats = summary.runs || {};
+  const currentFilter = document.getElementById("comparison-filter")?.value || "";
+
+  const diffPct = alignedTotal > 0 ? Math.min(100, Math.round((filteredTotal / alignedTotal) * 100)) : 0;
+
+  const categoryPillsHtml = Object.entries(categories).map(([catKey, count]) => {
+    const meta = COMPARISON_CATEGORY_CONFIG[catKey] || { label: catKey, icon: "🏷️", cls: "cmp-cat-all" };
+    const isActive = currentFilter === catKey;
+    return `
+      <div class="cmp-cat-pill ${meta.cls} ${isActive ? "active" : ""}" onclick="filterComparisonByCategory('${escapeHtml(catKey)}')" title="点击筛选此分类">
+        <span>${meta.icon}</span>
+        <span>${escapeHtml(meta.label)}</span>
+        <span class="cmp-cat-count">${count}</span>
+      </div>
+    `;
+  }).join("");
+
+  const scorecardsHtml = Object.entries(runsStats).map(([runId, st]) => {
+    const isBaseline = runId === state.comparison.baseline;
+    const parts = runId.split("/");
+    const model = parts[0] || runId;
+    const backend = parts[1] || "";
+    const scoreStr = typeof st.mean_score === "number" ? `${(st.mean_score * 100).toFixed(1)}%` : "—";
+    const latencyStr = typeof st.mean_latency === "number" ? `${st.mean_latency.toFixed(2)}s` : "—";
+
+    return `
+      <div class="cmp-run-scorecard ${isBaseline ? "is-baseline" : ""}">
+        <div class="cmp-run-scorecard-header">
+          <div class="cmp-run-title" title="${escapeHtml(runId)}">
+            ${escapeHtml(model)} <span style="font-size:0.75rem; color:var(--text-dim); font-weight:normal;">(${escapeHtml(backend)})</span>
+          </div>
+          ${isBaseline ? `<span class="badge" style="background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.35); font-size:0.68rem; padding:1px 6px;">⭐ 基准</span>` : ""}
+        </div>
+        <div class="cmp-run-stats-row">
+          <div>
+            <div style="font-size:0.7rem; color:var(--text-dim);">平均综合得分</div>
+            <div class="${typeof st.mean_score === "number" ? "cmp-run-score-big" : "cmp-run-score-null"}">${scoreStr}</div>
+          </div>
+          <div style="margin-left:auto; text-align:right;">
+            <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:2px;">判定分布</div>
+            <div class="cmp-run-counts-pill">
+              <span class="cmp-stat-correct">✓ ${st.correct ?? 0}</span>
+              <span class="cmp-stat-wrong">✗ ${st.wrong ?? 0}</span>
+            </div>
+          </div>
+        </div>
+        <div class="cmp-run-meta-row">
+          <span>覆盖率: <strong style="color:var(--text-secondary);">${st.coverage ?? 0}</strong> / ${alignedTotal}</span>
+          <span>平均时延: <strong style="color:var(--text-secondary);">${latencyStr}</strong></span>
+          ${st.missing_or_error > 0 ? `<span style="color:#fda4af;">异常: ${st.missing_or_error}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="cmp-summary-grid">
+      <div class="cmp-overview-metric-card">
+        <div>
+          <div class="cmp-overview-metric-title">
+            <span>对齐样本与分歧统计</span>
+            <span style="font-size:0.75rem; color:var(--cyan-500);">共对齐 ${alignedTotal} 轮</span>
+          </div>
+          <div class="cmp-overview-metric-big">
+            ${filteredTotal} <span style="font-size:1rem; font-weight:normal; color:var(--text-muted);">条差异样本</span>
+          </div>
+          <div class="cmp-progress-track" title="差异样本占比: ${diffPct}%">
+            <div class="cmp-progress-bar" style="width: ${diffPct}%;"></div>
+          </div>
+        </div>
+        <div class="cmp-overview-metric-desc">
+          当前条件展示 <strong style="color:var(--text-main);">${filteredTotal}</strong> 条样本 (占对齐总数 ${diffPct}%)
+        </div>
+      </div>
+
+      <div class="cmp-categories-card">
+        <div>
+          <div class="cmp-overview-metric-title">
+            <span>分歧特征分类 (点击直接过滤)</span>
+            <span style="font-size:0.72rem; color:var(--text-dim);">共 ${Object.keys(categories).length} 类分歧</span>
+          </div>
+          <div class="cmp-cat-pills-list">
+            <div class="cmp-cat-pill cmp-cat-all ${currentFilter === "" ? "active" : ""}" onclick="filterComparisonByCategory('')" title="显示全部差异样本">
+              <span>🌟</span>
+              <span>全部差异样本</span>
+              <span class="cmp-cat-count">${filteredTotal}</span>
+            </div>
+            ${categoryPillsHtml}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${Object.keys(runsStats).length ? `
+      <div style="margin-top: 0.85rem;">
+        <div style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem;">
+          <span>📊 参与对比模型核心战绩矩阵</span>
+        </div>
+        <div class="cmp-scorecards-grid">${scorecardsHtml}</div>
+      </div>
+    ` : ""}
+  `;
+}
+
+function comparisonPrediction(output, allOutputs) {
+  const baselineOutput = (allOutputs || []).find(o => o.run === state.comparison.baseline) || (allOutputs && allOutputs[0]);
+  const hasAnyField = (allOutputs || []).some(o => o.field != null);
+  return comparisonPredictionCard(output, allOutputs, baselineOutput, hasAnyField);
+}
+
+function comparisonPredictionCard(output, allOutputs, baselineOutput, hasAnyFieldInRow = false) {
+  const isBaseline = output.run === state.comparison.baseline;
+  const isUnique = allOutputs.filter(x => x.normalized_prediction === output.normalized_prediction).length === 1;
+  const isDiffFromBaseline = baselineOutput && output.normalized_prediction !== baselineOutput.normalized_prediction;
+  const isImprovement = baselineOutput?.status === "wrong" && output.status === "correct";
+  const isRegression = baselineOutput?.status === "correct" && output.status === "wrong";
+
+  let statusBadge = "";
+  if (output.status === "correct") {
+    statusBadge = `<span class="badge cmp-badge-correct">✓ 判定正确</span>`;
+  } else if (output.status === "wrong") {
+    statusBadge = `<span class="badge cmp-badge-wrong">✗ 判定错误</span>`;
+  } else if (output.status === "error") {
+    statusBadge = `<span class="badge cmp-badge-error">⚠️ 报错</span>`;
+  } else if (output.status === "missing") {
+    statusBadge = `<span class="badge cmp-badge-missing">— 缺失</span>`;
+  } else {
+    statusBadge = `<span class="badge cmp-badge-info">${escapeHtml(output.status)}</span>`;
+  }
+
+  const scoreStr = output.score != null ? `得分: <strong style="color:var(--text-main);">${escapeHtml(String(output.score))}</strong>` : "";
+  const latencyStr = output.latency != null ? `⚡ <strong style="color:var(--text-main);">${escapeHtml(String(output.latency))}s</strong>` : "";
+
+  let fieldHtml = "";
+  if (output.field && typeof output.field === "object") {
+    const fieldsList = output.field.fields || output.field.mismatches;
+    if (Array.isArray(fieldsList) && fieldsList.length > 0) {
+      const isAllCorrect = output.field.state === "all_correct" || fieldsList.every(f => f.correct === true);
+      const titleIcon = isAllCorrect ? "✅" : "🔬";
+      const titleText = isAllCorrect ? "字段抽取比对 (field-eval · 全部一致 ✓)" : "字段抽取比对 (field-eval · 存在失配 ✗)";
+      const titleColor = isAllCorrect ? "var(--emerald-500, #10b981)" : "var(--rose-500, #f43f5e)";
+
+      fieldHtml = `
+        <div class="cmp-fields-container ${isAllCorrect ? 'is-all-correct' : 'is-mismatch'}">
+          <div class="cmp-fields-title" style="color:${titleColor};">
+            <span>${titleIcon}</span>
+            <span>${titleText}</span>
+          </div>
+          <div class="cmp-fields-list">
+            ${fieldsList.map(f => {
+              const isCor = f.correct === true;
+              const refVal = Array.isArray(f.ref) ? (f.ref.length ? f.ref.join(", ") : "(空)") : (f.ref ?? "(空)");
+              const predVal = Array.isArray(f.pred) ? (f.pred.length ? f.pred.join(", ") : "(空)") : (f.pred ?? "(空)");
+              return `
+                <span class="cmp-field-tag ${isCor ? "is-correct" : "is-wrong"}" title="真值(ref): ${escapeHtml(refVal)} | 预测(pred): ${escapeHtml(predVal)}">
+                  ${isCor ? "✓" : "✗"} <strong>${escapeHtml(f.field || "")}:</strong> ${escapeHtml(predVal)}
+                </span>
+              `;
+            }).join("")}
+          </div>
+          <details style="margin-top:0.35rem;">
+            <summary style="cursor:pointer; font-size:0.72rem; color:var(--text-dim);">展开完整字段抽取 JSON</summary>
+            <pre style="margin-top:0.25rem; font-size:0.75rem; background:rgba(0,0,0,0.35); padding:0.45rem; border-radius:4px; max-height:10rem; overflow:auto; word-break:break-all; white-space:pre-wrap;">${escapeHtml(JSON.stringify(output.field, null, 2))}</pre>
+          </details>
+        </div>
+      `;
+    } else {
+      fieldHtml = `
+        <details style="margin-top:0.35rem;">
+          <summary style="cursor:pointer; font-size:0.72rem; color:var(--cyan-500);">🔬 字段抽取结果 (field-eval)</summary>
+          <pre style="margin-top:0.25rem; font-size:0.75rem; background:rgba(0,0,0,0.35); padding:0.45rem; border-radius:4px; max-height:10rem; overflow:auto; word-break:break-all; white-space:pre-wrap;">${escapeHtml(JSON.stringify(output.field, null, 2))}</pre>
+        </details>
+      `;
+    }
+  } else if (hasAnyFieldInRow) {
+    fieldHtml = `
+      <div class="cmp-fields-container is-empty">
+        <div class="cmp-fields-title" style="color:var(--text-dim);">🔬 字段抽取比对 (field-eval)</div>
+        <div style="font-size:0.73rem; color:var(--text-muted); line-height:1.4;">
+          ℹ️ 该 Run 未产出字段抽取数据 <span style="font-size:0.68rem; color:var(--text-dim);">(未运行 field-eval 或该轮次未抽词)</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let detailHtml = "";
+  if (output.detail != null) {
+    detailHtml = `
+      <details style="margin-top:0.35rem;">
+        <summary style="cursor:pointer; font-size:0.72rem; color:var(--text-dim);">Scorer 评分详情 (${escapeHtml(output.scorer || "scorer")})</summary>
+        <pre style="margin-top:0.25rem; font-size:0.75rem; background:rgba(0,0,0,0.35); padding:0.45rem; border-radius:4px; max-height:10rem; overflow:auto; word-break:break-all; white-space:pre-wrap;">${escapeHtml(JSON.stringify(output.detail, null, 2))}</pre>
+      </details>
+    `;
+  }
+
+  const parts = output.run.split("/");
+  const model = parts[0] || output.run;
+  const backend = parts[1] || "";
+
+  let colClass = "cmp-output-col";
+  if (isBaseline) colClass += " is-baseline";
+  if (isDiffFromBaseline || isUnique) {
+    colClass += " is-diff";
+    if (isImprovement) colClass += " is-improvement";
+  }
+
+  return `
+    <article class="${colClass}">
+      <div class="cmp-output-header">
+        <div class="cmp-output-model-info">
+          <div class="cmp-output-model-name" title="${escapeHtml(output.run)}">
+            ${escapeHtml(model)}
+            <span style="font-size:0.75rem; color:var(--text-dim); font-weight:normal;">(${escapeHtml(backend)})</span>
+            ${isBaseline ? `<span class="badge cmp-badge-baseline">⭐ 基准</span>` : ""}
+            ${isRegression ? `<span class="badge cmp-badge-regression">🔴 回归</span>` : ""}
+            ${isImprovement ? `<span class="badge cmp-badge-improvement">🟢 改进</span>` : ""}
+          </div>
+          <div class="cmp-output-meta-row">
+            <span>${scoreStr}</span>
+            <span>${latencyStr}</span>
+          </div>
+        </div>
+        <div class="cmp-output-badges">
+          ${statusBadge}
+        </div>
+      </div>
+
+      <div style="position:relative;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">
+          <span style="font-size:0.72rem; color:var(--text-dim); font-family:var(--font-mono);">PREDICTION OUTPUT</span>
+          <button class="cmp-copy-btn" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(output.prediction ?? "")}" title="复制该模型预测">📋 复制</button>
+        </div>
+        <pre class="cmp-output-text-box ${isUnique ? "comparison-diff" : ""}">${escapeHtml(output.prediction ?? "(无预测输出)")}</pre>
+      </div>
+
+      ${output.error ? `<div class="banner-stale" style="display:block; margin:0.35rem 0; color:#fda4af;">⚠️ ${escapeHtml(output.error)}</div>` : ""}
+      ${fieldHtml}
+      ${detailHtml}
+    </article>
+  `;
+}
+
+function renderComparison() {
+  const c = state.comparison;
+  renderComparisonSummary(c.summary, c.total);
+
+  const warnings = document.getElementById("comparison-warnings");
+  if (warnings) {
+    warnings.innerHTML = (c.warnings && c.warnings.length)
+      ? c.warnings.map(x => `<div class="banner-stale" style="display:block;margin-bottom:0.75rem;">⚠️ ${escapeHtml(x)}</div>`).join("")
+      : "";
+  }
+
+  const target = document.getElementById("comparison-records");
+  const pager = document.getElementById("comparison-pagination");
+  if (!target) return;
+
+  if (!c.records || !c.records.length) {
+    target.innerHTML = `
+      <div class="cmp-empty-card">
+        <div class="cmp-empty-icon">🎉</div>
+        <div class="cmp-empty-title">当前筛选下无差异样本</div>
+        <div class="cmp-empty-desc">
+          所有参与对比的模型在当前过滤条件下输出完全一致，或未搜索到匹配的样本。
+        </div>
+        <button class="btn btn-primary" onclick="filterComparisonByCategory(''); document.getElementById('comparison-query').value=''; loadComparison(0);">
+          重置所有筛选与搜索
+        </button>
+      </div>
+    `;
+    if (pager) pager.innerHTML = "";
+    return;
+  }
+
+  const baselineId = c.baseline;
+
+  target.innerHTML = c.records.map(row => {
+    const catBadges = (row.categories || []).map(catKey => {
+      const meta = COMPARISON_CATEGORY_CONFIG[catKey] || { label: catKey, icon: "🏷️", cls: "cmp-cat-all" };
+      return `<span class="cmp-cat-pill ${meta.cls}" style="font-size:0.72rem; padding:1px 7px; pointer-events:none;">${meta.icon} ${escapeHtml(meta.label)}</span>`;
+    }).join("");
+
+    const hasImages = row.image_urls && row.image_urls.length > 0;
+    const imagesHtml = hasImages ? `
+      <div class="cmp-gallery-strip">
+        ${row.image_urls.map((url, i) => `
+          <div class="cmp-thumb-wrap" onclick="openLightbox('${escapeHtml(url)}','样本 ${escapeHtml(row.id)} - 原图 ${i + 1}')" title="点击放大查看原图">
+            <img class="cmp-thumb-img" src="${escapeHtml(url)}&thumb=1" loading="lazy" alt="原图 ${i + 1}">
+            <span class="cmp-thumb-zoom-badge">🔍 原图 ${i + 1}</span>
+          </div>
+        `).join("")}
+      </div>
+    ` : "";
+
+    const hasTurns = row.turns && row.turns.length > 0;
+    const turnsHtml = hasTurns ? `
+      <div class="cmp-dialogue-list">
+        ${row.turns.map(t => `
+          <div class="cmp-chat-bubble ${t.role === 'user' ? 'cmp-chat-user' : 'cmp-chat-assistant'}">
+            <div class="cmp-chat-role">${t.role === 'user' ? '👤 USER 用户输入' : '🤖 ASSISTANT 对话上下文'}</div>
+            <div class="cmp-chat-content" style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(t.content)}</div>
+          </div>
+        `).join("")}
+      </div>
+    ` : "";
+
+    const hasAnyFieldInRow = (row.outputs || []).some(o => o.field != null);
+    const baselineOutput = (row.outputs || []).find(o => o.run === baselineId) || (row.outputs && row.outputs[0]);
+    const outputsHtml = (row.outputs || []).map(o => comparisonPredictionCard(o, row.outputs, baselineOutput, hasAnyFieldInRow)).join("");
+
+    return `
+      <section class="cmp-sample-card">
+        <div class="cmp-sample-header">
+          <div class="cmp-sample-id-group">
+            <span class="cmp-sample-id" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(row.id)}" title="点击复制样本 ID">
+              🆔 ${escapeHtml(row.id)}
+            </span>
+            <span class="cmp-turn-badge">第 ${row.turn} 轮 (Turn ${row.turn})</span>
+          </div>
+          <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+            ${catBadges || `<span class="badge cmp-badge-consistent">一致</span>`}
+          </div>
+        </div>
+
+        <div class="cmp-sample-body">
+          <div class="cmp-context-section">
+            ${imagesHtml}
+            ${turnsHtml}
+            <div class="cmp-gold-box">
+              <div class="cmp-gold-header">
+                <span class="cmp-gold-title">🎯 标注真值 (Reference / Gold)</span>
+                <button class="cmp-copy-btn" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(row.reference ?? '')}" title="复制标注真值">📋 复制</button>
+              </div>
+              <pre class="cmp-gold-content">${escapeHtml(row.reference ?? "(空真值)")}</pre>
+            </div>
+          </div>
+
+          <div class="cmp-outputs-section">
+            <div class="cmp-outputs-section-header">
+              <span>🤖 各模型预测输出横向比对</span>
+              <span style="font-size:0.72rem; color:var(--text-dim); font-weight:normal;">共 ${row.outputs ? row.outputs.length : 0} 个模型输出</span>
+            </div>
+            <div class="cmp-outputs-grid">
+              ${outputsHtml}
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+  }).join("");
+
+  if (pager) {
+    const currentStart = c.offset + 1;
+    const currentEnd = Math.min(c.offset + c.limit, c.total);
+    const hasPrev = c.offset > 0;
+    const hasNext = c.offset + c.limit < c.total;
+
+    pager.innerHTML = `
+      <div class="cmp-pagination-info">
+        显示第 <strong style="color:var(--text-main);">${currentStart} - ${currentEnd}</strong> 条，共 <strong style="color:var(--cyan-500);">${c.total}</strong> 条差异样本
+      </div>
+      <div class="cmp-pagination-btns">
+        <select class="select" style="height:32px; font-size:0.78rem; padding:0.2rem 0.5rem;" onchange="changeComparisonLimit(this.value)">
+          <option value="10" ${c.limit === 10 ? "selected" : ""}>每页 10 条</option>
+          <option value="20" ${c.limit === 20 ? "selected" : ""}>每页 20 条</option>
+          <option value="50" ${c.limit === 50 ? "selected" : ""}>每页 50 条</option>
+        </select>
+        <button class="btn" ${!hasPrev ? "disabled" : ""} onclick="loadComparison(${Math.max(0, c.offset - c.limit)})">
+          ← 上一页
+        </button>
+        <button class="btn" ${!hasNext ? "disabled" : ""} onclick="loadComparison(${c.offset + c.limit})">
+          下一页 →
+        </button>
+      </div>
+    `;
+  }
+}
+
+function renderComparisonEmpty(msg) {
+  const summary = document.getElementById("comparison-summary");
+  if (summary) summary.innerHTML = "";
+  const target = document.getElementById("comparison-records");
+  if (target) {
+    target.innerHTML = `
+      <div class="cmp-empty-card">
+        <div class="cmp-empty-icon">💡</div>
+        <div class="cmp-empty-title">准备开始模型对比</div>
+        <div class="cmp-empty-desc">${escapeHtml(msg || "请在上方勾选至少两个评测 Run，并指定基准模型后开始。")}</div>
+      </div>
+    `;
+  }
+  const pager = document.getElementById("comparison-pagination");
+  if (pager) pager.innerHTML = "";
+}
+
+function filterComparisonByCategory(catKey) {
+  const select = document.getElementById("comparison-filter");
+  if (select) {
+    select.value = catKey;
+    loadComparison(0);
+  }
+}
+
+function changeComparisonLimit(newLimit) {
+  const limit = parseInt(newLimit, 10);
+  if (limit > 0) {
+    state.comparison.limit = limit;
+    loadComparison(0);
+  }
+}
+
+function copyComparisonText(text) {
+  if (!text) {
+    showToast("内容为空", "warning");
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("已成功复制到剪贴板", "info");
+    }).catch(() => {
+      showToast("复制失败，请手动选择复制", "error");
+    });
+  } else {
+    showToast("浏览器不支持快捷复制，请手动选中复制", "warning");
+  }
+}
+
 async function loadFieldMetrics() {
   if (!state.selectedRun) return;
   const { model, backend } = state.selectedRun;
@@ -3726,6 +4511,15 @@ window.loadSamples = loadSamples;
 window.loadConfig = loadConfig;
 window.loadJobs = loadJobs;
 window.loadRuns = loadRuns;
+window.loadComparison = loadComparison;
+window.loadComparisonRuns = loadComparisonRuns;
+window.comparisonRunsChanged = comparisonRunsChanged;
+window.selectAllComparisonRuns = selectAllComparisonRuns;
+window.toggleComparisonRunChip = toggleComparisonRunChip;
+window.onComparisonBaselineChange = onComparisonBaselineChange;
+window.filterComparisonByCategory = filterComparisonByCategory;
+window.changeComparisonLimit = changeComparisonLimit;
+window.copyComparisonText = copyComparisonText;
 window.loadTrash = loadTrash;
 window.loadHealth = loadHealth;
 window.selectDatasetAndNavigate = selectDatasetAndNavigate;

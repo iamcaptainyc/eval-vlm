@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Optional
+import urllib.parse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.gzip import GZipMiddleware
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Config
+from ..comparison import compare_dataset, filter_records, sort_records
 from ..workspace import global_config_path, scan_local_models, set_global_value
 from .automation import check_dataset_health, compare_runs
 from .configio import read_config_info, update_dataset_config
@@ -285,9 +287,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def api_get_image(
         ref: str = Query(..., description="图片引用或路径"),
         thumb: int = Query(0, description="是否返回缩略图 (1=是)"),
+        max_dim: Optional[int] = Query(None, description="限制最大边长像素尺寸（如 1280 约 1K）"),
         cfg: Config = Depends(get_dataset_cfg),
     ) -> Response:
-        return serve_image(cfg, ref=ref, thumb=bool(thumb))
+        return serve_image(cfg, ref=ref, thumb=bool(thumb), max_dim=max_dim)
 
     # -----------------------------------------------------------------------
     # 配置
@@ -482,6 +485,38 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         cfg: Config = Depends(get_dataset_cfg),
     ) -> dict[str, Any]:
         return compare_runs(cfg, a, b)
+
+    @app.get("/api/datasets/{name}/comparison")
+    def api_comparison(
+        name: str,
+        runs: list[str] = Query(..., description="重复 runs=model/backend，至少两个"),
+        baseline: Optional[str] = None,
+        filter: Optional[str] = Query(None, pattern="^(regression|improvement|correctness_disagreement|text_disagreement|field_disagreement|all_wrong|missing_or_error)$"),
+        sort: str = Query("priority", pattern="^(priority|score_delta|id)$"),
+        descending: bool = False,
+        include_agreements: bool = False,
+        query: Optional[str] = None,
+        offset: int = 0,
+        limit: int = Query(20, ge=1, le=100),
+        allow_mixed_dataset: bool = False,
+        cfg: Config = Depends(get_dataset_cfg),
+    ) -> dict[str, Any]:
+        try:
+            comparison = compare_dataset(cfg, runs, baseline, allow_mixed_dataset=allow_mixed_dataset)
+            rows = filter_records(comparison["records"], category=filter, query=query,
+                                  include_agreements=include_agreements)
+            rows = sort_records(rows, sort, descending)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        total = len(rows)
+        page = rows[offset: offset + limit]
+        # Do not expose filesystem paths: reuse the existing guarded image endpoint.
+        for row in page:
+            row["image_urls"] = [f"/api/datasets/{name}/image?ref={urllib.parse.quote(ref)}" for ref in row.get("images", [])]
+        return {"summary": comparison["summary"], "warnings": comparison["warnings"],
+                "runs": comparison["runs"], "baseline": comparison["baseline"],
+                "normalization": comparison["normalization"], "total": total,
+                "offset": offset, "limit": limit, "records": page}
 
     # -----------------------------------------------------------------------
     # 任务执行 (Jobs)

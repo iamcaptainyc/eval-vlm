@@ -237,8 +237,9 @@ def serve_image(
     cfg: Config,
     ref: str,
     thumb: bool = False,
+    max_dim: Optional[int] = None,
 ) -> Response:
-    """提供图片服务，带目录穿越校验与 Pillow 动态缩略图支持。"""
+    """提供图片服务，带目录穿越校验与 Pillow 动态缩略/大图适配支持。"""
     # 1. 外部链接直接 302
     if ref.startswith(("http://", "https://")):
         return RedirectResponse(url=ref, status_code=status.HTTP_302_FOUND)
@@ -293,25 +294,30 @@ def serve_image(
             detail=f"图片文件不存在: {resolved}",
         )
 
-    # 4. 缩略图模式
-    if thumb:
+    # 4. 缩略图模式或自适应尺寸模式（如 1K/1280px 大图适配）
+    effective_dim = 768 if thumb else max_dim
+    if effective_dim:
         try:
-            thumb_key = (*_stat_key(resolved), 768)
+            cache_key = (*_stat_key(resolved), effective_dim)
             with _CACHE_LOCK:
-                cached_thumb = _THUMB_CACHE.get(thumb_key)
+                cached_thumb = _THUMB_CACHE.get(cache_key)
                 if cached_thumb is not None:
-                    _THUMB_CACHE.move_to_end(thumb_key)
+                    _THUMB_CACHE.move_to_end(cache_key)
                     return Response(
                         content=cached_thumb,
                         media_type="image/jpeg",
-                        headers={"Cache-Control": "private, max-age=0, must-revalidate", "ETag": f'"{hash(thumb_key)}"'},
+                        headers={"Cache-Control": "public, max-age=86400", "ETag": f'"{hash(cache_key)}"'},
                     )
         except OSError:
-            thumb_key = None
+            cache_key = None
         try:
             with Image.open(resolved) as img:
-                img = img.copy()
-                img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+                w, h = img.size
+                if max(w, h) > effective_dim:
+                    img = img.copy()
+                    img.thumbnail((effective_dim, effective_dim), Image.Resampling.LANCZOS)
+                else:
+                    img = img.copy()
                 if img.mode in ("RGBA", "P", "LA"):
                     bg = Image.new("RGB", img.size, (255, 255, 255))
                     if img.mode == "RGBA":
@@ -323,14 +329,22 @@ def serve_image(
                     img = img.convert("RGB")
 
                 buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=82, optimize=True)
+                quality = 82 if thumb else 86
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
                 payload = buf.getvalue()
-                if thumb_key is not None:
+                if cache_key is not None:
                     with _CACHE_LOCK:
-                        _bounded_put(_THUMB_CACHE, thumb_key, payload, _THUMB_CACHE_MAX)
-                return Response(content=payload, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=0, must-revalidate", "ETag": f'"{hash(thumb_key)}"'})
+                        _bounded_put(_THUMB_CACHE, cache_key, payload, _THUMB_CACHE_MAX)
+                return Response(
+                    content=payload,
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400", "ETag": f'"{hash(cache_key)}"'},
+                )
         except Exception:
             # 缩略失败回退到原图输出
             pass
 
-    return FileResponse(path=str(resolved))
+    return FileResponse(
+        path=str(resolved),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
