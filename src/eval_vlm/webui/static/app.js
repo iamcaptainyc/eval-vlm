@@ -3554,43 +3554,250 @@ function renderComparisonSummary(summary, filteredTotal) {
     `;
   }).join("");
 
-  const scorecardsHtml = Object.entries(runsStats).map(([runId, st]) => {
+  // 提取参与对比的 fieldNames
+  let fieldNames = summary.field_names || [];
+  if (!fieldNames.length) {
+    const fset = new Set();
+    Object.values(runsStats).forEach(st => {
+      if (st.field_eval && st.field_eval.fields) {
+        Object.keys(st.field_eval.fields).forEach(f => fset.add(f));
+      }
+    });
+    fieldNames = Array.from(fset);
+  }
+
+  // 提取参与对比的 turns
+  let turns = summary.turns || [];
+  if (!turns.length) {
+    const tset = new Set();
+    Object.values(runsStats).forEach(st => {
+      if (st.turn_metrics) {
+        Object.keys(st.turn_metrics).forEach(t => tset.add(Number(t)));
+      }
+    });
+    turns = Array.from(tset).sort((a, b) => a - b);
+  }
+
+  // 计算 field-eval 最高值
+  let maxAllCorrectRate = -1;
+  const maxAccByField = {};
+  const hasAnyFieldEval = Object.values(runsStats).some(st => st.field_eval && st.field_eval.has_field_eval);
+
+  if (hasAnyFieldEval) {
+    Object.values(runsStats).forEach(st => {
+      const fe = st.field_eval;
+      if (fe && fe.has_field_eval) {
+        if (typeof fe.all_correct_rate === "number" && fe.all_correct_rate > maxAllCorrectRate) {
+          maxAllCorrectRate = fe.all_correct_rate;
+        }
+        if (fe.fields) {
+          fieldNames.forEach(fn => {
+            const acc = fe.fields[fn]?.accuracy;
+            if (typeof acc === "number") {
+              if (maxAccByField[fn] == null || acc > maxAccByField[fn]) {
+                maxAccByField[fn] = acc;
+              }
+            }
+          });
+        }
+      }
+    });
+  }
+
+  // 计算 eval turn 最高值
+  let maxOverallScore = -1;
+  const maxTurnAcc = {};
+  Object.values(runsStats).forEach(st => {
+    if (typeof st.mean_score === "number" && st.mean_score > maxOverallScore) {
+      maxOverallScore = st.mean_score;
+    }
+    if (st.turn_metrics) {
+      turns.forEach(t => {
+        const tm = st.turn_metrics[String(t)] || st.turn_metrics[t];
+        if (tm && typeof tm.accuracy === "number") {
+          if (maxTurnAcc[t] == null || tm.accuracy > maxTurnAcc[t]) {
+            maxTurnAcc[t] = tm.accuracy;
+          }
+        }
+      });
+    }
+  });
+
+  // 1. 构建 Field-Eval 矩阵 HTML
+  let fieldEvalMatrixHtml = "";
+  if (!hasAnyFieldEval) {
+    fieldEvalMatrixHtml = `
+      <div class="cmp-matrix-empty-tip">
+        💡 参与对比的模型尚未运行 <code>field-eval</code> 评测。运行字段抽取评测后，将在此自动对比各字段总体准确率与全对率。
+      </div>
+    `;
+  } else {
+    const theadFields = fieldNames.map(fn => `<th>${escapeHtml(fn)} 准确率</th>`).join("");
+    const tbodyRows = Object.entries(runsStats).map(([runId, st]) => {
+      const isBaseline = runId === state.comparison.baseline;
+      const parts = runId.split("/");
+      const model = parts[0] || runId;
+      const backend = parts[1] || "";
+      const fe = st.field_eval;
+
+      let allCorrectCell = "";
+      if (!fe || !fe.has_field_eval) {
+        allCorrectCell = `<td><span style="color:var(--text-dim); font-size:0.75rem;">未参与评测</span></td>`;
+      } else {
+        const ratePct = (fe.all_correct_rate * 100).toFixed(1);
+        const isTopRate = fe.all_correct_rate === maxAllCorrectRate && maxAllCorrectRate > 0 && Object.keys(runsStats).length > 1;
+        allCorrectCell = `
+          <td>
+            <div class="cmp-stat-cell-main ${isTopRate ? 'is-top' : ''}">
+              <span>${ratePct}%</span>
+              ${isTopRate ? `<span style="font-size:0.68rem; color:var(--emerald-500); font-weight:normal;">👑 最高</span>` : ""}
+            </div>
+            <div class="cmp-stat-cell-sub">
+              <span>全对数/总数: <strong style="color:var(--text-main); font-weight:600;">${fe.all_correct_count}</strong> / ${fe.total_samples}</span>
+            </div>
+            <div class="cmp-mini-progress" title="全对率: ${ratePct}% (${fe.all_correct_count}/${fe.total_samples})">
+              <div class="cmp-mini-progress-bar" style="width:${Math.round(fe.all_correct_rate * 100)}%;"></div>
+            </div>
+          </td>
+        `;
+      }
+
+      const fieldCells = fieldNames.map(fn => {
+        const fst = fe?.fields?.[fn];
+        if (!fst || typeof fst.accuracy !== "number") {
+          return `<td><span style="color:var(--text-dim); font-size:0.75rem;">—</span></td>`;
+        }
+        const accPct = (fst.accuracy * 100).toFixed(1);
+        const isTopAcc = fst.accuracy === maxAccByField[fn] && maxAccByField[fn] > 0 && Object.keys(runsStats).length > 1;
+        return `
+          <td>
+            <div class="cmp-stat-cell-main ${isTopAcc ? 'is-top' : ''}">
+              <span>${accPct}%</span>
+            </div>
+            <div class="cmp-stat-cell-sub">
+              <span>${fst.correct} / ${fst.total}</span>
+            </div>
+            <div class="cmp-mini-progress" title="${escapeHtml(fn)} 准确率: ${accPct}% (${fst.correct}/${fst.total})">
+              <div class="cmp-mini-progress-bar" style="width:${Math.round(fst.accuracy * 100)}%;"></div>
+            </div>
+          </td>
+        `;
+      }).join("");
+
+      return `
+        <tr class="${isBaseline ? 'is-baseline' : ''}">
+          <td class="cmp-model-cell">
+            <div class="cmp-model-name" title="${escapeHtml(runId)}">
+              <span>${escapeHtml(model)}</span>
+              ${isBaseline ? `<span class="badge" style="background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.35); font-size:0.65rem; padding:1px 5px;">⭐ 基准</span>` : ""}
+            </div>
+            <div class="cmp-model-backend">${escapeHtml(backend || runId)}</div>
+          </td>
+          ${allCorrectCell}
+          ${fieldCells}
+        </tr>
+      `;
+    }).join("");
+
+    fieldEvalMatrixHtml = `
+      <div class="cmp-matrix-table-wrap">
+        <table class="cmp-matrix-table">
+          <thead>
+            <tr>
+              <th style="min-width:170px;">对比模型</th>
+              <th style="min-width:150px;">全对率 (全对数/总数)</th>
+              ${theadFields}
+            </tr>
+          </thead>
+          <tbody>
+            ${tbodyRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // 2. 构建 Eval Turn-by-Turn 矩阵 HTML
+  const theadTurns = turns.map(t => `<th>Turn ${t} 指标</th>`).join("");
+  const turnRows = Object.entries(runsStats).map(([runId, st]) => {
     const isBaseline = runId === state.comparison.baseline;
     const parts = runId.split("/");
     const model = parts[0] || runId;
     const backend = parts[1] || "";
-    const scoreStr = typeof st.mean_score === "number" ? `${(st.mean_score * 100).toFixed(1)}%` : "—";
-    const latencyStr = typeof st.mean_latency === "number" ? `${st.mean_latency.toFixed(2)}s` : "—";
+    const isTopOverall = st.mean_score === maxOverallScore && maxOverallScore > 0 && Object.keys(runsStats).length > 1;
+    const overallScoreStr = typeof st.mean_score === "number" ? `${(st.mean_score * 100).toFixed(1)}%` : "—";
+
+    const turnCells = turns.map(t => {
+      const tm = st.turn_metrics?.[String(t)] || st.turn_metrics?.[t];
+      if (!tm) {
+        return `<td><span style="color:var(--text-dim); font-size:0.75rem;">—</span></td>`;
+      }
+      const accPct = (tm.accuracy * 100).toFixed(1);
+      const isTopTurn = tm.accuracy === maxTurnAcc[t] && maxTurnAcc[t] > 0 && Object.keys(runsStats).length > 1;
+      return `
+        <td>
+          <div class="cmp-stat-cell-main ${isTopTurn ? 'is-top' : ''}">
+            <span>${accPct}%</span>
+          </div>
+          <div class="cmp-stat-cell-sub">
+            <span style="color:var(--emerald-500);">✓ ${tm.correct}</span>
+            <span style="color:var(--rose-500);">✗ ${tm.wrong}</span>
+            <span style="color:var(--text-dim);">/ ${tm.total}</span>
+            ${tm.mean_latency != null ? `<span style="color:var(--text-dim); margin-left:2px;">⚡${tm.mean_latency.toFixed(2)}s</span>` : ""}
+          </div>
+          <div class="cmp-mini-progress" title="Turn ${t} 正确率: ${accPct}% (✓${tm.correct} / ✗${tm.wrong})">
+            <div class="cmp-mini-progress-bar" style="width:${Math.round(tm.accuracy * 100)}%;"></div>
+          </div>
+        </td>
+      `;
+    }).join("");
 
     return `
-      <div class="cmp-run-scorecard ${isBaseline ? "is-baseline" : ""}">
-        <div class="cmp-run-scorecard-header">
-          <div class="cmp-run-title" title="${escapeHtml(runId)}">
-            ${escapeHtml(model)} <span style="font-size:0.75rem; color:var(--text-dim); font-weight:normal;">(${escapeHtml(backend)})</span>
+      <tr class="${isBaseline ? 'is-baseline' : ''}">
+        <td class="cmp-model-cell">
+          <div class="cmp-model-name" title="${escapeHtml(runId)}">
+            <span>${escapeHtml(model)}</span>
+            ${isBaseline ? `<span class="badge" style="background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.35); font-size:0.65rem; padding:1px 5px;">⭐ 基准</span>` : ""}
           </div>
-          ${isBaseline ? `<span class="badge" style="background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.35); font-size:0.68rem; padding:1px 6px;">⭐ 基准</span>` : ""}
-        </div>
-        <div class="cmp-run-stats-row">
-          <div>
-            <div style="font-size:0.7rem; color:var(--text-dim);">平均综合得分</div>
-            <div class="${typeof st.mean_score === "number" ? "cmp-run-score-big" : "cmp-run-score-null"}">${scoreStr}</div>
+          <div class="cmp-model-backend">${escapeHtml(backend || runId)}</div>
+        </td>
+        <td>
+          <div class="cmp-stat-cell-main ${isTopOverall ? 'is-top' : ''}">
+            <span>${overallScoreStr}</span>
+            ${isTopOverall ? `<span style="font-size:0.68rem; color:var(--emerald-500); font-weight:normal;">👑</span>` : ""}
           </div>
-          <div style="margin-left:auto; text-align:right;">
-            <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:2px;">判定分布</div>
-            <div class="cmp-run-counts-pill">
-              <span class="cmp-stat-correct">✓ ${st.correct ?? 0}</span>
-              <span class="cmp-stat-wrong">✗ ${st.wrong ?? 0}</span>
+          <div class="cmp-stat-cell-sub">
+            <span style="color:var(--emerald-500);">✓ ${st.correct ?? 0}</span>
+            <span style="color:var(--rose-500);">✗ ${st.wrong ?? 0}</span>
+            ${st.mean_latency != null ? `<span style="color:var(--text-dim); margin-left:2px;">⚡${st.mean_latency.toFixed(2)}s</span>` : ""}
+          </div>
+          ${typeof st.mean_score === "number" ? `
+            <div class="cmp-mini-progress" title="综合得分: ${overallScoreStr}">
+              <div class="cmp-mini-progress-bar" style="width:${Math.round(st.mean_score * 100)}%;"></div>
             </div>
-          </div>
-        </div>
-        <div class="cmp-run-meta-row">
-          <span>覆盖率: <strong style="color:var(--text-secondary);">${st.coverage ?? 0}</strong> / ${alignedTotal}</span>
-          <span>平均时延: <strong style="color:var(--text-secondary);">${latencyStr}</strong></span>
-          ${st.missing_or_error > 0 ? `<span style="color:#fda4af;">异常: ${st.missing_or_error}</span>` : ""}
-        </div>
-      </div>
+          ` : ""}
+        </td>
+        ${turnCells}
+      </tr>
     `;
   }).join("");
+
+  const turnMetricsMatrixHtml = `
+    <div class="cmp-matrix-table-wrap">
+      <table class="cmp-matrix-table">
+        <thead>
+          <tr>
+            <th style="min-width:170px;">对比模型</th>
+            <th style="min-width:150px;">总体表现 (Overall)</th>
+            ${theadTurns}
+          </tr>
+        </thead>
+        <tbody>
+          ${turnRows}
+        </tbody>
+      </table>
+    </div>
+  `;
 
   container.innerHTML = `
     <div class="cmp-summary-grid">
@@ -3631,11 +3838,32 @@ function renderComparisonSummary(summary, filteredTotal) {
     </div>
 
     ${Object.keys(runsStats).length ? `
-      <div style="margin-top: 0.85rem;">
-        <div style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem;">
-          <span>📊 参与对比模型核心战绩矩阵</span>
+      <div class="cmp-matrices-wrapper">
+        <!-- 模块一：field-eval 字段总体准确率与全对率对比 -->
+        <div class="cmp-matrix-card">
+          <div class="cmp-matrix-header">
+            <div class="cmp-matrix-title">
+              <span>🔬 Field-Eval 字段总体准确率 & 全对率对比</span>
+            </div>
+            <div class="cmp-matrix-subtitle">
+              基于结构化字段抽取评测 · 对比各抽取字段准确率与全对率 (全对数/总数)
+            </div>
+          </div>
+          ${fieldEvalMatrixHtml}
         </div>
-        <div class="cmp-scorecards-grid">${scorecardsHtml}</div>
+
+        <!-- 模块二：eval 各 turn 指标对比 -->
+        <div class="cmp-matrix-card">
+          <div class="cmp-matrix-header">
+            <div class="cmp-matrix-title">
+              <span>📈 Eval 各轮次对话 (Turn-by-Turn) 评测指标对比</span>
+            </div>
+            <div class="cmp-matrix-subtitle">
+              基于对齐对话样本 · 横向对比模型在不同轮次追问中的答题表现
+            </div>
+          </div>
+          ${turnMetricsMatrixHtml}
+        </div>
       </div>
     ` : ""}
   `;

@@ -113,3 +113,45 @@ def test_field_rows_complemented_from_fields_pred(tmp_path):
     assert new_field["fields"][0]["field"] == "color"
     assert new_field["fields"][0]["correct"] is True
 
+
+def test_summary_includes_turn_metrics_and_field_eval(tmp_path):
+    cfg, sid = _setup(tmp_path)
+    # 给 new/hf 写入 field_metrics.json
+    fm = {
+        "num_scored": 1,
+        "overall": {
+            "strict_exact_match_samples": 1,
+            "strict_exact_match_rate": 1.0,
+        },
+        "per_field": {
+            "road": {"total": 1, "correct": 1, "accuracy": 1.0},
+            "lane": {"total": 1, "correct": 1, "accuracy": 1.0},
+        },
+    }
+    (tmp_path / "new" / "hf" / "field_metrics.json").write_text(json.dumps(fm), encoding="utf-8")
+
+    result = compare_dataset(cfg, ["old/hf", "new/hf"])
+    summary = result["summary"]
+    assert "turns" in summary
+    assert summary["turns"] == [1, 3]
+    assert "field_names" in summary
+    assert "road" in summary["field_names"]
+
+    # 验证 turn_metrics
+    old_turns = summary["runs"]["old/hf"]["turn_metrics"]
+    assert "1" in old_turns and "3" in old_turns
+    assert old_turns["1"]["correct"] == 1
+    assert old_turns["3"]["correct"] == 0
+
+    # 验证 field_eval
+    new_fe = summary["runs"]["new/hf"]["field_eval"]
+    assert new_fe["has_field_eval"] is True
+    assert new_fe["total_samples"] == 1
+    assert new_fe["all_correct_count"] == 1
+    assert new_fe["all_correct_rate"] == 1.0
+    assert "road" in new_fe["fields"]
+    assert new_fe["fields"]["road"]["accuracy"] == 1.0
+
+    old_fe = summary["runs"]["old/hf"]["field_eval"]
+    assert old_fe["has_field_eval"] is False
+

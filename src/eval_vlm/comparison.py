@@ -181,14 +181,111 @@ def _categorize(outputs: list[dict[str, Any]], baseline_index: int) -> list[str]
     return categories
 
 
-def _summary(records: Iterable[dict[str, Any]], run_ids: list[str]) -> dict[str, Any]:
+def _summary(
+    records: Iterable[dict[str, Any]],
+    run_ids: list[str],
+    run_dirs: Optional[dict[str, Path]] = None,
+) -> dict[str, Any]:
     all_records = list(records)
     cats = Counter(category for row in all_records for category in row["categories"])
+    turns = sorted({int(row["turn"]) for row in all_records if "turn" in row and row["turn"] is not None})
     runs: dict[str, Any] = {}
+
     for idx, run_id in enumerate(run_ids):
         output = [row["outputs"][idx] for row in all_records]
         scores = [float(x["score"]) for x in output if isinstance(x.get("score"), (int, float))]
         latency = [float(x["latency"]) for x in output if isinstance(x.get("latency"), (int, float))]
+
+        # 1. 逐 Turn 指标统计
+        turn_metrics: dict[str, Any] = {}
+        for t in turns:
+            t_rows = [(row, row["outputs"][idx]) for row in all_records if int(row.get("turn", -999)) == t]
+            t_total = len(t_rows)
+            t_correct = sum(1 for _, o in t_rows if o.get("status") == "correct")
+            t_wrong = sum(1 for _, o in t_rows if o.get("status") == "wrong")
+            t_scores = [float(o["score"]) for _, o in t_rows if isinstance(o.get("score"), (int, float))]
+            t_latencies = [float(o["latency"]) for _, o in t_rows if isinstance(o.get("latency"), (int, float))]
+            turn_metrics[str(t)] = {
+                "turn": t,
+                "total": t_total,
+                "correct": t_correct,
+                "wrong": t_wrong,
+                "accuracy": round(t_correct / t_total, 4) if t_total > 0 else 0.0,
+                "mean_score": round(mean(t_scores), 4) if t_scores else None,
+                "mean_latency": round(mean(t_latencies), 4) if t_latencies else None,
+            }
+
+        # 2. field-eval 字段指标与全对率统计
+        fm_path = (run_dirs.get(run_id) / "field_metrics.json") if run_dirs and run_dirs.get(run_id) else None
+        field_eval_data: Optional[dict[str, Any]] = None
+        if fm_path and fm_path.exists():
+            try:
+                raw_fm = json.loads(fm_path.read_text(encoding="utf-8"))
+                ov = raw_fm.get("overall", {})
+                num_samples = raw_fm.get("num_scored") or raw_fm.get("num_samples") or 0
+                em_count = ov.get("strict_exact_match_samples", ov.get("exact_match_samples", 0))
+                em_rate = ov.get("strict_exact_match_rate", ov.get("exact_match_rate", 0.0))
+                per_field_raw = raw_fm.get("per_field", {})
+                fields_stat = {}
+                for f_name, f_st in per_field_raw.items():
+                    fields_stat[f_name] = {
+                        "total": f_st.get("total", f_st.get("overall_total", 0)),
+                        "correct": f_st.get("correct", f_st.get("overall_correct", 0)),
+                        "accuracy": f_st.get("accuracy", f_st.get("overall_accuracy", 0.0)),
+                    }
+                field_eval_data = {
+                    "has_field_eval": True,
+                    "total_samples": int(num_samples),
+                    "all_correct_count": int(em_count),
+                    "all_correct_rate": round(float(em_rate), 4),
+                    "fields": fields_stat,
+                }
+            except Exception:
+                field_eval_data = None
+
+        if not field_eval_data:
+            field_outputs = [o["field"] for o in output if o.get("field") and isinstance(o["field"], dict)]
+            if field_outputs:
+                tot_samples = len(field_outputs)
+                all_correct_cnt = 0
+                field_accs: dict[str, dict[str, int]] = {}
+                for fo in field_outputs:
+                    flist = fo.get("fields") or fo.get("mismatches") or []
+                    is_all_cor = (fo.get("state") == "all_correct") or (len(flist) > 0 and all(f.get("correct") is True for f in flist))
+                    if is_all_cor:
+                        all_correct_cnt += 1
+                    for fitem in flist:
+                        fn = str(fitem.get("field", "")).strip()
+                        if not fn:
+                            continue
+                        if fn not in field_accs:
+                            field_accs[fn] = {"correct": 0, "total": 0}
+                        field_accs[fn]["total"] += 1
+                        if fitem.get("correct") is True:
+                            field_accs[fn]["correct"] += 1
+                field_eval_data = {
+                    "has_field_eval": True,
+                    "total_samples": tot_samples,
+                    "all_correct_count": all_correct_cnt,
+                    "all_correct_rate": round(all_correct_cnt / tot_samples, 4) if tot_samples > 0 else 0.0,
+                    "fields": {
+                        fn: {
+                            "total": st["total"],
+                            "correct": st["correct"],
+                            "accuracy": round(st["correct"] / st["total"], 4) if st["total"] > 0 else 0.0,
+                        }
+                        for fn, st in field_accs.items()
+                    },
+                }
+            else:
+                field_eval_data = {
+                    "has_field_eval": False,
+                    "total_samples": 0,
+                    "all_correct_count": 0,
+                    "all_correct_rate": 0.0,
+                    "fields": {},
+                }
+
         runs[run_id] = {
             "mean_score": round(mean(scores), 4) if scores else None,
             "coverage": sum(x["status"] not in {"missing", "error"} for x in output),
@@ -196,8 +293,24 @@ def _summary(records: Iterable[dict[str, Any]], run_ids: list[str]) -> dict[str,
             "correct": sum(x["status"] == "correct" for x in output),
             "wrong": sum(x["status"] == "wrong" for x in output),
             "mean_latency": round(mean(latency), 4) if latency else None,
+            "turn_metrics": turn_metrics,
+            "field_eval": field_eval_data,
         }
-    return {"aligned_total": len(all_records), "categories": dict(cats), "runs": runs}
+
+    all_field_names: list[str] = []
+    for r_st in runs.values():
+        fe = r_st.get("field_eval") or {}
+        for fn in (fe.get("fields") or {}).keys():
+            if fn not in all_field_names:
+                all_field_names.append(fn)
+
+    return {
+        "aligned_total": len(all_records),
+        "categories": dict(cats),
+        "runs": runs,
+        "turns": turns,
+        "field_names": all_field_names,
+    }
 
 
 def compare_dataset(
@@ -271,7 +384,8 @@ def compare_dataset(
         warnings.append(f"结果中有不在当前 test.json 的记录: {sid}/{turn}")
     return {"dataset": cfg.dataset_dir.name, "runs": run_specs, "baseline": baseline,
             "warnings": list(dict.fromkeys(warnings)), "records": records,
-            "summary": _summary(records, run_specs), "normalization": "prediction.strip()"}
+            "summary": _summary(records, run_specs, run_dirs={r["id"]: r["dir"] for r in runs}),
+            "normalization": "prediction.strip()"}
 
 
 def _sha(path: Path) -> Optional[str]:

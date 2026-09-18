@@ -5127,7 +5127,163 @@ table.ui-table tr:hover {
   font-weight: 700;
 }
 
-/* 模型战绩矩阵 */
+/* 模型对比矩阵：field-eval 与 eval 逐轮次指标 */
+.cmp-matrices-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.cmp-matrix-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.cmp-matrix-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.cmp-matrix-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cmp-matrix-subtitle {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-weight: normal;
+}
+
+.cmp-matrix-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.cmp-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.cmp-matrix-table th {
+  background: var(--bg-input, rgba(255, 255, 255, 0.04));
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.cmp-matrix-table td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.cmp-matrix-table tr:last-child td {
+  border-bottom: none;
+}
+
+.cmp-matrix-table tr:hover td {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.02));
+}
+
+.cmp-matrix-table tr.is-baseline td {
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.cmp-model-cell {
+  min-width: 170px;
+  max-width: 230px;
+}
+
+.cmp-model-name {
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-model-backend {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.cmp-stat-cell-main {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-main);
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.cmp-stat-cell-main.is-top {
+  color: var(--emerald-500);
+}
+
+.cmp-stat-cell-sub {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.cmp-mini-progress {
+  width: 100%;
+  min-width: 60px;
+  max-width: 120px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.cmp-mini-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan-500) 0%, var(--emerald-500) 100%);
+}
+
+.cmp-matrix-empty-tip {
+  padding: 1.2rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-subtle);
+}
+
+/* 模型战绩卡片兼容保留 */
 .cmp-scorecards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
