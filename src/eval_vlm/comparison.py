@@ -215,7 +215,7 @@ def _summary(
                 "mean_latency": round(mean(t_latencies), 4) if t_latencies else None,
             }
 
-        # 2. field-eval 字段指标与全对率统计
+        # 2. field-eval 字段指标与全对率统计 (支持非空准确率与总体准确率两种口径)
         fm_path = (run_dirs.get(run_id) / "field_metrics.json") if run_dirs and run_dirs.get(run_id) else None
         field_eval_data: Optional[dict[str, Any]] = None
         if fm_path and fm_path.exists():
@@ -223,19 +223,39 @@ def _summary(
                 raw_fm = json.loads(fm_path.read_text(encoding="utf-8"))
                 ov = raw_fm.get("overall", {})
                 num_samples = raw_fm.get("num_scored") or raw_fm.get("num_samples") or 0
-                em_count = ov.get("strict_exact_match_samples", ov.get("exact_match_samples", 0))
-                em_rate = ov.get("strict_exact_match_rate", ov.get("exact_match_rate", 0.0))
+                em_count = ov.get("exact_match_samples", ov.get("strict_exact_match_samples", 0))
+                em_rate = ov.get("exact_match_rate", ov.get("strict_exact_match_rate", 0.0))
+                strict_em_count = ov.get("strict_exact_match_samples", ov.get("exact_match_samples", 0))
+                strict_em_rate = ov.get("strict_exact_match_rate", ov.get("exact_match_rate", 0.0))
+
                 per_field_raw = raw_fm.get("per_field", {})
                 fields_stat = {}
                 for f_name, f_st in per_field_raw.items():
+                    ne_tot = f_st.get("non_empty_count", f_st.get("total", 0))
+                    ne_cor = f_st.get("non_empty_correct", f_st.get("correct", 0))
+                    ne_acc = f_st.get("non_empty_accuracy", f_st.get("accuracy", 0.0))
+                    ov_tot = f_st.get("overall_total", num_samples)
+                    ov_cor = f_st.get("overall_correct", ne_cor)
+                    ov_acc = f_st.get("overall_accuracy", ne_acc)
                     fields_stat[f_name] = {
-                        "total": f_st.get("total", f_st.get("overall_total", 0)),
-                        "correct": f_st.get("correct", f_st.get("overall_correct", 0)),
-                        "accuracy": f_st.get("accuracy", f_st.get("overall_accuracy", 0.0)),
+                        "non_empty_total": ne_tot,
+                        "non_empty_correct": ne_cor,
+                        "non_empty_accuracy": ne_acc,
+                        "overall_total": ov_tot,
+                        "overall_correct": ov_cor,
+                        "overall_accuracy": ov_acc,
+                        # 兼容默认
+                        "total": ne_tot,
+                        "correct": ne_cor,
+                        "accuracy": ne_acc,
                     }
                 field_eval_data = {
                     "has_field_eval": True,
                     "total_samples": int(num_samples),
+                    "exact_match_count": int(em_count),
+                    "exact_match_rate": round(float(em_rate), 4),
+                    "strict_exact_match_count": int(strict_em_count),
+                    "strict_exact_match_rate": round(float(strict_em_rate), 4),
                     "all_correct_count": int(em_count),
                     "all_correct_rate": round(float(em_rate), 4),
                     "fields": fields_stat,
@@ -247,35 +267,68 @@ def _summary(
             field_outputs = [o["field"] for o in output if o.get("field") and isinstance(o["field"], dict)]
             if field_outputs:
                 tot_samples = len(field_outputs)
-                all_correct_cnt = 0
+                ne_all_correct_cnt = 0
+                strict_all_correct_cnt = 0
                 field_accs: dict[str, dict[str, int]] = {}
                 for fo in field_outputs:
                     flist = fo.get("fields") or fo.get("mismatches") or []
-                    is_all_cor = (fo.get("state") == "all_correct") or (len(flist) > 0 and all(f.get("correct") is True for f in flist))
-                    if is_all_cor:
-                        all_correct_cnt += 1
+                    is_strict = (fo.get("state") == "all_correct") or (len(flist) > 0 and all(f.get("correct") is True for f in flist))
+                    non_empty_items = [f for f in flist if not f.get("is_empty_ref")]
+                    is_ne = (len(non_empty_items) > 0 and all(f.get("correct") is True for f in non_empty_items))
+                    if is_strict:
+                        strict_all_correct_cnt += 1
+                    if is_ne:
+                        ne_all_correct_cnt += 1
+
                     for fitem in flist:
                         fn = str(fitem.get("field", "")).strip()
                         if not fn:
                             continue
                         if fn not in field_accs:
-                            field_accs[fn] = {"correct": 0, "total": 0}
-                        field_accs[fn]["total"] += 1
-                        if fitem.get("correct") is True:
-                            field_accs[fn]["correct"] += 1
+                            field_accs[fn] = {
+                                "non_empty_correct": 0, "non_empty_total": 0,
+                                "overall_correct": 0, "overall_total": 0,
+                            }
+                        is_empty_ref = bool(fitem.get("is_empty_ref"))
+                        is_cor = (fitem.get("correct") is True)
+                        field_accs[fn]["overall_total"] += 1
+                        if is_cor:
+                            field_accs[fn]["overall_correct"] += 1
+                        if not is_empty_ref:
+                            field_accs[fn]["non_empty_total"] += 1
+                            if is_cor:
+                                field_accs[fn]["non_empty_correct"] += 1
+
+                fields_stat = {}
+                for fn, st in field_accs.items():
+                    ne_tot = st["non_empty_total"]
+                    ne_cor = st["non_empty_correct"]
+                    ne_acc = round(ne_cor / ne_tot, 4) if ne_tot > 0 else 0.0
+                    ov_tot = st["overall_total"]
+                    ov_cor = st["overall_correct"]
+                    ov_acc = round(ov_cor / ov_tot, 4) if ov_tot > 0 else 0.0
+                    fields_stat[fn] = {
+                        "non_empty_total": ne_tot,
+                        "non_empty_correct": ne_cor,
+                        "non_empty_accuracy": ne_acc,
+                        "overall_total": ov_tot,
+                        "overall_correct": ov_cor,
+                        "overall_accuracy": ov_acc,
+                        "total": ne_tot,
+                        "correct": ne_cor,
+                        "accuracy": ne_acc,
+                    }
+
                 field_eval_data = {
                     "has_field_eval": True,
                     "total_samples": tot_samples,
-                    "all_correct_count": all_correct_cnt,
-                    "all_correct_rate": round(all_correct_cnt / tot_samples, 4) if tot_samples > 0 else 0.0,
-                    "fields": {
-                        fn: {
-                            "total": st["total"],
-                            "correct": st["correct"],
-                            "accuracy": round(st["correct"] / st["total"], 4) if st["total"] > 0 else 0.0,
-                        }
-                        for fn, st in field_accs.items()
-                    },
+                    "exact_match_count": ne_all_correct_cnt,
+                    "exact_match_rate": round(ne_all_correct_cnt / tot_samples, 4) if tot_samples > 0 else 0.0,
+                    "strict_exact_match_count": strict_all_correct_cnt,
+                    "strict_exact_match_rate": round(strict_all_correct_cnt / tot_samples, 4) if tot_samples > 0 else 0.0,
+                    "all_correct_count": ne_all_correct_cnt,
+                    "all_correct_rate": round(ne_all_correct_cnt / tot_samples, 4) if tot_samples > 0 else 0.0,
+                    "fields": fields_stat,
                 }
             else:
                 field_eval_data = {
@@ -283,6 +336,10 @@ def _summary(
                     "total_samples": 0,
                     "all_correct_count": 0,
                     "all_correct_rate": 0.0,
+                    "exact_match_count": 0,
+                    "exact_match_rate": 0.0,
+                    "strict_exact_match_count": 0,
+                    "strict_exact_match_rate": 0.0,
                     "fields": {},
                 }
 

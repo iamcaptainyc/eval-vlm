@@ -100,7 +100,7 @@ const state = {
   activeRunMethod: "field-eval", // "field-eval" | "eval"
 
   // 样本级模型对比（默认只看预测不同）
-  comparison: { runs: [], baseline: "", records: [], total: 0, offset: 0, limit: 10, summary: null, warnings: [] },
+  comparison: { runs: [], baseline: "", records: [], total: 0, offset: 0, limit: 10, summary: null, warnings: [], fieldAccuracyMode: "non_empty" },
 
   // eval 模式数据
   runMetrics: null,
@@ -3528,6 +3528,14 @@ async function loadComparison(offset = 0) {
   }
 }
 
+function setComparisonFieldAccuracyMode(mode) {
+  if (mode !== "non_empty" && mode !== "overall") return;
+  state.comparison.fieldAccuracyMode = mode;
+  if (state.comparison.summary) {
+    renderComparisonSummary(state.comparison.summary, state.comparison.total);
+  }
+}
+
 function renderComparisonSummary(summary, filteredTotal) {
   const container = document.getElementById("comparison-summary");
   if (!container) return;
@@ -3578,6 +3586,10 @@ function renderComparisonSummary(summary, filteredTotal) {
     turns = Array.from(tset).sort((a, b) => a - b);
   }
 
+  // 当前字段准确率口径：'non_empty' (默认非空准确率) | 'overall' (总体准确率)
+  const accMode = state.comparison.fieldAccuracyMode || "non_empty";
+  const isOverall = accMode === "overall";
+
   // 计算 field-eval 最高值
   let maxAllCorrectRate = -1;
   const maxAccByField = {};
@@ -3587,15 +3599,21 @@ function renderComparisonSummary(summary, filteredTotal) {
     Object.values(runsStats).forEach(st => {
       const fe = st.field_eval;
       if (fe && fe.has_field_eval) {
-        if (typeof fe.all_correct_rate === "number" && fe.all_correct_rate > maxAllCorrectRate) {
-          maxAllCorrectRate = fe.all_correct_rate;
+        const curAllRate = isOverall
+          ? (typeof fe.strict_exact_match_rate === "number" ? fe.strict_exact_match_rate : fe.all_correct_rate)
+          : (typeof fe.exact_match_rate === "number" ? fe.exact_match_rate : fe.all_correct_rate);
+        if (typeof curAllRate === "number" && curAllRate > maxAllCorrectRate) {
+          maxAllCorrectRate = curAllRate;
         }
         if (fe.fields) {
           fieldNames.forEach(fn => {
-            const acc = fe.fields[fn]?.accuracy;
-            if (typeof acc === "number") {
-              if (maxAccByField[fn] == null || acc > maxAccByField[fn]) {
-                maxAccByField[fn] = acc;
+            const fst = fe.fields[fn];
+            if (fst) {
+              const acc = isOverall ? (fst.overall_accuracy ?? fst.accuracy) : (fst.non_empty_accuracy ?? fst.accuracy);
+              if (typeof acc === "number") {
+                if (maxAccByField[fn] == null || acc > maxAccByField[fn]) {
+                  maxAccByField[fn] = acc;
+                }
               }
             }
           });
@@ -3628,11 +3646,11 @@ function renderComparisonSummary(summary, filteredTotal) {
   if (!hasAnyFieldEval) {
     fieldEvalMatrixHtml = `
       <div class="cmp-matrix-empty-tip">
-        💡 参与对比的模型尚未运行 <code>field-eval</code> 评测。运行字段抽取评测后，将在此自动对比各字段总体准确率与全对率。
+        💡 参与对比的模型尚未运行 <code>field-eval</code> 评测。运行字段抽取评测后，将在此自动对比各字段准确率与全对率。
       </div>
     `;
   } else {
-    const theadFields = fieldNames.map(fn => `<th>${escapeHtml(fn)} 准确率</th>`).join("");
+    const theadFields = fieldNames.map(fn => `<th>${escapeHtml(fn)} ${isOverall ? '总体准确率' : '非空准确率'}</th>`).join("");
     const tbodyRows = Object.entries(runsStats).map(([runId, st]) => {
       const isBaseline = runId === state.comparison.baseline;
       const parts = runId.split("/");
@@ -3644,8 +3662,14 @@ function renderComparisonSummary(summary, filteredTotal) {
       if (!fe || !fe.has_field_eval) {
         allCorrectCell = `<td><span style="color:var(--text-dim); font-size:0.75rem;">未参与评测</span></td>`;
       } else {
-        const ratePct = (fe.all_correct_rate * 100).toFixed(1);
-        const isTopRate = fe.all_correct_rate === maxAllCorrectRate && maxAllCorrectRate > 0 && Object.keys(runsStats).length > 1;
+        const curRate = isOverall
+          ? (typeof fe.strict_exact_match_rate === "number" ? fe.strict_exact_match_rate : fe.all_correct_rate)
+          : (typeof fe.exact_match_rate === "number" ? fe.exact_match_rate : fe.all_correct_rate);
+        const curCount = isOverall
+          ? (fe.strict_exact_match_count ?? fe.all_correct_count)
+          : (fe.exact_match_count ?? fe.all_correct_count);
+        const ratePct = (curRate * 100).toFixed(1);
+        const isTopRate = curRate === maxAllCorrectRate && maxAllCorrectRate > 0 && Object.keys(runsStats).length > 1;
         allCorrectCell = `
           <td>
             <div class="cmp-stat-cell-main ${isTopRate ? 'is-top' : ''}">
@@ -3653,10 +3677,10 @@ function renderComparisonSummary(summary, filteredTotal) {
               ${isTopRate ? `<span style="font-size:0.68rem; color:var(--emerald-500); font-weight:normal;">👑 最高</span>` : ""}
             </div>
             <div class="cmp-stat-cell-sub">
-              <span>全对数/总数: <strong style="color:var(--text-main); font-weight:600;">${fe.all_correct_count}</strong> / ${fe.total_samples}</span>
+              <span>${isOverall ? '严格全对' : '非空全对'}: <strong style="color:var(--text-main); font-weight:600;">${curCount}</strong> / ${fe.total_samples}</span>
             </div>
-            <div class="cmp-mini-progress" title="全对率: ${ratePct}% (${fe.all_correct_count}/${fe.total_samples})">
-              <div class="cmp-mini-progress-bar" style="width:${Math.round(fe.all_correct_rate * 100)}%;"></div>
+            <div class="cmp-mini-progress" title="${isOverall ? '严格全对率' : '非空全对率'}: ${ratePct}% (${curCount}/${fe.total_samples})">
+              <div class="cmp-mini-progress-bar" style="width:${Math.round(curRate * 100)}%;"></div>
             </div>
           </td>
         `;
@@ -3664,21 +3688,27 @@ function renderComparisonSummary(summary, filteredTotal) {
 
       const fieldCells = fieldNames.map(fn => {
         const fst = fe?.fields?.[fn];
-        if (!fst || typeof fst.accuracy !== "number") {
+        if (!fst) {
           return `<td><span style="color:var(--text-dim); font-size:0.75rem;">—</span></td>`;
         }
-        const accPct = (fst.accuracy * 100).toFixed(1);
-        const isTopAcc = fst.accuracy === maxAccByField[fn] && maxAccByField[fn] > 0 && Object.keys(runsStats).length > 1;
+        const acc = isOverall ? (fst.overall_accuracy ?? fst.accuracy) : (fst.non_empty_accuracy ?? fst.accuracy);
+        if (typeof acc !== "number") {
+          return `<td><span style="color:var(--text-dim); font-size:0.75rem;">—</span></td>`;
+        }
+        const cor = isOverall ? (fst.overall_correct ?? fst.correct) : (fst.non_empty_correct ?? fst.correct);
+        const tot = isOverall ? (fst.overall_total ?? fst.total) : (fst.non_empty_total ?? fst.total);
+        const accPct = (acc * 100).toFixed(1);
+        const isTopAcc = acc === maxAccByField[fn] && maxAccByField[fn] > 0 && Object.keys(runsStats).length > 1;
         return `
           <td>
             <div class="cmp-stat-cell-main ${isTopAcc ? 'is-top' : ''}">
               <span>${accPct}%</span>
             </div>
             <div class="cmp-stat-cell-sub">
-              <span>${fst.correct} / ${fst.total}</span>
+              <span>${cor} / ${tot}</span>
             </div>
-            <div class="cmp-mini-progress" title="${escapeHtml(fn)} 准确率: ${accPct}% (${fst.correct}/${fst.total})">
-              <div class="cmp-mini-progress-bar" style="width:${Math.round(fst.accuracy * 100)}%;"></div>
+            <div class="cmp-mini-progress" title="${escapeHtml(fn)} ${isOverall ? '总体准确率' : '非空准确率'}: ${accPct}% (${cor}/${tot})">
+              <div class="cmp-mini-progress-bar" style="width:${Math.round(acc * 100)}%;"></div>
             </div>
           </td>
         `;
@@ -3705,7 +3735,7 @@ function renderComparisonSummary(summary, filteredTotal) {
           <thead>
             <tr>
               <th style="min-width:170px;">对比模型</th>
-              <th style="min-width:150px;">全对率 (全对数/总数)</th>
+              <th style="min-width:160px;">${isOverall ? '严格全对率 (全对/总数)' : '非空全对率 (全对/总数)'}</th>
               ${theadFields}
             </tr>
           </thead>
@@ -3839,21 +3869,37 @@ function renderComparisonSummary(summary, filteredTotal) {
 
     ${Object.keys(runsStats).length ? `
       <div class="cmp-matrices-wrapper">
-        <!-- 模块一：field-eval 字段总体准确率与全对率对比 -->
-        <div class="cmp-matrix-card">
+        <!-- 模块一：field-eval 字段准确率与全对率对比 (支持非空/总体切换) -->
+        <div class="cmp-matrix-card cmp-matrix-field-eval">
           <div class="cmp-matrix-header">
             <div class="cmp-matrix-title">
-              <span>🔬 Field-Eval 字段总体准确率 & 全对率对比</span>
+              <span>🔬 Field-Eval 字段准确率 & 全对率对比</span>
             </div>
-            <div class="cmp-matrix-subtitle">
-              基于结构化字段抽取评测 · 对比各抽取字段准确率与全对率 (全对数/总数)
+            <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
+              <div class="cmp-mode-toggle-group" title="切换字段准确率与全对率统计口径">
+                <button type="button" 
+                        class="cmp-mode-btn ${!isOverall ? 'active' : ''}" 
+                        onclick="setComparisonFieldAccuracyMode('non_empty')"
+                        title="非空准确率：仅评估真值非空的有效实体样本，排除真值为空样本">
+                  非空准确率
+                </button>
+                <button type="button" 
+                        class="cmp-mode-btn ${isOverall ? 'active' : ''}" 
+                        onclick="setComparisonFieldAccuracyMode('overall')"
+                        title="总体准确率：全局整体统计，包含真值为空且预测为空的一致匹配判定">
+                  总体准确率
+                </button>
+              </div>
+              <div class="cmp-matrix-subtitle">
+                ${isOverall ? '全局总体评估 · 包含空值一致匹配' : '非空样本评估 · 仅评估真值非空有效实体'}
+              </div>
             </div>
           </div>
           ${fieldEvalMatrixHtml}
         </div>
 
         <!-- 模块二：eval 各 turn 指标对比 -->
-        <div class="cmp-matrix-card">
+        <div class="cmp-matrix-card cmp-matrix-turn-eval">
           <div class="cmp-matrix-header">
             <div class="cmp-matrix-title">
               <span>📈 Eval 各轮次对话 (Turn-by-Turn) 评测指标对比</span>

@@ -151,6 +151,10 @@ def test_summary_includes_turn_metrics_and_field_eval(tmp_path):
     assert new_fe["all_correct_rate"] == 1.0
     assert "road" in new_fe["fields"]
     assert new_fe["fields"]["road"]["accuracy"] == 1.0
+    assert new_fe["fields"]["road"]["non_empty_accuracy"] == 1.0
+    assert new_fe["fields"]["road"]["overall_accuracy"] == 1.0
+    assert new_fe["exact_match_rate"] == 1.0
+    assert new_fe["strict_exact_match_rate"] == 1.0
 
     old_fe = summary["runs"]["old/hf"]["field_eval"]
     assert old_fe["has_field_eval"] is False

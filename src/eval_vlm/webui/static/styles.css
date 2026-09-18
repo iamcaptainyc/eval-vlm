@@ -5144,6 +5144,62 @@ table.ui-table tr:hover {
   overflow: hidden;
 }
 
+/* 深色模式下：Field-Eval 专属青绿微渐变（拒绝暗沉灰色） */
+.cmp-matrix-card.cmp-matrix-field-eval {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.09) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(16, 185, 129, 0.06) 100%);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-top: 3px solid var(--cyan-500);
+  box-shadow: 0 8px 30px -4px rgba(6, 182, 212, 0.15), var(--shadow-card);
+}
+
+.cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-title {
+  color: #38bdf8;
+}
+
+.cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-subtitle {
+  color: #2dd4bf;
+  opacity: 0.9;
+}
+
+.cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table-wrap {
+  border-color: rgba(6, 182, 212, 0.22);
+  background: rgba(8, 20, 40, 0.65);
+}
+
+.cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table th {
+  background: rgba(6, 182, 212, 0.12);
+  color: #7dd3fc;
+  border-bottom: 2px solid rgba(6, 182, 212, 0.35);
+}
+
+/* 深色模式下：Turn-Eval 专属靛紫微渐变（拒绝暗沉灰色） */
+.cmp-matrix-card.cmp-matrix-turn-eval {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(15, 23, 42, 0.95) 45%, rgba(139, 92, 246, 0.06) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-top: 3px solid var(--primary-500);
+  box-shadow: 0 8px 30px -4px rgba(99, 102, 241, 0.15), var(--shadow-card);
+}
+
+.cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-title {
+  color: #a5b4fc;
+}
+
+.cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-subtitle {
+  color: #c084fc;
+  opacity: 0.9;
+}
+
+.cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table-wrap {
+  border-color: rgba(99, 102, 241, 0.22);
+  background: rgba(18, 20, 48, 0.65);
+}
+
+.cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table th {
+  background: rgba(99, 102, 241, 0.12);
+  color: #c7d2fe;
+  border-bottom: 2px solid rgba(99, 102, 241, 0.35);
+}
+
 .cmp-matrix-header {
   display: flex;
   justify-content: space-between;
@@ -5151,6 +5207,41 @@ table.ui-table tr:hover {
   margin-bottom: 0.75rem;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* 准确率口径切换按钮 (深色模式) */
+.cmp-mode-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.cmp-mode-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  line-height: 1.2;
+  background: transparent;
+  color: #7dd3fc;
+}
+
+.cmp-mode-btn:hover {
+  color: #ffffff;
+}
+
+.cmp-mode-btn.active {
+  background: var(--cyan-500);
+  color: #081528;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
 }
 
 .cmp-matrix-title {
@@ -5172,7 +5263,7 @@ table.ui-table tr:hover {
   overflow-x: auto;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .cmp-matrix-table {
@@ -6021,6 +6112,160 @@ table.ui-table tr:hover {
 [data-theme="light"] .cmp-run-meta-row {
   border-top-color: #e2e8f0 !important;
   color: #64748b !important;
+}
+
+/* --------------------------------------------------------------------------
+   浅色主题下模型对比核心矩阵专属设计（告别沉闷灰色，打造清新高对比界面）
+   -------------------------------------------------------------------------- */
+
+[data-theme="light"] .cmp-matrix-card {
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05) !important;
+}
+
+[data-theme="light"] .cmp-matrix-title {
+  color: #0f172a !important;
+}
+
+/* 1. Field-Eval 字段总体对比矩阵 - 浅色模式：薄荷冰川青白微渐变，纯净通透 */
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval {
+  background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 45%, #f0fdf4 100%) !important;
+  border: 1px solid #99f6e4 !important;
+  border-top: 3.5px solid #0d9488 !important;
+  box-shadow: 0 6px 20px -2px rgba(13, 148, 136, 0.1), 0 2px 6px rgba(15, 23, 42, 0.03) !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-subtitle {
+  color: #0f766e !important;
+  font-weight: 500 !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table-wrap {
+  background: #ffffff !important;
+  border: 1px solid #ccfbf1 !important;
+  box-shadow: 0 1px 3px rgba(13, 148, 136, 0.05) !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table th {
+  background: #e6fffa !important;
+  color: #115e59 !important;
+  border-bottom: 2px solid #5eead4 !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table td {
+  border-bottom: 1px solid #f0fdfa !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-matrix-table tr:hover td {
+  background: #f0fdf4 !important;
+}
+
+/* 2. Eval Turn-by-Turn 对比矩阵 - 浅色模式：罗兰紫/皇家靛蓝清爽微渐变，典雅大方 */
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 45%, #eff6ff 100%) !important;
+  border: 1px solid #c7d2fe !important;
+  border-top: 3.5px solid #4f46e5 !important;
+  box-shadow: 0 6px 20px -2px rgba(79, 70, 229, 0.1), 0 2px 6px rgba(15, 23, 42, 0.03) !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-subtitle {
+  color: #4338ca !important;
+  font-weight: 500 !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table-wrap {
+  background: #ffffff !important;
+  border: 1px solid #e0e7ff !important;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.05) !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table th {
+  background: #eef2ff !important;
+  color: #312e81 !important;
+  border-bottom: 2px solid #a5b4fc !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table td {
+  border-bottom: 1px solid #f5f3ff !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-turn-eval .cmp-matrix-table tr:hover td {
+  background: #f5f3ff !important;
+}
+
+/* 浅色主题下矩阵单元格元素高清晰度适配 */
+[data-theme="light"] .cmp-matrix-table tr.is-baseline td {
+  background: #fffdf0 !important;
+}
+
+[data-theme="light"] .cmp-model-name {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-model-backend {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .cmp-stat-cell-main {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cmp-stat-cell-main.is-top {
+  color: #047857 !important;
+}
+
+[data-theme="light"] .cmp-stat-cell-sub {
+  color: #475569 !important;
+}
+
+[data-theme="light"] .cmp-mini-progress {
+  background: #e2e8f0 !important;
+}
+
+[data-theme="light"] .cmp-matrix-field-eval .cmp-mini-progress-bar {
+  background: linear-gradient(90deg, #0d9488 0%, #10b981 100%) !important;
+}
+
+[data-theme="light"] .cmp-matrix-turn-eval .cmp-mini-progress-bar {
+  background: linear-gradient(90deg, #4f46e5 0%, #8b5cf6 100%) !important;
+}
+
+[data-theme="light"] .cmp-matrix-empty-tip {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+/* 浅色模式下准确率口径切换按钮 */
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-mode-toggle-group {
+  background: #ccfbf1 !important;
+  border: 1px solid #5eead4 !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-mode-btn {
+  background: transparent !important;
+  color: #0f766e !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-mode-btn:hover {
+  color: #115e59 !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+}
+
+[data-theme="light"] .cmp-matrix-card.cmp-matrix-field-eval .cmp-mode-btn.active {
+  background: #0d9488 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 5px rgba(13, 148, 136, 0.25) !important;
 }
 
 /* 浅色主题样本卡片与对话真值排版 */
