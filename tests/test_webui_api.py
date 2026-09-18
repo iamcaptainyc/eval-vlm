@@ -386,3 +386,96 @@ def test_api_multirun_comparison_is_paginated_and_returns_images(api_client):
     assert body["total"] == 1
     assert "regression" in body["records"][0]["categories"]
     assert body["records"][0]["image_urls"][0].startswith(f"/api/datasets/{ds_name}/image")
+
+
+def test_api_get_run_scored_with_turns_and_images(api_client):
+    """验证 /scored 接口能够正常返回前置多轮对话、原图链接，且没有 AttributeError。"""
+    client, ds_name, cfg, _ = api_client
+    record = [{
+        "messages": [
+            {"role": "user", "content": "<image> 第一轮提问"},
+            {"role": "assistant", "content": "第一轮回答"},
+            {"role": "user", "content": "第二轮提问"},
+            {"role": "assistant", "content": "第二轮回答"},
+        ],
+        "images": ["sample.jpg"],
+    }]
+    cfg.test_path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    from eval_vlm.data.loader import _stable_id
+    sid = _stable_id(0, record[0])
+
+    rdir = cfg.dataset_dir / "test_model" / "test_backend"
+    rdir.mkdir(parents=True, exist_ok=True)
+    scored_lines = [
+        {"id": sid, "turn": 1, "scorer": "exact_match", "score": 1.0, "prediction": "第一轮回答", "reference": "第一轮回答"},
+        {"id": sid, "turn": 3, "scorer": "exact_match", "score": 0.0, "prediction": "错误回答", "reference": "第二轮回答"},
+    ]
+    (rdir / "scored.jsonl").write_text(
+        "\n".join(json.dumps(line, ensure_ascii=False) for line in scored_lines) + "\n",
+        encoding="utf-8"
+    )
+
+    # 1. 默认查询全部记录
+    resp = client.get(f"/api/datasets/{ds_name}/runs/test_model/test_backend/scored")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert len(data["records"]) == 2
+
+    # 检查第 1 轮模型预测记录的前置对话
+    r1 = data["records"][0]
+    assert r1["turn"] == 1
+    assert len(r1["images"]) == 1
+    assert r1["image_urls"][0].startswith(f"/api/datasets/{ds_name}/image")
+    # 第 1 轮模型预测的前置对话流应仅含遇到第 1 轮 assistant 之前的第 0 轮 user 提问
+    assert len(r1["turns"]) == 1
+    assert r1["turns"][0]["role"] == "user"
+    assert r1["turns"][0]["turn_index"] == 0
+    assert "第一轮提问" in r1["turns"][0]["content"]
+
+    # 检查第 2 个模型预测记录 (对应消息轮次 turn 3) 的前置对话
+    r2 = data["records"][1]
+    assert r2["turn"] == 3
+    # 第 3 轮模型预测的前置对话流应含第 0 轮 user、第 1 轮 assistant、第 2 轮 user
+    assert len(r2["turns"]) == 3
+    assert r2["turns"][0]["role"] == "user"
+    assert r2["turns"][0]["turn_index"] == 0
+    assert r2["turns"][1]["role"] == "assistant"
+    assert r2["turns"][1]["turn_index"] == 1
+    assert r2["turns"][2]["role"] == "user"
+    assert r2["turns"][2]["turn_index"] == 2
+
+    # 2. 仅看未命中坏例 (only_miss=true)
+    resp_miss = client.get(f"/api/datasets/{ds_name}/runs/test_model/test_backend/scored?only_miss=true")
+    assert resp_miss.status_code == 200
+    data_miss = resp_miss.json()
+    assert data_miss["total"] == 1
+    assert data_miss["records"][0]["turn"] == 3
+    assert data_miss["records"][0]["is_miss"] is True
+
+    # 3. 按真实轮次与目标序号筛选
+    resp_t1 = client.get(f"/api/datasets/{ds_name}/runs/test_model/test_backend/scored?turn=1")
+    assert resp_t1.status_code == 200
+    assert resp_t1.json()["total"] == 1
+    assert resp_t1.json()["records"][0]["turn"] == 1
+
+    resp_t3 = client.get(f"/api/datasets/{ds_name}/runs/test_model/test_backend/scored?turn=3")
+    assert resp_t3.status_code == 200
+    assert resp_t3.json()["total"] == 1
+    assert resp_t3.json()["records"][0]["turn"] == 3
+
+    # 兼容通过用户轮次(0)或序号筛选第 1 个预测
+    resp_t0 = client.get(f"/api/datasets/{ds_name}/runs/test_model/test_backend/scored?turn=0")
+    assert resp_t0.status_code == 200
+    assert resp_t0.json()["total"] == 1
+    assert resp_t0.json()["records"][0]["turn"] == 1
+
+    # 3. 缺少 scored.jsonl 时优雅降级返回空列表，不抛 404/500
+    rdir_empty = cfg.dataset_dir / "empty_model" / "empty_backend"
+    rdir_empty.mkdir(parents=True, exist_ok=True)
+    resp_empty = client.get(f"/api/datasets/{ds_name}/runs/empty_model/empty_backend/scored")
+    assert resp_empty.status_code == 200
+    data_empty = resp_empty.json()
+    assert data_empty["total"] == 0
+    assert data_empty["records"] == []
+    assert "warning" in data_empty

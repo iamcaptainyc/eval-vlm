@@ -636,11 +636,13 @@ function renderGallery() {
       const turnsHtml = s.turns
         .map((t, tIdx) => {
           const isTarget = s.targets.some((tgt) => tgt.turn_index === tIdx);
+          const isUser = t.role === "user";
+          const roleLabel = isUser ? `🧑 用户提问 [Turn ${tIdx}]` : `🤖 助手回答 [Turn ${tIdx}]`;
           return `
           <div class="turn-bubble">
             <div class="turn-role-badge">
-              <span>${escapeHtml(t.role)}</span>
-              ${isTarget ? `<span class="target-chip">评测目标</span>` : ""}
+              <span>${roleLabel}</span>
+              ${isTarget ? `<span class="target-chip">🎯 评测目标 (模型预测轮)</span>` : ""}
             </div>
             <div class="turn-text">${escapeHtml(t.content)}</div>
           </div>`;
@@ -4236,12 +4238,15 @@ function renderComparison() {
     const hasTurns = row.turns && row.turns.length > 0;
     const turnsHtml = hasTurns ? `
       <div class="cmp-dialogue-list">
-        ${row.turns.map(t => `
-          <div class="cmp-chat-bubble ${t.role === 'user' ? 'cmp-chat-user' : 'cmp-chat-assistant'}">
-            <div class="cmp-chat-role">${t.role === 'user' ? '👤 USER 用户输入' : '🤖 ASSISTANT 对话上下文'}</div>
+        ${row.turns.map((t, tIdx) => {
+          const isUser = t.role === 'user';
+          const tNum = t.turn_index !== undefined ? t.turn_index : tIdx;
+          return `
+          <div class="cmp-chat-bubble ${isUser ? 'cmp-chat-user' : 'cmp-chat-assistant'}">
+            <div class="cmp-chat-role">${isUser ? `👤 用户提问 [轮 ${tNum}]` : `🤖 助手历史回答 [轮 ${tNum}]`}</div>
             <div class="cmp-chat-content" style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(t.content)}</div>
           </div>
-        `).join("")}
+        `;}).join("")}
       </div>
     ` : "";
 
@@ -4256,7 +4261,7 @@ function renderComparison() {
             <span class="cmp-sample-id" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(row.id)}" title="点击复制样本 ID">
               🆔 ${escapeHtml(row.id)}
             </span>
-            <span class="cmp-turn-badge">第 ${row.turn} 轮 (Turn ${row.turn})</span>
+            <span class="cmp-turn-badge">第 ${row.turn} 轮模型预测 (Turn ${row.turn})</span>
           </div>
           <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
             ${catBadges || `<span class="badge cmp-badge-consistent">一致</span>`}
@@ -4828,11 +4833,14 @@ async function loadFieldMismatches(offset = 0) {
       const countEl = document.getElementById("field-mismatches-count");
       if (countEl) countEl.textContent = state.fieldMismatchesTotal;
       renderFieldMismatches();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `HTTP ${res.status}: ${res.statusText}`);
     }
   } catch (err) {
     if (container) {
       container.innerHTML = `
-        <div class="cmp-empty-card">
+        <div class="cmp-empty-card" style="padding: 3rem 1.5rem;">
           <div class="cmp-empty-icon">⚠️</div>
           <div class="cmp-empty-title">加载失配样本失败</div>
           <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
@@ -4998,6 +5006,31 @@ async function loadRunMetrics() {
   } catch (_) {}
 }
 
+function getActualModelTurn(tk, td, idx, perTurn) {
+  // 1. 若 metrics.json 中显式记录了真实消息下标 turn_index (奇数: 1, 3, 5...)
+  if (td && typeof td.turn_index === "number" && td.turn_index % 2 === 1) {
+    return td.turn_index;
+  }
+  // 2. 检测 perTurn 的全部 keys：若存在 turn_0 或 0，说明基于 0 起始的目标序号 (0, 1, 2...)
+  const keys = perTurn ? Object.keys(perTurn) : [];
+  const hasTurn0 = keys.some((k) => k === "turn_0" || k === "0");
+  const rawNum = parseInt(String(tk).replace(/^[^\d]*/, ""), 10);
+
+  if (hasTurn0 && !isNaN(rawNum)) {
+    // 0 起始的目标序号 ordinal：第 0 个目标在 turn 1，第 1 个目标在 turn 3，第 2 个目标在 turn 5...
+    return 2 * rawNum + 1;
+  }
+
+  if (!isNaN(rawNum)) {
+    // 若已经是奇数 (1, 3, 5...)，说明本身就是真实的助手消息轮次
+    if (rawNum % 2 === 1) return rawNum;
+    // 若是偶数 (0, 2, 4...)，偶数为用户问答，对应预测必然是后续助手轮 (0->1, 2->3, 4->5)
+    return rawNum + 1;
+  }
+
+  return idx !== undefined ? 2 * idx + 1 : 1;
+}
+
 function renderMetrics() {
   const m = state.runMetrics;
   if (!m) return;
@@ -5029,12 +5062,14 @@ function renderMetrics() {
         const cm = td.confusion_matrix;
         const activeCls = idx === 0 ? " active" : "";
         const displayStyle = idx === 0 ? "display: block;" : "display: none;";
+        const actualTurn = getActualModelTurn(tk, td, idx, perTurn);
+        const scorer = td.scorer || "exact_match";
         tabs.push(`
           <button type="button" class="field-tab-btn${activeCls}" onclick="switchEvalCmTab(this, '${idx}')">
-            ${escapeHtml(tk)} (scorer: ${escapeHtml(td.scorer || "exact_match")})
+            第 ${actualTurn} 轮模型预测 (${escapeHtml(scorer)})
           </button>
         `);
-        const cmHtml = renderConfusionMatrixHtml(cm, `混淆矩阵 — ${tk} (scorer: ${td.scorer || "exact_match"})`, `eval-cm-box-${idx}`);
+        const cmHtml = renderConfusionMatrixHtml(cm, `混淆矩阵 — 第 ${actualTurn} 轮模型预测 (scorer: ${scorer})`, `eval-cm-box-${idx}`);
         panes.push(`
           <div class="field-cm-pane${activeCls}" id="eval-cm-pane-${idx}" style="${displayStyle}">
             ${cmHtml}
@@ -5058,16 +5093,22 @@ function renderMetrics() {
     }
   }
 
-  // 动态填充轮次筛选下拉框
+  // 动态填充样本评测打分明细的轮次筛选下拉框 (明确标注模型预测的奇数轮次 1, 3, 5...)
   const turnFilterSelect = document.getElementById("scored-turn-filter");
   if (turnFilterSelect) {
     const curVal = turnFilterSelect.value;
     const options = [`<option value="">全部目标轮次</option>`];
     const perTurn = m.per_turn || {};
-    Object.keys(perTurn).forEach((tk) => {
-      const turnNum = tk.replace("turn_", "");
-      const label = `${tk} (scorer: ${perTurn[tk]?.scorer || "exact_match"})`;
-      options.push(`<option value="${turnNum}" ${turnNum === curVal ? "selected" : ""}>${escapeHtml(label)}</option>`);
+    const turnKeys = Object.keys(perTurn);
+
+    turnKeys.forEach((tk, idx) => {
+      const td = perTurn[tk];
+      const actualTurn = getActualModelTurn(tk, td, idx, perTurn);
+      const scorer = td?.scorer || "exact_match";
+      const label = `第 ${actualTurn} 轮模型预测 (Turn ${actualTurn} · ${scorer})`;
+      // 兼容历史或当前选择 (无论是实际轮次还是旧值)
+      const isSelected = String(actualTurn) === String(curVal) || (curVal === "0" && actualTurn === 1);
+      options.push(`<option value="${actualTurn}" ${isSelected ? "selected" : ""}>${escapeHtml(label)}</option>`);
     });
     turnFilterSelect.innerHTML = options.join("");
     if (curVal) turnFilterSelect.value = curVal;
@@ -5116,11 +5157,14 @@ async function loadScored(offset = 0) {
       const countEl = document.getElementById("scored-count");
       if (countEl) countEl.textContent = state.scoredTotal;
       renderScored();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `HTTP ${res.status}: ${res.statusText}`);
     }
   } catch (err) {
     if (container) {
       container.innerHTML = `
-        <div class="cmp-empty-card">
+        <div class="cmp-empty-card" style="padding: 3rem 1.5rem;">
           <div class="cmp-empty-icon">⚠️</div>
           <div class="cmp-empty-title">加载打分样本失败</div>
           <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
@@ -5133,6 +5177,21 @@ async function loadScored(offset = 0) {
 function renderScored() {
   const container = document.getElementById("scored-cards");
   if (!container) return;
+
+  // 若轮次下拉选项尚未填充且当前有打分样本，从打分样本中提取并填充轮次选项
+  const turnFilterSelect = document.getElementById("scored-turn-filter");
+  if (turnFilterSelect && turnFilterSelect.options.length <= 1 && state.scoredRecords && state.scoredRecords.length > 0) {
+    const turns = Array.from(new Set(state.scoredRecords.map((r) => r.turn || 1))).sort((a, b) => a - b);
+    if (turns.length > 0) {
+      const curVal = turnFilterSelect.value;
+      const opts = [`<option value="">全部目标轮次</option>`];
+      turns.forEach((t) => {
+        opts.push(`<option value="${t}" ${String(t) === String(curVal) ? "selected" : ""}>第 ${t} 轮模型预测 (Turn ${t})</option>`);
+      });
+      turnFilterSelect.innerHTML = opts.join("");
+      if (curVal) turnFilterSelect.value = curVal;
+    }
+  }
 
   if (!state.scoredRecords || !state.scoredRecords.length) {
     container.innerHTML = `
@@ -5151,6 +5210,7 @@ function renderScored() {
       const isMiss = r.is_miss ?? (r.score === null || r.score < 1.0 || Boolean(r.error));
       const cardClass = isMiss ? "run-sample-card is-miss" : "run-sample-card is-hit";
       const scoreStr = r.score !== null && r.score !== undefined ? String(r.score) : "0";
+      const predTurn = r.turn || 1;
 
       // 缩略图 strip
       let imagesHtml = "";
@@ -5177,14 +5237,16 @@ function renderScored() {
       if (r.turns && r.turns.length > 0) {
         dialogueHtml = `
           <div class="run-dialogue-box">
-            <div class="run-dialogue-title">💬 评测目标轮前置对话流:</div>
+            <div class="run-dialogue-title">💬 评测目标轮前置对话流 (Turn 0 ~ Turn ${predTurn - 1}):</div>
             ${r.turns
-              .map((t) => {
+              .map((t, i) => {
                 const isUser = t.role === "user";
+                const turnIdx = t.turn_index !== undefined ? t.turn_index : (isUser ? 2 * i : 2 * i + 1);
+                const roleLabel = isUser ? `🧑 用户问答 [轮 ${turnIdx}]` : `🤖 助手历史回答 [轮 ${turnIdx}]`;
                 return `
                   <div class="run-chat-bubble ${isUser ? 'run-chat-user' : 'run-chat-assistant'}">
                     <div style="font-size: 0.74rem; font-weight: 700; margin-bottom: 2px; color: ${isUser ? 'var(--cyan-500)' : 'var(--primary-500)'};">
-                      ${isUser ? '🧑 用户 (User)' : '🤖 助手 (Assistant)'}:
+                      ${roleLabel}:
                     </div>
                     <div style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(t.content)}</div>
                   </div>
@@ -5226,7 +5288,7 @@ function renderScored() {
               <span class="run-card-id" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(r.id)}" title="点击复制样本 ID">
                 📋 ${escapeHtml(r.id)}
               </span>
-              <span class="badge badge-secondary">第 ${r.turn ?? 0} 轮</span>
+              <span class="badge badge-secondary">第 ${predTurn} 轮 (模型预测)</span>
               ${isMiss
                 ? `<span class="badge badge-error">得分: ${scoreStr} (未命中)</span>`
                 : `<span class="badge badge-success">得分: ${scoreStr} (满分命中)</span>`}
@@ -6683,6 +6745,7 @@ function renderSweepEvalDetail(result) {
     } else {
       turnsContainer.innerHTML = turnKeys.map((tk, idx) => {
         const t = perTurn[tk];
+        const actualTurn = getActualModelTurn(tk, t, idx, perTurn);
         const scorer = t.scorer || "scorer";
 
         let metricDetails = "";
@@ -6717,7 +6780,7 @@ function renderSweepEvalDetail(result) {
             <div style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
               <div class="sr-cm-header">
                 <div style="font-size: 0.86rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
-                  <span>🔥 第 ${idx + 1} 轮分类混淆矩阵 (${escapeHtml(tk)})</span>
+                  <span>🔥 第 ${actualTurn} 轮分类混淆矩阵 (Turn ${actualTurn} · ${escapeHtml(tk)})</span>
                   ${accHtml}
                 </div>
                 <div class="sr-cm-legend">
@@ -6749,7 +6812,7 @@ function renderSweepEvalDetail(result) {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <span class="role-badge" style="background: rgba(99,102,241,0.2); color: #a5b4fc; font-weight: 700;">
-                  轮次: ${escapeHtml(tk)}
+                  轮次: 第 ${actualTurn} 轮 (模型预测 · Turn ${actualTurn})
                 </span>
                 <span class="config-key-badge">${escapeHtml(scorer)}</span>
               </div>

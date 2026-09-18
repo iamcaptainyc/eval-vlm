@@ -154,6 +154,107 @@ def get_field_metrics_detail(cfg: Config, model: str, backend: str) -> dict[str,
     return json.loads(fm_file.read_text(encoding="utf-8"))
 
 
+_SAMPLES_CACHE: dict[str, tuple[float, int, dict[str, Any]]] = {}
+
+
+def _get_samples_map(cfg: Config) -> dict[str, Any]:
+    """快速获取带 mtime 与 size 缓存的样本映射字典，避免每次请求重复解析 test.json。"""
+    test_path = cfg.test_path
+    if not test_path.exists():
+        return {}
+    try:
+        stat = test_path.stat()
+        cache_key = str(test_path.resolve())
+        cached = _SAMPLES_CACHE.get(cache_key)
+        if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+            return cached[2]
+
+        from ..data.loader import load_samples
+
+        samples = load_samples(cfg, source=test_path)
+        samples_map = {s.id: s for s in samples}
+        _SAMPLES_CACHE[cache_key] = (stat.st_mtime, stat.st_size, samples_map)
+        return samples_map
+    except Exception:
+        return {}
+
+
+def _resolve_sample_turn(obj: dict[str, Any], sample: Any = None) -> tuple[int, int]:
+    """解析记录对应的 (实际助手消息轮次 actual_turn, 目标序号 ordinal)。
+
+    在多模态对话规范中：
+    - 偶数下标 (0, 2, 4...) 为用户提问 (User 问答)
+    - 奇数下标 (1, 3, 5...) 为助手回复 (Assistant 模型预测目标轮次)
+    """
+    raw_turn = obj.get("turn")
+    raw_ord = obj.get("ordinal")
+
+    # 1. 若有关联样本且包含 targets，以 sample.targets (turn_index 均为奇数轮) 为权威基准
+    if sample and hasattr(sample, "targets") and sample.targets:
+        # A. 若记录包含显式 ordinal
+        if raw_ord is not None:
+            try:
+                ord_i = int(raw_ord)
+                if 0 <= ord_i < len(sample.targets):
+                    return sample.targets[ord_i].turn_index, ord_i
+            except (TypeError, ValueError):
+                pass
+        # B. 检查 raw_turn 是否直接命中某个 target.turn_index (1, 3, 5...)
+        if raw_turn is not None:
+            try:
+                t_val = int(raw_turn)
+                for i, tgt in enumerate(sample.targets):
+                    if tgt.turn_index == t_val:
+                        return t_val, i
+                # 若 raw_turn 是偶数 (如 0, 2, 4... 用户误当成 0 起始的目标序号或用户轮次)
+                # 例如 turn: 0 -> 目标 0 -> targets[0].turn_index (1)
+                # turn: 2 -> 对应第 2 个用户问答后的助手回复 -> targets[1].turn_index (3)
+                if t_val % 2 == 0:
+                    guess_ord = t_val // 2
+                    if 0 <= guess_ord < len(sample.targets):
+                        return sample.targets[guess_ord].turn_index, guess_ord
+                elif 0 <= t_val < len(sample.targets):
+                    return sample.targets[t_val].turn_index, t_val
+            except (TypeError, ValueError):
+                pass
+        # 默认回退到第 0 个目标 (通常为 turn 1)
+        return sample.targets[0].turn_index, 0
+
+    # 2. 若无 sample 对象的纯数据推算
+    if raw_ord is not None:
+        try:
+            ord_i = max(0, int(raw_ord))
+            return 2 * ord_i + 1, ord_i
+        except (TypeError, ValueError):
+            pass
+
+    if raw_turn is not None:
+        try:
+            t_val = int(raw_turn)
+            if t_val % 2 == 1:
+                # 已经是奇数助手轮 (1, 3, 5...)
+                return t_val, (t_val - 1) // 2
+            else:
+                # 偶数轮 (0, 2, 4...) 为用户提问，模型预测必然为对应的后续助手轮 (1, 3, 5...)
+                return t_val + 1, t_val // 2
+        except (TypeError, ValueError):
+            pass
+
+    return 1, 0
+
+
+def _match_turn(filter_turn: int, actual_turn: int, ord_i: int, raw_turn: Any) -> bool:
+    # 1. 优先匹配实际助手轮次 (奇数轮 1, 3, 5...)
+    if filter_turn == actual_turn:
+        return True
+    # 2. 若 filter_turn 是偶数 (0, 2, 4...)，偶数是用户提问轮，对应其后续助手模型预测 (0->1, 2->3, 4->5)
+    #    或者作为 0 起始的 ordinal 序号 (0 对应第 1 个目标轮 actual_turn 1)
+    if filter_turn % 2 == 0:
+        if filter_turn + 1 == actual_turn or filter_turn == ord_i:
+            return True
+    return False
+
+
 def get_scored_records(
     cfg: Config,
     model: str,
@@ -171,20 +272,16 @@ def get_scored_records(
     rdir = _find_run_dir(cfg, model, backend)
     scored_file = rdir / "scored.jsonl"
     if not scored_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{model}/{backend} 缺少 scored.jsonl",
-        )
+        return {
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "records": [],
+            "warning": f"{model}/{backend} 尚未生成 scored.jsonl 评测明细文件",
+        }
 
-    # 尝试加载 test.json 以附带原图和多轮对话上下文
-    samples_map = {}
-    if cfg.test_path.exists():
-        try:
-            from ..data.loader import load_samples
-            samples = load_samples(cfg, source=cfg.test_path)
-            samples_map = {s.id: s for s in samples}
-        except Exception:
-            samples_map = {}
+    # 读取/复用 test.json 样本缓存以附带原图和前置多轮对话上下文
+    samples_map = _get_samples_map(cfg)
 
     rows: list[dict[str, Any]] = []
     with scored_file.open("r", encoding="utf-8") as f:
@@ -199,7 +296,9 @@ def get_scored_records(
                     continue
                 if max_score is not None and score is not None and score > max_score:
                     continue
-                if turn is not None and int(obj.get("turn", -999)) != turn:
+                s_item = samples_map.get(obj.get("id"))
+                actual_turn, ord_i = _resolve_sample_turn(obj, s_item)
+                if turn is not None and not _match_turn(turn, actual_turn, ord_i, obj.get("turn")):
                     continue
                 is_miss = (score is None or score < 1.0 or bool(obj.get("error")))
                 if only_miss and not is_miss:
@@ -211,6 +310,8 @@ def get_scored_records(
                         and q not in str(obj.get("reference", "")).lower()):
                         continue
                 obj["is_miss"] = is_miss
+                obj["turn"] = actual_turn
+                obj["ordinal"] = ord_i
                 rows.append(obj)
             except Exception:
                 continue
@@ -226,19 +327,25 @@ def get_scored_records(
     ds_name = cfg.dataset_dir.name
     for row in paged:
         s = samples_map.get(row.get("id"))
-        imgs = list(s.images) if s else (row.get("images") or [])
+        imgs = list(s.images) if (s and hasattr(s, "images")) else (row.get("images") or [])
         row["images"] = imgs
         row["image_urls"] = [
             f"/api/datasets/{ds_name}/image?ref={urllib.parse.quote(ref)}"
             for ref in imgs
         ]
-        if s:
-            target_turn = row.get("turn")
+
+        target_turn = row.get("turn", 1)
+
+        if s and hasattr(s, "turns") and s.turns:
             turns_ctx = []
-            for idx, msg in enumerate(s.messages):
-                if target_turn is not None and idx >= target_turn:
+            # target_turn 是模型预测所在的 Assistant 轮次 (奇数轮 1, 3, 5...)
+            # 前置对话是且仅是位于该预测之前的轮次 (即 idx < target_turn)
+            for idx, t in enumerate(s.turns):
+                if idx >= target_turn:
                     break
-                turns_ctx.append({"role": msg.get("role"), "content": msg.get("content")})
+                role = getattr(t, "role", "user") if hasattr(t, "role") else (t.get("role") if isinstance(t, dict) else "user")
+                content = getattr(t, "content", "") if hasattr(t, "content") else (t.get("content") if isinstance(t, dict) else str(t))
+                turns_ctx.append({"role": role, "content": content, "turn_index": idx})
             row["turns"] = turns_ctx
         else:
             row["turns"] = []

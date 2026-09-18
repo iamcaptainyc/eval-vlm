@@ -75,6 +75,7 @@ def score_predictions(
     # 按目标序号(ordinal)分组,每组用各自 scorer 聚合。
     groups: dict[int, list] = defaultdict(list)
     group_scorer: dict[int, str] = {}
+    group_turn_index: dict[int, int] = {}
     scored_rows = []
     all_scores: list[float] = []
 
@@ -82,6 +83,7 @@ def score_predictions(
         for ordinal, target in enumerate(sample.targets):
             name, scorer = _scorer_for(ordinal, default_name, turn_names, cache)
             group_scorer[ordinal] = name
+            group_turn_index[ordinal] = target.turn_index
             pred = pred_by_key.get((sample.id, target.turn_index))
             if pred is None:
                 res = scorer.score_one("", target.reference, sample)
@@ -113,7 +115,10 @@ def score_predictions(
     per_turn = {}
     for ordinal in sorted(groups):
         name = group_scorer[ordinal]
-        per_turn[f"turn_{ordinal}"] = cache[name].aggregate(groups[ordinal])
+        agg = cache[name].aggregate(groups[ordinal])
+        agg["turn_index"] = group_turn_index.get(ordinal, target.turn_index if sample.targets else 1)
+        agg["ordinal"] = ordinal
+        per_turn[f"turn_{ordinal}"] = agg
 
     # 未命中以 id 为单位:某 id 任一 exact_match 轮错了,整个样本进清单(列出全部轮)。
     sample_by_id = {s.id: s for s in samples}
