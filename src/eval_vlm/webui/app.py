@@ -392,6 +392,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         min_score: Optional[float] = None,
         max_score: Optional[float] = None,
         order: str = "default",
+        turn: Optional[int] = None,
+        query: Optional[str] = None,
+        only_miss: bool = False,
         cfg: Config = Depends(get_dataset_cfg),
     ) -> dict[str, Any]:
         return get_scored_records(
@@ -403,6 +406,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             min_score=min_score,
             max_score=max_score,
             order_by=order,
+            turn=turn,
+            query=query,
+            only_miss=only_miss,
         )
 
     @app.get("/api/datasets/{name}/runs/{model}/{backend}/failures.html")
@@ -449,6 +455,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         offset: int = 0,
         limit: int = 50,
         filter_state: Optional[str] = None,
+        filter_field: Optional[str] = None,
+        query: Optional[str] = None,
         cfg: Config = Depends(get_dataset_cfg),
     ) -> dict[str, Any]:
         return get_field_mismatches_records(
@@ -458,6 +466,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             offset=offset,
             limit=limit,
             filter_state=filter_state,
+            filter_field=filter_field,
+            query=query,
         )
 
     @app.get("/api/datasets/{name}/runs/{model}/{backend}/field-mismatches.html")
@@ -505,7 +515,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             comparison = compare_dataset(cfg, runs, baseline, allow_mixed_dataset=allow_mixed_dataset)
             rows = filter_records(comparison["records"], category=filter, query=query,
-                                  include_agreements=include_agreements, field=field)
+                                  include_agreements=include_agreements, field=field,
+                                  baseline=comparison["baseline"])
             rows = sort_records(rows, sort, descending)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

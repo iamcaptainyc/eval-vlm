@@ -163,8 +163,11 @@ def get_scored_records(
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
     order_by: str = "default",  # "default" | "lowest" | "highest"
+    turn: Optional[int] = None,
+    query: Optional[str] = None,
+    only_miss: bool = False,
 ) -> dict[str, Any]:
-    """分页读取与筛选逐样本评分记录。"""
+    """分页读取与筛选逐样本评分记录，附加原图与上下文信息。"""
     rdir = _find_run_dir(cfg, model, backend)
     scored_file = rdir / "scored.jsonl"
     if not scored_file.exists():
@@ -172,6 +175,16 @@ def get_scored_records(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"{model}/{backend} 缺少 scored.jsonl",
         )
+
+    # 尝试加载 test.json 以附带原图和多轮对话上下文
+    samples_map = {}
+    if cfg.test_path.exists():
+        try:
+            from ..data.loader import load_samples
+            samples = load_samples(cfg, source=cfg.test_path)
+            samples_map = {s.id: s for s in samples}
+        except Exception:
+            samples_map = {}
 
     rows: list[dict[str, Any]] = []
     with scored_file.open("r", encoding="utf-8") as f:
@@ -186,6 +199,18 @@ def get_scored_records(
                     continue
                 if max_score is not None and score is not None and score > max_score:
                     continue
+                if turn is not None and int(obj.get("turn", -999)) != turn:
+                    continue
+                is_miss = (score is None or score < 1.0 or bool(obj.get("error")))
+                if only_miss and not is_miss:
+                    continue
+                if query:
+                    q = query.strip().lower()
+                    if (q not in str(obj.get("id", "")).lower()
+                        and q not in str(obj.get("prediction", "")).lower()
+                        and q not in str(obj.get("reference", "")).lower()):
+                        continue
+                obj["is_miss"] = is_miss
                 rows.append(obj)
             except Exception:
                 continue
@@ -197,6 +222,26 @@ def get_scored_records(
 
     total = len(rows)
     paged = rows[offset : offset + limit]
+
+    ds_name = cfg.dataset_dir.name
+    for row in paged:
+        s = samples_map.get(row.get("id"))
+        imgs = list(s.images) if s else (row.get("images") or [])
+        row["images"] = imgs
+        row["image_urls"] = [
+            f"/api/datasets/{ds_name}/image?ref={urllib.parse.quote(ref)}"
+            for ref in imgs
+        ]
+        if s:
+            target_turn = row.get("turn")
+            turns_ctx = []
+            for idx, msg in enumerate(s.messages):
+                if target_turn is not None and idx >= target_turn:
+                    break
+                turns_ctx.append({"role": msg.get("role"), "content": msg.get("content")})
+            row["turns"] = turns_ctx
+        else:
+            row["turns"] = []
 
     return {
         "total": total,
@@ -213,8 +258,10 @@ def get_field_mismatches_records(
     offset: int = 0,
     limit: int = 50,
     filter_state: Optional[str] = None,
+    filter_field: Optional[str] = None,
+    query: Optional[str] = None,
 ) -> dict[str, Any]:
-    """分页读取与筛选 field-eval 的逐字段失配记录 (field_mismatches.json)。"""
+    """分页读取与筛选 field-eval 的逐字段失配记录 (field_mismatches.json)，附加图片与字段过滤。"""
     rdir = _find_run_dir(cfg, model, backend)
     fm_file = rdir / "field_mismatches.json"
     if not fm_file.exists():
@@ -228,8 +275,52 @@ def get_field_mismatches_records(
     if filter_state:
         rows = [r for r in rows if r.get("state") == filter_state]
 
+    if filter_field:
+        ff = filter_field.strip()
+        rows = [
+            r for r in rows
+            if (
+                str(r.get("field", "")).strip() == ff
+                or any(
+                    str(f.get("field", "")).strip() == ff
+                    and (not f.get("correct") or (f.get("is_empty_ref") is False and not f.get("correct")))
+                    for f in r.get("fields", [])
+                )
+            )
+        ]
+
+    if query:
+        q = query.strip().lower()
+        rows = [
+            r for r in rows
+            if (
+                q in str(r.get("id", "")).lower()
+                or q in str(r.get("pred_desc", "")).lower()
+                or q in str(r.get("field", "")).lower()
+                or q in str(r.get("actual", "")).lower()
+                or q in str(r.get("expected", "")).lower()
+            )
+        ]
+
     total = len(rows)
     paged = rows[offset : offset + limit]
+
+    ds_name = cfg.dataset_dir.name
+    for row in paged:
+        if "fields" not in row and "field" in row:
+            row["fields"] = [{
+                "field": row.get("field"),
+                "ref": row.get("expected"),
+                "pred": row.get("actual"),
+                "correct": False,
+                "is_empty_ref": False,
+            }]
+        if "state" not in row:
+            row["state"] = "mismatch"
+        row["image_urls"] = [
+            f"/api/datasets/{ds_name}/image?ref={urllib.parse.quote(ref)}"
+            for ref in row.get("images", [])
+        ]
 
     return {
         "total": total,

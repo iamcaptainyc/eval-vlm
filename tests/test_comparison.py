@@ -165,3 +165,126 @@ def test_summary_includes_turn_metrics_and_field_eval(tmp_path):
     old_fe = summary["runs"]["old/hf"]["field_eval"]
     assert old_fe["has_field_eval"] is False
 
+
+def test_field_eval_only_runs_support_regression_and_improvement(tmp_path):
+    """验证纯 field-eval 运行（无 scored.jsonl）也能正确识别 regression 和 improvement。"""
+    record = {"messages": [
+        {"role": "user", "content": "<image> describe"},
+        {"role": "assistant", "content": "description gold"},
+    ], "images": ["photo.png"]}
+    (tmp_path / "test.json").write_text(json.dumps([record]), encoding="utf-8")
+    sid = _stable_id(0, record)
+    cfg = Config(run_dir_path=tmp_path)
+    digest = hashlib.sha256((tmp_path / "test.json").read_bytes()).hexdigest()
+
+    # old/hf: 全对 (all_correct)
+    run1 = tmp_path / "old" / "hf"
+    run1.mkdir(parents=True)
+    (run1 / "run_meta.json").write_text(json.dumps({"test_sha256": digest}), encoding="utf-8")
+    (run1 / "predictions.jsonl").write_text(json.dumps({"id": sid, "turn": 1, "prediction": "old pred"}) + "\n", encoding="utf-8")
+    (run1 / "field_mismatches.json").write_text(json.dumps({"rows": []}), encoding="utf-8")
+    (run1 / "field_metrics.json").write_text(json.dumps({"num_scored": 1, "per_field": {"lane": {"total": 1, "correct": 1}}}), encoding="utf-8")
+
+    # new/hf: 车道位置失配 (mismatch)
+    run2 = tmp_path / "new" / "hf"
+    run2.mkdir(parents=True)
+    (run2 / "run_meta.json").write_text(json.dumps({"test_sha256": digest}), encoding="utf-8")
+    (run2 / "predictions.jsonl").write_text(json.dumps({"id": sid, "turn": 1, "prediction": "new pred"}) + "\n", encoding="utf-8")
+    (run2 / "field_mismatches.json").write_text(json.dumps({
+        "rows": [{
+            "id": sid, "turn": 1, "state": "mismatch",
+            "fields": [{"field": "车道位置", "ref": ["第一车道"], "pred": ["第二车道"], "correct": False}]
+        }]
+    }), encoding="utf-8")
+    (run2 / "field_metrics.json").write_text(json.dumps({"num_scored": 1, "per_field": {"lane": {"total": 1, "correct": 0}}}), encoding="utf-8")
+
+    result = compare_dataset(cfg, ["old/hf", "new/hf"], baseline="old/hf")
+    records = result["records"]
+    assert len(records) == 1
+    # Baseline old/hf 是全对 (correct), 候选 new/hf 是失配 (wrong) -> 必定归类为 regression!
+    assert "regression" in records[0]["categories"]
+    assert records[0]["outputs"][0]["status"] == "correct"
+    assert records[0]["outputs"][1]["status"] == "wrong"
+
+
+def test_field_filter_combined_with_category_filter(tmp_path):
+    """验证按字段筛选（如车道位置）与分歧类型筛选（如 regression / improvement / all_wrong）联合生效。"""
+    rec1 = {"messages": [{"role": "user", "content": "1"}, {"role": "assistant", "content": "1"}], "images": []}
+    rec2 = {"messages": [{"role": "user", "content": "2"}, {"role": "assistant", "content": "2"}], "images": []}
+    rec3 = {"messages": [{"role": "user", "content": "3"}, {"role": "assistant", "content": "3"}], "images": []}
+    (tmp_path / "test.json").write_text(json.dumps([rec1, rec2, rec3]), encoding="utf-8")
+    s1, s2, s3 = _stable_id(0, rec1), _stable_id(1, rec2), _stable_id(2, rec3)
+    cfg = Config(run_dir_path=tmp_path)
+    digest = hashlib.sha256((tmp_path / "test.json").read_bytes()).hexdigest()
+
+    run1 = tmp_path / "base" / "hf"
+    run1.mkdir(parents=True)
+    (run1 / "run_meta.json").write_text(json.dumps({"test_sha256": digest}), encoding="utf-8")
+    (run1 / "predictions.jsonl").write_text("\n".join(json.dumps({"id": sid, "turn": 1, "prediction": "p"}) for sid in (s1, s2, s3)) + "\n", encoding="utf-8")
+    # base 模型在 s1 上车道对、主路错; 在 s2 上车道错; 在 s3 上车道错
+    (run1 / "field_mismatches.json").write_text(json.dumps({
+        "rows": [
+            {"id": s1, "turn": 1, "state": "mismatch", "fields": [
+                {"field": "主辅路", "ref": ["主路"], "pred": ["辅路"], "correct": False},
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第一车道"], "correct": True},
+            ]},
+            {"id": s2, "turn": 1, "state": "mismatch", "fields": [
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第二车道"], "correct": False},
+            ]},
+            {"id": s3, "turn": 1, "state": "mismatch", "fields": [
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第三车道"], "correct": False},
+            ]},
+        ]
+    }), encoding="utf-8")
+
+    run2 = tmp_path / "cand" / "hf"
+    run2.mkdir(parents=True)
+    (run2 / "run_meta.json").write_text(json.dumps({"test_sha256": digest}), encoding="utf-8")
+    (run2 / "predictions.jsonl").write_text("\n".join(json.dumps({"id": sid, "turn": 1, "prediction": "p"}) for sid in (s1, s2, s3)) + "\n", encoding="utf-8")
+    # cand 模型在 s1 上车道错; 在 s2 上车道对; 在 s3 上车道错
+    (run2 / "field_mismatches.json").write_text(json.dumps({
+        "rows": [
+            {"id": s1, "turn": 1, "state": "mismatch", "fields": [
+                {"field": "主辅路", "ref": ["主路"], "pred": ["辅路"], "correct": False},
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第二车道"], "correct": False},
+            ]},
+            {"id": s2, "turn": 1, "state": "all_correct", "fields": [
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第一车道"], "correct": True},
+            ]},
+            {"id": s3, "turn": 1, "state": "mismatch", "fields": [
+                {"field": "车道位置", "ref": ["第一车道"], "pred": ["第四车道"], "correct": False},
+            ]},
+        ]
+    }), encoding="utf-8")
+
+    result = compare_dataset(cfg, ["base/hf", "cand/hf"], baseline="base/hf")
+    all_recs = result["records"]
+
+    # 1. 联合筛选：field="车道位置" 且 category="regression" (用户报告的核心 bug 场景)
+    # s1 上 base 车道对、cand 车道错，应该精准命中 s1，且不能返回 0！
+    reg_recs = filter_records(all_recs, category="regression", field="车道位置", baseline="base/hf")
+    assert len(reg_recs) == 1
+    assert reg_recs[0]["id"] == s1
+    assert "regression" in reg_recs[0]["target_field_categories"]
+
+    # 2. 联合筛选：field="车道位置" 且 category="improvement"
+    # s2 上 base 车道错、cand 车道对，精准命中 s2
+    imp_recs = filter_records(all_recs, category="improvement", field="车道位置", baseline="base/hf")
+    assert len(imp_recs) == 1
+    assert imp_recs[0]["id"] == s2
+    assert "improvement" in imp_recs[0]["target_field_categories"]
+
+    # 3. 联合筛选：field="车道位置" 且 category="all_wrong"
+    # s3 上两者车道皆错，精准命中 s3
+    wrong_recs = filter_records(all_recs, category="all_wrong", field="车道位置", baseline="base/hf")
+    assert len(wrong_recs) == 1
+    assert wrong_recs[0]["id"] == s3
+
+    # 4. 验证 summary 中包含 categories_by_field 统计
+    assert "categories_by_field" in result["summary"]
+    lane_cats = result["summary"]["categories_by_field"].get("车道位置", {})
+    assert lane_cats.get("regression") == 1
+    assert lane_cats.get("improvement") == 1
+    assert lane_cats.get("all_wrong") == 1
+
+

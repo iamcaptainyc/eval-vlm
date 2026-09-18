@@ -6718,6 +6718,712 @@ table.ui-table tr:hover {
   color: #881337 !important;
 }
 
+/* ==========================================================================
+   15. 评测指标页面 (Runs Tab) 混淆矩阵与富样本审查卡片 (Rich Sample Review)
+   ========================================================================== */
+.field-cm-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.field-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+.field-tab-btn {
+  border: 1px solid var(--border-card);
+  background: var(--bg-surface);
+  padding: 5px 13px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.field-tab-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-main);
+  border-color: var(--primary-500);
+}
+
+.field-tab-btn.active {
+  background: var(--primary-500);
+  color: #ffffff;
+  border-color: var(--primary-600);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.field-cm-panes {
+  min-height: 120px;
+}
+
+.field-cm-pane {
+  display: none;
+}
+
+.field-cm-pane.active {
+  display: block;
+}
+
+.cm-card-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-card);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.cm-table-wrapper, .cm-report-wrapper {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+  border-radius: 6px;
+}
+
+.cm-table, .cm-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.cm-table th, .cm-table td, .cm-report-table th, .cm-report-table td {
+  border: 1px solid var(--border-subtle);
+  padding: 6px 8px;
+}
+
+.cm-table th, .cm-report-table th {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-align: center;
+}
+
+.cm-table th.row-label {
+  text-align: left;
+  font-weight: 600;
+}
+
+.cm-report-table td.cat-name {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.cm-table td {
+  text-align: center;
+  vertical-align: middle;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cm-cell-val {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 44px;
+  line-height: 1.2;
+}
+
+.cm-v-count {
+  font-size: 0.86rem;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: inherit;
+}
+
+.cm-v-pct {
+  font-size: 0.70rem;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.85;
+  color: inherit;
+}
+
+/* 混淆矩阵显示模式切换控制 */
+.cm-mode-count-only .cm-v-pct {
+  display: none !important;
+}
+
+.cm-mode-pct-only .cm-v-count {
+  display: none !important;
+}
+
+/* 混淆矩阵热力图单元格样式（基于 --heat-alpha 动态深度） */
+.cm-diag {
+  background: rgba(16, 185, 129, var(--heat-alpha, 0.22));
+  color: #ecfdf5;
+  font-weight: 700;
+}
+
+.cm-miss {
+  background: rgba(244, 63, 94, var(--heat-alpha, 0.18));
+  color: #fff1f2;
+  font-weight: 600;
+}
+
+.cm-zero {
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0.35;
+}
+
+.cm-table tbody td:hover {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: -2px;
+  z-index: 2;
+  position: relative;
+}
+
+.cm-total {
+  background: rgba(0, 0, 0, 0.18);
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.cm-total-all {
+  background: rgba(99, 102, 241, 0.25);
+  font-weight: 800;
+  color: #818cf8;
+}
+
+/* 评测样本深度审查工具栏与卡片容器 */
+.run-review-section {
+  margin-top: 1.5rem;
+}
+
+.run-review-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.run-review-toolbar-left,
+.run-review-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.run-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.run-filter-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.run-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.run-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+/* 富样本卡片 */
+.run-sample-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.run-sample-card:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.run-sample-card.is-miss {
+  border-left: 4px solid var(--rose-500);
+}
+
+.run-sample-card.is-pred-missing {
+  border-left: 4px solid var(--amber-500);
+}
+
+.run-sample-card.is-hit {
+  border-left: 4px solid var(--emerald-500);
+}
+
+.run-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.run-card-id-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.run-card-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.84rem;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  transition: all 0.15s;
+}
+
+.run-card-id:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: var(--primary-500);
+}
+
+.run-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* 样本缩略图条 */
+.run-thumb-strip {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.run-thumb-wrap {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-card);
+  cursor: zoom-in;
+  max-height: 220px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.run-thumb-wrap:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  border-color: var(--primary-500);
+}
+
+.run-thumb-img {
+  max-height: 220px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.run-thumb-zoom {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  font-family: var(--font-sans);
+}
+
+/* 模型预测描述框 */
+.run-pred-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.run-pred-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.run-pred-text {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* 逐字段比对详情表 */
+.run-field-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.run-field-table th, .run-field-table td {
+  border: 1px solid var(--border-subtle);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.run-field-table th {
+  background: rgba(0, 0, 0, 0.25);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.field-tag-ok {
+  color: var(--emerald-500) !important;
+  font-weight: 700;
+  background: var(--emerald-bg);
+}
+
+.field-tag-bad {
+  color: var(--rose-500) !important;
+  font-weight: 700;
+  background: var(--rose-bg);
+}
+
+.field-tag-empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* eval 对话上下文与真值预测横向对比网格 */
+.run-dialogue-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.run-dialogue-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.run-chat-bubble {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.run-chat-user {
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.run-chat-assistant {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.run-comp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .run-comp-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.run-comp-col {
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.run-comp-ref {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.run-comp-pred {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: var(--border-card);
+}
+
+.run-comp-pred.is-miss {
+  background: rgba(244, 63, 94, 0.08);
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+.run-comp-pred.is-hit {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.run-comp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.run-comp-content {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-main);
+  margin: 0;
+}
+
+/* ==========================================================================
+   16. 评测指标页面 (Runs Tab) 浅色主题专属高对比度深度适配 (Light Theme)
+   ========================================================================== */
+[data-theme="light"] .field-cm-wrapper {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06) !important;
+}
+
+[data-theme="light"] .field-tab-bar {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .field-tab-btn {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .field-tab-btn:hover {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+[data-theme="light"] .field-tab-btn.active {
+  background: #4f46e5 !important;
+  color: #ffffff !important;
+  border-color: #4338ca !important;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35) !important;
+}
+
+[data-theme="light"] .cm-card-box {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04) !important;
+}
+
+[data-theme="light"] .cm-table th,
+[data-theme="light"] .cm-report-table th {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .cm-table td,
+[data-theme="light"] .cm-report-table td {
+  border: 1px solid #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .cm-diag {
+  background: rgba(16, 185, 129, var(--heat-alpha, 0.22));
+  color: #065f46;
+  border: 1px solid #86efac;
+  font-weight: 700;
+}
+
+[data-theme="light"] .cm-miss {
+  background: rgba(244, 63, 94, var(--heat-alpha, 0.18));
+  color: #9f1239;
+  border: 1px solid #fca5a5;
+  font-weight: 600;
+}
+
+[data-theme="light"] .cm-zero {
+  background: transparent;
+  color: #94a3b8;
+  opacity: 0.45;
+}
+
+[data-theme="light"] .cm-total {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .cm-total-all {
+  background: #e0e7ff !important;
+  color: #3730a3 !important;
+}
+
+[data-theme="light"] .run-review-toolbar {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06) !important;
+}
+
+[data-theme="light"] .run-checkbox-label {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .run-sample-card {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06) !important;
+}
+
+[data-theme="light"] .run-sample-card:hover {
+  border-color: #818cf8 !important;
+}
+
+[data-theme="light"] .run-card-header {
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .run-card-id {
+  background: #eef2ff !important;
+  color: #3730a3 !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+[data-theme="light"] .run-thumb-wrap {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .run-pred-box {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .run-pred-text {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .run-field-table th {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .run-field-table td {
+  border: 1px solid #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .field-tag-ok {
+  background: #ecfdf5 !important;
+  color: #047857 !important;
+}
+
+[data-theme="light"] .field-tag-bad {
+  background: #fff1f2 !important;
+  color: #be123c !important;
+}
+
+[data-theme="light"] .run-dialogue-box {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .run-chat-user {
+  background: #ecfeff !important;
+  border: 1px solid #a5f3fc !important;
+  color: #0e7490 !important;
+}
+
+[data-theme="light"] .run-chat-assistant {
+  background: #f5f3ff !important;
+  border: 1px solid #ddd6fe !important;
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .run-comp-ref {
+  background: #f5f3ff !important;
+  border: 1px solid #ddd6fe !important;
+}
+
+[data-theme="light"] .run-comp-pred {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .run-comp-pred.is-miss {
+  background: #fff1f2 !important;
+  border: 1px solid #fecdd3 !important;
+}
+
+[data-theme="light"] .run-comp-pred.is-hit {
+  background: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+
+[data-theme="light"] .run-comp-content {
+  color: #0f172a !important;
+}
+
+
 
 
 

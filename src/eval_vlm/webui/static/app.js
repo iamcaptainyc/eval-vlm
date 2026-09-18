@@ -2049,6 +2049,8 @@ function openJobModal(type, prefill = null) {
   if (evalTargetsCustom) { evalTargetsCustom.value = ""; evalTargetsCustom.style.display = "none"; }
   if (overwriteCb) overwriteCb.checked = false;
   if (scorerSelect) scorerSelect.value = "";
+  const reportHtmlCb = document.getElementById("job-modal-report-html");
+  if (reportHtmlCb) reportHtmlCb.checked = false;
 
   // 确保弹窗内模型列表已渲染最新数据
   if ((!state.models.hf_models || state.models.hf_models.length === 0) &&
@@ -2166,6 +2168,11 @@ function buildJobModalArgs() {
   if (failfast) {
     params.fail_fast = true;
     parts.push("--fail-fast");
+  }
+  const reportHtml = document.getElementById("job-modal-report-html")?.checked;
+  if (reportHtml) {
+    params.report_html = true;
+    parts.push("--report-html");
   }
 
   if (type === "field-eval") {
@@ -3469,6 +3476,9 @@ async function loadComparison(offset = 0) {
     refreshBtn.classList.add("is-loading");
   }
 
+  const warningsEl = document.getElementById("comparison-warnings");
+  if (warningsEl) warningsEl.innerHTML = "";
+
   const target = document.getElementById("comparison-records");
   if (target) {
     target.innerHTML = `
@@ -3512,13 +3522,22 @@ async function loadComparison(offset = 0) {
     renderComparison();
   } catch (err) {
     showToast(`模型对比失败: ${err.message}`, "error");
+    if (warningsEl) warningsEl.innerHTML = "";
     if (target) {
+      const isMixedShaError = err.message && (err.message.includes("版本不一致") || err.message.includes("allow-mixed-dataset"));
       target.innerHTML = `
         <div class="cmp-empty-card">
           <div class="cmp-empty-icon">⚠️</div>
           <div class="cmp-empty-title">模型对比读取失败</div>
           <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
-          <button class="btn btn-primary" onclick="loadComparison(0)">重试</button>
+          <div style="display:flex; gap:0.5rem; justify-content:center; margin-top:0.75rem;">
+            ${isMixedShaError ? `
+              <button class="btn btn-primary" onclick="const chk=document.getElementById('comparison-allow-mixed'); if(chk) chk.checked=true; loadComparison(0);">
+                🔓 允许跨版本对比并重试
+              </button>
+            ` : ""}
+            <button class="btn btn-secondary" onclick="loadComparison(0)">重试</button>
+          </div>
         </div>
       `;
     }
@@ -3586,10 +3605,13 @@ function renderComparisonSummary(summary, filteredTotal) {
     return;
   }
   const alignedTotal = summary.aligned_total ?? 0;
-  const categories = summary.categories || {};
   const runsStats = summary.runs || {};
   const currentFilter = document.getElementById("comparison-filter")?.value || "";
   const currentFieldFilter = document.getElementById("comparison-field-filter")?.value?.trim() || "";
+  let categories = summary.categories || {};
+  if (currentFieldFilter && summary.categories_by_field && summary.categories_by_field[currentFieldFilter]) {
+    categories = summary.categories_by_field[currentFieldFilter];
+  }
 
   const diffPct = alignedTotal > 0 ? Math.min(100, Math.round((filteredTotal / alignedTotal) * 100)) : 0;
 
@@ -3988,8 +4010,26 @@ function comparisonPredictionCard(output, allOutputs, baselineOutput, hasAnyFiel
   const isBaseline = output.run === state.comparison.baseline;
   const isUnique = allOutputs.filter(x => x.normalized_prediction === output.normalized_prediction).length === 1;
   const isDiffFromBaseline = baselineOutput && output.normalized_prediction !== baselineOutput.normalized_prediction;
-  const isImprovement = baselineOutput?.status === "wrong" && output.status === "correct";
-  const isRegression = baselineOutput?.status === "correct" && output.status === "wrong";
+  const curFieldFilter = document.getElementById("comparison-field-filter")?.value?.trim() || "";
+  let isImprovement = baselineOutput?.status === "wrong" && output.status === "correct";
+  let isRegression = baselineOutput?.status === "correct" && output.status === "wrong";
+
+  if (curFieldFilter && output.field && baselineOutput?.field) {
+    const getFieldCorrect = (fobj) => {
+      if (!fobj || typeof fobj !== "object") return undefined;
+      const flist = fobj.fields || fobj.mismatches || [];
+      const item = flist.find(f => f.field === curFieldFilter);
+      if (item) return item.correct === true;
+      if (fobj.state === "all_correct") return true;
+      return undefined;
+    };
+    const bCor = getFieldCorrect(baselineOutput.field);
+    const oCor = getFieldCorrect(output.field);
+    if (bCor !== undefined && oCor !== undefined) {
+      isRegression = (bCor === true && oCor === false);
+      isImprovement = (bCor === false && oCor === true);
+    }
+  }
 
   let statusBadge = "";
   if (output.status === "correct") {
@@ -4173,7 +4213,10 @@ function renderComparison() {
   const baselineId = c.baseline;
 
   target.innerHTML = activeFilterBanner + c.records.map(row => {
-    const catBadges = (row.categories || []).map(catKey => {
+    const displayCategories = (currentFieldFilter && row.target_field_categories && row.target_field_categories.length)
+      ? row.target_field_categories
+      : (row.categories || []);
+    const catBadges = displayCategories.map(catKey => {
       const meta = COMPARISON_CATEGORY_CONFIG[catKey] || { label: catKey, icon: "🏷️", cls: "cmp-cat-all" };
       return `<span class="cmp-cat-pill ${meta.cls}" style="font-size:0.72rem; padding:1px 7px; pointer-events:none;">${meta.icon} ${escapeHtml(meta.label)}</span>`;
     }).join("");
@@ -4277,6 +4320,8 @@ function renderComparison() {
 function renderComparisonEmpty(msg) {
   const summary = document.getElementById("comparison-summary");
   if (summary) summary.innerHTML = "";
+  const warnings = document.getElementById("comparison-warnings");
+  if (warnings) warnings.innerHTML = "";
   const target = document.getElementById("comparison-records");
   if (target) {
     target.innerHTML = `
@@ -4337,6 +4382,286 @@ async function loadFieldMetrics() {
   } catch (_) {}
 }
 
+// --------------------------------------------------------------------------
+// 混淆矩阵与评测样本深度审查 (Confusion Matrix & Rich Review Cards)
+// --------------------------------------------------------------------------
+
+function setCmDisplayMode(boxId, mode, btn) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const wrap = box.querySelector(".cm-table-wrapper");
+  if (!wrap) return;
+  if (btn) {
+    btn.parentElement.querySelectorAll(".field-tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+  }
+  wrap.classList.remove("cm-mode-count-only", "cm-mode-pct-only");
+  if (mode === "count") wrap.classList.add("cm-mode-count-only");
+  else if (mode === "pct") wrap.classList.add("cm-mode-pct-only");
+}
+
+function setCmHeatMode(boxId, mode, btn) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  if (btn) {
+    btn.parentElement.querySelectorAll(".field-tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+  }
+  const cells = box.querySelectorAll("td[data-val]");
+  const maxVal = parseFloat(box.getAttribute("data-max-val") || "1");
+  cells.forEach(c => {
+    const val = parseFloat(c.getAttribute("data-val") || "0");
+    const pct = parseFloat(c.getAttribute("data-pct") || "0");
+    const colPct = parseFloat(c.getAttribute("data-col-pct") || "0");
+    if (val === 0) {
+      c.style.setProperty("--heat-alpha", "0");
+      return;
+    }
+    let ratio = 0;
+    if (mode === "count") {
+      ratio = maxVal > 0 ? (val / maxVal) : 0;
+    } else if (mode === "col_pct") {
+      ratio = colPct / 100;
+    } else {
+      // 默认 pct：真值行占比（Recall），按每行数值由浅到深
+      ratio = pct / 100;
+    }
+    const alpha = Math.min(0.85, Math.max(0.12, 0.12 + ratio * 0.73));
+    c.style.setProperty("--heat-alpha", alpha.toFixed(3));
+  });
+}
+
+function switchFieldCmTab(btn, targetIdx) {
+  const wrap = document.getElementById("field-cm-section");
+  if (!wrap) return;
+  wrap.querySelectorAll(".field-tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  const panes = wrap.querySelectorAll(".field-cm-pane");
+  if (targetIdx === "all") {
+    panes.forEach(p => { p.style.display = "block"; p.classList.add("active"); });
+  } else {
+    panes.forEach(p => { p.style.display = "none"; p.classList.remove("active"); });
+    const target = document.getElementById(`field-cm-pane-${targetIdx}`);
+    if (target) { target.style.display = "block"; target.classList.add("active"); }
+  }
+}
+
+function switchEvalCmTab(btn, targetIdx) {
+  const wrap = document.getElementById("eval-cm-section");
+  if (!wrap) return;
+  wrap.querySelectorAll(".field-tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  const panes = wrap.querySelectorAll(".field-cm-pane");
+  if (targetIdx === "all") {
+    panes.forEach(p => { p.style.display = "block"; p.classList.add("active"); });
+  } else {
+    panes.forEach(p => { p.style.display = "none"; p.classList.remove("active"); });
+    const target = document.getElementById(`eval-cm-pane-${targetIdx}`);
+    if (target) { target.style.display = "block"; target.classList.add("active"); }
+  }
+}
+
+function renderConfusionMatrixHtml(cm, title, boxId) {
+  if (!cm || !cm.classes || !cm.ref_classes || !cm.matrix) return "";
+  const classes = cm.classes;
+  const refClasses = cm.ref_classes;
+  const matrix = cm.matrix;
+  const totalSamples = cm.total_samples ?? 0;
+  const acc = cm.accuracy !== undefined ? cm.accuracy : 0.0;
+
+  let maxVal = 0;
+  const colTotals = new Array(classes.length).fill(0);
+  matrix.forEach(row => {
+    row.forEach((v, j) => {
+      if (v > maxVal) maxVal = v;
+      colTotals[j] += v;
+    });
+  });
+
+  const theadCols = classes.map(c => `<th>${escapeHtml(c)}</th>`).join("");
+  const tbodyRows = refClasses.map((rc, i) => {
+    const rowVals = matrix[i] || [];
+    const rowSum = rowVals.reduce((acc, x) => acc + x, 0);
+    const cellsHtml = rowVals.map((val, j) => {
+      const predName = classes[j];
+      const isDiag = (rc === predName);
+      const pct = rowSum > 0 ? (val / rowSum * 100) : 0;
+      const colPct = colTotals[j] > 0 ? (val / colTotals[j] * 100) : 0;
+      const cellCls = isDiag ? "cm-diag" : (val === 0 ? "cm-zero" : "cm-miss");
+      const tooltip = `真实: ${rc}\n预测: ${predName}\n频次: ${val}\n占该真值行 (Recall): ${pct.toFixed(1)}%\n占该预测列 (Precision): ${colPct.toFixed(1)}%`;
+      
+      let alpha = 0;
+      if (val > 0) {
+        const ratio = pct / 100;
+        alpha = Math.min(0.85, Math.max(0.12, 0.12 + ratio * 0.73));
+      }
+
+      return `
+        <td class="${cellCls}" title="${escapeHtml(tooltip)}" data-val="${val}" data-pct="${pct}" data-col-pct="${colPct}" data-is-diag="${isDiag ? '1' : '0'}" style="--heat-alpha: ${alpha.toFixed(3)};">
+          <div class="cm-cell-val">
+            <span class="cm-v-count">${val}</span>
+            <span class="cm-v-pct">${pct.toFixed(1)}%</span>
+          </div>
+        </td>
+      `;
+    }).join("");
+
+    return `
+      <tr>
+        <th class="row-label">${escapeHtml(rc)}</th>
+        ${cellsHtml}
+        <th class="cm-total">${rowSum}</th>
+      </tr>
+    `;
+  }).join("");
+
+  const tfootHtml = `
+    <tfoot>
+      <tr>
+        <th class="cm-total" style="text-align:left;">合计 (Pred)</th>
+        ${colTotals.map(cnt => `<td class="cm-total">${cnt}</td>`).join("")}
+        <td class="cm-total-all">${totalSamples}</td>
+      </tr>
+    </tfoot>
+  `;
+
+  // 分类报告表格
+  let reportHtml = "";
+  if (cm.per_class && Object.keys(cm.per_class).length > 0) {
+    const repRows = refClasses.map(rc => {
+      const pc = cm.per_class[rc] || {};
+      const p = pc.precision !== undefined ? (pc.precision * 100).toFixed(1) + "%" : "—";
+      const r = pc.recall !== undefined ? (pc.recall * 100).toFixed(1) + "%" : "—";
+      const f = pc.f1 !== undefined ? (pc.f1 * 100).toFixed(1) + "%" : "—";
+      const s = pc.support !== undefined ? pc.support : "—";
+      return `
+        <tr>
+          <td class="cat-name">${escapeHtml(rc)}</td>
+          <td>${p}</td>
+          <td>${r}</td>
+          <td><strong>${f}</strong></td>
+          <td>${s}</td>
+        </tr>
+      `;
+    }).join("");
+
+    const macroRow = cm.macro_avg ? `
+      <tfoot>
+        <tr>
+          <td class="cat-name">Macro-Average (宏平均)</td>
+          <td>${((cm.macro_avg.precision || 0) * 100).toFixed(1)}%</td>
+          <td>${((cm.macro_avg.recall || 0) * 100).toFixed(1)}%</td>
+          <td><strong>${((cm.macro_avg.f1 || 0) * 100).toFixed(1)}%</strong></td>
+          <td>${totalSamples}</td>
+        </tr>
+      </tfoot>
+    ` : "";
+
+    reportHtml = `
+      <div class="cm-report-wrapper" style="margin-top: 1.25rem;">
+        <div style="font-size: 0.84rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 0.45rem; display: flex; align-items: center; gap: 5px;">
+          <span>📑</span> 分类评估指标报告 (Precision / Recall / F1-Score)
+        </div>
+        <table class="cm-report-table">
+          <thead>
+            <tr>
+              <th class="cat-name">类别名称</th>
+              <th>Precision (精确率)</th>
+              <th>Recall (召回率)</th>
+              <th>F1-Score</th>
+              <th>Support (真值样本数)</th>
+            </tr>
+          </thead>
+          <tbody>${repRows}</tbody>
+          ${macroRow}
+        </table>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="cm-card-box" id="${boxId}" data-max-val="${maxVal}">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.85rem; flex-wrap:wrap; gap:0.5rem;">
+        <h4 style="margin:0; font-size:0.96rem; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+          <span>📊</span> ${escapeHtml(title)}
+        </h4>
+        <div style="font-size:0.82rem; color:var(--text-muted);">
+          样本总数: <strong style="color:var(--text-main);">${totalSamples}</strong> &nbsp;|&nbsp; 总体准确率: <strong style="color:var(--emerald-500);">${(acc * 100).toFixed(2)}%</strong>
+        </div>
+      </div>
+
+      <div class="cm-toolbar" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-bottom:0.85rem; background:rgba(0,0,0,0.12); padding:6px 12px; border-radius:8px; border:1px solid var(--border-subtle);">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:6px; font-size:0.8rem;">
+            <span style="color:var(--text-muted); font-weight:600;">显示:</span>
+            <div class="field-tab-bar" style="margin:0; padding:2px; background:var(--bg-surface);">
+              <button type="button" class="field-tab-btn active" style="padding:2px 8px; font-size:0.75rem;" onclick="setCmDisplayMode('${boxId}', 'both', this)">数值+占比</button>
+              <button type="button" class="field-tab-btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setCmDisplayMode('${boxId}', 'count', this)">仅数值</button>
+              <button type="button" class="field-tab-btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setCmDisplayMode('${boxId}', 'pct', this)">仅占比</button>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; font-size:0.8rem;">
+            <span style="color:var(--text-muted); font-weight:600;">热力:</span>
+            <div class="field-tab-bar" style="margin:0; padding:2px; background:var(--bg-surface);">
+              <button type="button" class="field-tab-btn active" style="padding:2px 8px; font-size:0.75rem;" onclick="setCmHeatMode('${boxId}', 'pct', this)">召回率 %</button>
+              <button type="button" class="field-tab-btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setCmHeatMode('${boxId}', 'count', this)">绝对样本数</button>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-dim); display:flex; align-items:center; gap:8px;">
+          <span style="display:inline-flex; align-items:center; gap:3px;"><span style="color:#34d399;">■</span> 对角对齐(正确命中)</span>
+          <span style="display:inline-flex; align-items:center; gap:3px;"><span style="color:#fb7185;">■</span> 偏离对角(分类混淆)</span>
+        </div>
+      </div>
+
+      <div class="cm-table-wrapper" id="${boxId}-table-wrap">
+        <table class="cm-table">
+          <thead>
+            <tr>
+              <th style="min-width:100px; text-align:left;">真实 \\ 预测</th>
+              ${theadCols}
+              <th class="cm-total">合计 (Support)</th>
+            </tr>
+          </thead>
+          <tbody>${tbodyRows}</tbody>
+          ${tfootHtml}
+        </table>
+      </div>
+
+      ${reportHtml}
+    </div>
+  `;
+}
+
+function renderRunPagination(pagerId, total, offset, limit, onPageFnName) {
+  const pager = document.getElementById(pagerId);
+  if (!pager) return;
+  if (!total || total <= 0) {
+    pager.innerHTML = "";
+    return;
+  }
+  const currentStart = offset + 1;
+  const currentEnd = Math.min(offset + limit, total);
+  const hasPrev = offset > 0;
+  const hasNext = offset + limit < total;
+  const totalPages = Math.ceil(total / limit) || 1;
+  const curPage = Math.floor(offset / limit) + 1;
+
+  pager.innerHTML = `
+    <div class="cmp-pagination-info">
+      显示第 <strong style="color:var(--text-main);">${currentStart} - ${currentEnd}</strong> 条，共 <strong style="color:var(--cyan-500);">${total}</strong> 条记录 (第 ${curPage}/${totalPages} 页)
+    </div>
+    <div class="cmp-pagination-btns">
+      <button class="btn btn-sm btn-secondary" ${!hasPrev ? "disabled" : ""} onclick="${onPageFnName}(${Math.max(0, offset - limit)})">
+        ← 上一页
+      </button>
+      <button class="btn btn-sm btn-secondary" ${!hasNext ? "disabled" : ""} onclick="${onPageFnName}(${offset + limit})">
+        下一页 →
+      </button>
+    </div>
+  `;
+}
+
 function renderFieldMetrics() {
   const m = state.fieldMetrics;
   if (!m) return;
@@ -4360,48 +4685,106 @@ function renderFieldMetrics() {
 
   // 渲染逐字段细分看板 (Per-Field Grid)
   const grid = document.getElementById("field-metrics-grid");
-  if (!grid) return;
-
   const perField = m.per_field || (m.fields && !Array.isArray(m.fields) ? m.fields : {});
   const fieldList = Array.isArray(m.fields) ? m.fields : Object.keys(perField);
 
-  grid.innerHTML = fieldList
-    .map((f) => {
-      const data = perField[f] || { accuracy: 0, correct: 0, total: 0 };
-      const correct = data.correct ?? data.match ?? 0;
-      const total = data.total ?? 0;
-      const acc = data.accuracy !== undefined ? data.accuracy : (total ? correct / total : 0);
-      const accPct = (acc * 100).toFixed(1);
-      const emptyCount = data.empty_count ?? 0;
-      const nonEmptyCount = data.non_empty_count ?? total;
-      const overallAcc = data.overall_accuracy !== undefined ? (data.overall_accuracy * 100).toFixed(1) : accPct;
-      let barColor = "var(--emerald-500)";
-      if (acc < 0.7) barColor = "var(--rose-500)";
-      else if (acc < 0.9) barColor = "var(--amber-500)";
+  if (grid) {
+    grid.innerHTML = fieldList
+      .map((f) => {
+        const data = perField[f] || { accuracy: 0, correct: 0, total: 0 };
+        const correct = data.correct ?? data.match ?? 0;
+        const total = data.total ?? 0;
+        const acc = data.accuracy !== undefined ? data.accuracy : (total ? correct / total : 0);
+        const accPct = (acc * 100).toFixed(1);
+        const emptyCount = data.empty_count ?? 0;
+        const nonEmptyCount = data.non_empty_count ?? total;
+        const overallAcc = data.overall_accuracy !== undefined ? (data.overall_accuracy * 100).toFixed(1) : accPct;
+        let barColor = "var(--emerald-500)";
+        if (acc < 0.7) barColor = "var(--rose-500)";
+        else if (acc < 0.9) barColor = "var(--amber-500)";
 
-      return `
-      <div class="field-metric-card">
-        <div class="field-metric-header">
-          <span class="field-name-title">${escapeHtml(f)}</span>
-          <span class="field-acc-pct" style="color: ${barColor};" title="非空准确率">${accPct}%</span>
-        </div>
-        <div class="field-progress-track">
-          <div class="field-progress-bar" style="width: ${accPct}%; background: ${barColor};"></div>
-        </div>
-        <div class="field-metric-footer" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
-          <div style="display: flex; justify-content: space-between;">
-            <span>非空: <strong>${correct}</strong> / ${nonEmptyCount}</span>
-            <span>空样本: <strong>${emptyCount}</strong></span>
+        return `
+        <div class="field-metric-card">
+          <div class="field-metric-header">
+            <span class="field-name-title">${escapeHtml(f)}</span>
+            <span class="field-acc-pct" style="color: ${barColor};" title="非空准确率">${accPct}%</span>
           </div>
-          <div style="display: flex; justify-content: space-between; color: var(--text-dim, #64748b);">
-            <span>总体准确率: <strong>${overallAcc}%</strong></span>
-            <span>非空失配: <strong>${nonEmptyCount - correct}</strong></span>
+          <div class="field-progress-track">
+            <div class="field-progress-bar" style="width: ${accPct}%; background: ${barColor};"></div>
+          </div>
+          <div class="field-metric-footer" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span>非空: <strong>${correct}</strong> / ${nonEmptyCount}</span>
+              <span>空样本: <strong>${emptyCount}</strong></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: var(--text-dim, #64748b);">
+              <span>总体准确率: <strong>${overallAcc}%</strong></span>
+              <span>非空失配: <strong>${nonEmptyCount - correct}</strong></span>
+            </div>
           </div>
         </div>
-      </div>
-    `;
-    })
-    .join("");
+      `;
+      })
+      .join("");
+  }
+
+  // 渲染逐字段混淆矩阵看板 (Confusion Matrices)
+  const cmSection = document.getElementById("field-cm-section");
+  const cmTabBar = document.getElementById("field-cm-tab-bar");
+  const cmPanes = document.getElementById("field-cm-panes");
+  const cmDict = m.confusion_matrices || {};
+  const cmKeys = Object.keys(cmDict);
+
+  if (cmSection && cmTabBar && cmPanes) {
+    if (cmKeys.length > 0) {
+      cmSection.style.display = "block";
+      const tabs = [];
+      const panes = [];
+      cmKeys.forEach((f, idx) => {
+        const cm = cmDict[f];
+        const pfAcc = perField[f]?.accuracy ?? cm.accuracy ?? 0.0;
+        const activeCls = idx === 0 ? " active" : "";
+        const displayStyle = idx === 0 ? "display: block;" : "display: none;";
+        tabs.push(`
+          <button type="button" class="field-tab-btn${activeCls}" onclick="switchFieldCmTab(this, '${idx}')">
+            ${escapeHtml(f)} (${(pfAcc * 100).toFixed(1)}%)
+          </button>
+        `);
+        const cmHtml = renderConfusionMatrixHtml(cm, `字段混淆矩阵: ${f}`, `fe-cm-box-${idx}`);
+        panes.push(`
+          <div class="field-cm-pane${activeCls}" id="field-cm-pane-${idx}" style="${displayStyle}">
+            ${cmHtml}
+          </div>
+        `);
+      });
+
+      if (cmKeys.length > 1) {
+        tabs.push(`
+          <button type="button" class="field-tab-btn" onclick="switchFieldCmTab(this, 'all')">
+            📑 查看全部字段矩阵
+          </button>
+        `);
+      }
+      cmTabBar.innerHTML = tabs.join("");
+      cmPanes.innerHTML = panes.join("");
+    } else {
+      cmSection.style.display = "none";
+      cmTabBar.innerHTML = "";
+      cmPanes.innerHTML = "";
+    }
+  }
+
+  // 动态更新按失配字段下拉筛选器选项
+  const fieldFilterSelect = document.getElementById("field-mismatches-field-filter");
+  if (fieldFilterSelect) {
+    const curVal = fieldFilterSelect.value;
+    const options = [`<option value="">🌟 全部字段 (不限)</option>`];
+    fieldList.forEach((f) => {
+      options.push(`<option value="${escapeHtml(f)}" ${f === curVal ? "selected" : ""}>${escapeHtml(f)}</option>`);
+    });
+    fieldFilterSelect.innerHTML = options.join("");
+    if (curVal) fieldFilterSelect.value = curVal;
+  }
 }
 
 async function loadFieldMismatches(offset = 0) {
@@ -4409,17 +4792,29 @@ async function loadFieldMismatches(offset = 0) {
   state.fieldMismatchesOffset = offset;
   const { model, backend } = state.selectedRun;
 
+  const filterState = document.getElementById("field-mismatches-filter")?.value || "";
+  const filterField = document.getElementById("field-mismatches-field-filter")?.value || "";
+  const query = document.getElementById("field-mismatches-search")?.value?.trim() || "";
+
+  state.fieldMismatchesFilter = filterState;
+  state.fieldMismatchesFieldFilter = filterField;
+
   const q = new URLSearchParams({
     offset: state.fieldMismatchesOffset,
     limit: state.fieldMismatchesLimit,
   });
-  if (state.fieldMismatchesFilter) {
-    q.append("filter_state", state.fieldMismatchesFilter);
-  }
+  if (filterState) q.append("filter_state", filterState);
+  if (filterField) q.append("filter_field", filterField);
+  if (query) q.append("query", query);
 
-  const tbody = document.getElementById("field-mismatches-tbody");
-  if (tbody) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:2.5rem; color:var(--text-dim);">加载逐字段失配记录中...</td></tr>`;
+  const container = document.getElementById("field-mismatches-cards");
+  if (container) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:3rem; color:var(--text-dim);">
+        <span class="is-loading" style="display:inline-block; width:20px; height:20px; vertical-align:middle; margin-right:8px;"></span>
+        正在加载失配样本与比对细节...
+      </div>
+    `;
   }
 
   try {
@@ -4428,63 +4823,162 @@ async function loadFieldMismatches(offset = 0) {
     );
     if (res.ok) {
       const data = await res.json();
-      state.fieldMismatches = data.records;
-      state.fieldMismatchesTotal = data.total;
+      state.fieldMismatches = data.records || [];
+      state.fieldMismatchesTotal = data.total || 0;
+      const countEl = document.getElementById("field-mismatches-count");
+      if (countEl) countEl.textContent = state.fieldMismatchesTotal;
       renderFieldMismatches();
     }
-  } catch (_) {}
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `
+        <div class="cmp-empty-card">
+          <div class="cmp-empty-icon">⚠️</div>
+          <div class="cmp-empty-title">加载失配样本失败</div>
+          <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
+        </div>
+      `;
+    }
+  }
 }
 
 function renderFieldMismatches() {
-  const tbody = document.getElementById("field-mismatches-tbody");
-  if (!tbody) return;
+  const container = document.getElementById("field-mismatches-cards");
+  if (!container) return;
 
-  if (!state.fieldMismatches.length) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:3rem; color:var(--emerald-500);">🎉 该条件下无任何失配记录（全部准确命中）</td></tr>`;
+  if (!state.fieldMismatches || !state.fieldMismatches.length) {
+    container.innerHTML = `
+      <div class="cmp-empty-card" style="padding: 3rem 1.5rem;">
+        <div class="cmp-empty-icon" style="font-size: 2.2rem;">🎉</div>
+        <div class="cmp-empty-title" style="color: var(--emerald-500);">当前条件下无失配样本</div>
+        <div class="cmp-empty-desc">该筛选范围内所有字段均与标准答案吻合，或无符合条件的样本。</div>
+      </div>
+    `;
+    renderRunPagination("field-mismatches-pagination", 0, 0, state.fieldMismatchesLimit, "loadFieldMismatches");
     return;
   }
 
-  tbody.innerHTML = state.fieldMismatches
+  container.innerHTML = state.fieldMismatches
     .map((row) => {
-      let stateBadge = `<span class="role-badge" style="background:var(--rose-bg); color:var(--rose-500); border-color:var(--rose-border);">失配</span>`;
-      if (row.state === "pred_missing") {
-        stateBadge = `<span class="role-badge" style="background:rgba(245,158,11,0.15); color:var(--amber-500); border-color:var(--amber-border);">未产出描述</span>`;
+      const isMissing = row.state === "pred_missing";
+      const cardClass = isMissing ? "run-sample-card is-pred-missing" : "run-sample-card is-miss";
+      const rowFields = (row.fields && row.fields.length)
+        ? row.fields
+        : (row.field ? [{ field: row.field, ref: row.expected, pred: row.actual, correct: false, is_empty_ref: false }] : []);
+      const badFields = rowFields.filter((f) => !f.is_empty_ref && !f.correct);
+      const hitFields = rowFields.filter((f) => f.correct);
+
+      // 缩略图 strip
+      let imagesHtml = "";
+      if (row.image_urls && row.image_urls.length > 0) {
+        imagesHtml = `
+          <div class="run-thumb-strip">
+            ${row.image_urls
+              .map((u, i) => {
+                const ref = (row.images && row.images[i]) || `图片 ${i + 1}`;
+                return `
+                  <div class="run-thumb-wrap" onclick="openLightbox('${escapeHtml(u)}', '样本 ${escapeHtml(row.id)} - ${escapeHtml(ref)}')" title="点击放大查看原图">
+                    <img src="${escapeHtml(u)}&thumb=1" class="run-thumb-img" loading="lazy" alt="${escapeHtml(ref)}">
+                    <span class="run-thumb-zoom">🔍 点击放大</span>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
       }
 
-      // 比对字段详情
-      const fieldsHtml = (row.fields || [])
-        .map((f) => {
-          const isMatch = f.correct;
-          const refStr = (f.ref && f.ref.length) ? f.ref.join("、") : "(无)";
-          const predStr = (f.pred && f.pred.length) ? f.pred.join("、") : (row.state === "pred_missing" ? "(未输出)" : "(无)");
+      // 模型描述框
+      let predDescHtml = "";
+      if (row.pred_desc) {
+        predDescHtml = `
+          <div class="run-pred-box">
+            <div class="run-pred-header">
+              <span>🤖 模型输出描述文本 (Raw Prediction):</span>
+              <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.72rem;" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(row.pred_desc)}">复制描述</button>
+            </div>
+            <pre class="run-pred-text">${escapeHtml(row.pred_desc)}</pre>
+          </div>
+        `;
+      }
+
+      // 逐字段比对详情表格
+      const trsHtml = rowFields
+        .map((fr) => {
+          const isMatch = fr.correct;
+          const isEmptyRef = fr.is_empty_ref;
+          const refStr = Array.isArray(fr.ref) ? (fr.ref.length ? fr.ref.join("、") : "(无)") : (fr.ref || "(无)");
+          const predStr = Array.isArray(fr.pred)
+            ? (fr.pred.length ? fr.pred.join("、") : (isMissing ? "(未输出)" : "(无)"))
+            : (fr.pred || (isMissing ? "(未输出)" : "(无)"));
+
+          let statusBadge = "";
+          let rowBg = "";
+          if (isEmptyRef) {
+            if (isMatch) {
+              statusBadge = `<span class="field-tag-ok">✓ 皆空</span>`;
+            } else {
+              statusBadge = `<span class="field-tag-empty">— (真值空)</span>`;
+            }
+          } else if (isMatch) {
+            statusBadge = `<span class="field-tag-ok">✓ 命中</span>`;
+          } else {
+            statusBadge = `<span class="field-tag-bad">✗ 失配</span>`;
+            rowBg = "background: rgba(244, 63, 94, 0.06);";
+          }
+
           return `
-          <div class="diff-tag-row ${isMatch ? "match" : "mismatch"}">
-            <span class="diff-field-name">${escapeHtml(f.field)}:</span>
-            <span class="diff-ref">标准[${escapeHtml(refStr)}]</span>
-            <span style="color:var(--text-dim); margin: 0 2px;">vs</span>
-            <span class="diff-pred" style="color: ${isMatch ? "var(--emerald-500)" : "#fb7185"};">
-              模型[${escapeHtml(predStr)}] ${isMatch ? "✓" : "✗"}
-            </span>
-          </div>`;
+            <tr style="${rowBg}">
+              <td style="font-weight: 600; font-family: var(--font-mono); color: var(--text-main);">${escapeHtml(fr.field)}</td>
+              <td style="color: var(--text-secondary); word-break: break-word;">${escapeHtml(refStr)}</td>
+              <td style="color: ${isMatch ? 'var(--text-main)' : 'var(--rose-500)'}; font-weight: ${isMatch ? 'normal' : '600'}; word-break: break-word;">${escapeHtml(predStr)}</td>
+              <td style="text-align: center;">${statusBadge}</td>
+            </tr>
+          `;
         })
         .join("");
 
       return `
-      <tr>
-        <td style="font-family: var(--font-mono); font-weight: 600; font-size: 0.8rem;">${escapeHtml(row.id)}</td>
-        <td>${stateBadge}</td>
-        <td style="font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary); word-break: break-word; max-width: 350px;">
-          ${escapeHtml(row.pred_desc || "—")}
-        </td>
-        <td>
-          <div class="diff-tag-group">
-            ${fieldsHtml}
+        <div class="${cardClass}">
+          <div class="run-card-header">
+            <div class="run-card-id-group">
+              <span class="run-card-id" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(row.id)}" title="点击复制样本 ID">
+                📋 ${escapeHtml(row.id)}
+              </span>
+              ${isMissing
+                ? `<span class="badge" style="background:rgba(245,158,11,0.15); color:var(--amber-500); border:1px solid var(--amber-border);">⚠️ 模型未产出描述</span>`
+                : `<span class="badge" style="background:var(--rose-bg); color:var(--rose-500); border:1px solid var(--rose-border);">失配 (${badFields.length} 字段)</span>`}
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-dim);">
+              字段总数: <strong>${rowFields.length}</strong> &nbsp;|&nbsp;
+              命中: <strong style="color: var(--emerald-500);">${hitFields.length}</strong> &nbsp;|&nbsp;
+              失配: <strong style="color: var(--rose-500);">${badFields.length}</strong>
+            </div>
           </div>
-        </td>
-      </tr>
-    `;
+
+          <div class="run-card-body">
+            ${imagesHtml}
+            ${predDescHtml}
+            <div style="overflow-x: auto; border-radius: 6px; border: 1px solid var(--border-subtle);">
+              <table class="run-field-table">
+                <thead>
+                  <tr>
+                    <th style="width: 140px;">字段名称</th>
+                    <th>标注真值 (Reference)</th>
+                    <th>模型抽取 (Prediction)</th>
+                    <th style="width: 120px; text-align: center;">判定状态</th>
+                  </tr>
+                </thead>
+                <tbody>${trsHtml}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
     })
     .join("");
+
+  renderRunPagination("field-mismatches-pagination", state.fieldMismatchesTotal, state.fieldMismatchesOffset, state.fieldMismatchesLimit, "loadFieldMismatches");
 }
 
 // --------------------------------------------------------------------------
@@ -4516,17 +5010,100 @@ function renderMetrics() {
   if (countEl) countEl.textContent = m.num_samples || 0;
   if (failedEl) failedEl.textContent = m.num_failed_targets || 0;
   if (scorerEl) scorerEl.textContent = m.scorer || "—";
+
+  // 渲染 eval 目标轮次混淆矩阵看板 (若评测指标包含混淆矩阵)
+  const evalCmSec = document.getElementById("eval-cm-section");
+  const evalCmTabBar = document.getElementById("eval-cm-tab-bar");
+  const evalCmPanes = document.getElementById("eval-cm-panes");
+
+  if (evalCmSec && evalCmTabBar && evalCmPanes) {
+    const perTurn = m.per_turn || {};
+    const turnKeysWithCm = Object.keys(perTurn).filter((tk) => perTurn[tk] && perTurn[tk].confusion_matrix);
+
+    if (turnKeysWithCm.length > 0) {
+      evalCmSec.style.display = "block";
+      const tabs = [];
+      const panes = [];
+      turnKeysWithCm.forEach((tk, idx) => {
+        const td = perTurn[tk];
+        const cm = td.confusion_matrix;
+        const activeCls = idx === 0 ? " active" : "";
+        const displayStyle = idx === 0 ? "display: block;" : "display: none;";
+        tabs.push(`
+          <button type="button" class="field-tab-btn${activeCls}" onclick="switchEvalCmTab(this, '${idx}')">
+            ${escapeHtml(tk)} (scorer: ${escapeHtml(td.scorer || "exact_match")})
+          </button>
+        `);
+        const cmHtml = renderConfusionMatrixHtml(cm, `混淆矩阵 — ${tk} (scorer: ${td.scorer || "exact_match"})`, `eval-cm-box-${idx}`);
+        panes.push(`
+          <div class="field-cm-pane${activeCls}" id="eval-cm-pane-${idx}" style="${displayStyle}">
+            ${cmHtml}
+          </div>
+        `);
+      });
+
+      if (turnKeysWithCm.length > 1) {
+        tabs.push(`
+          <button type="button" class="field-tab-btn" onclick="switchEvalCmTab(this, 'all')">
+            📑 查看全部轮次矩阵
+          </button>
+        `);
+      }
+      evalCmTabBar.innerHTML = tabs.join("");
+      evalCmPanes.innerHTML = panes.join("");
+    } else {
+      evalCmSec.style.display = "none";
+      evalCmTabBar.innerHTML = "";
+      evalCmPanes.innerHTML = "";
+    }
+  }
+
+  // 动态填充轮次筛选下拉框
+  const turnFilterSelect = document.getElementById("scored-turn-filter");
+  if (turnFilterSelect) {
+    const curVal = turnFilterSelect.value;
+    const options = [`<option value="">全部目标轮次</option>`];
+    const perTurn = m.per_turn || {};
+    Object.keys(perTurn).forEach((tk) => {
+      const turnNum = tk.replace("turn_", "");
+      const label = `${tk} (scorer: ${perTurn[tk]?.scorer || "exact_match"})`;
+      options.push(`<option value="${turnNum}" ${turnNum === curVal ? "selected" : ""}>${escapeHtml(label)}</option>`);
+    });
+    turnFilterSelect.innerHTML = options.join("");
+    if (curVal) turnFilterSelect.value = curVal;
+  }
 }
 
 async function loadScored(offset = 0) {
   if (!state.selectedRun) return;
   state.scoredOffset = offset;
   const { model, backend } = state.selectedRun;
+
+  const onlyMiss = document.getElementById("scored-only-miss")?.checked ?? true;
+  const turnVal = document.getElementById("scored-turn-filter")?.value ?? "";
+  const orderVal = document.getElementById("scored-order-select")?.value || state.scoredOrder || "lowest";
+  const query = document.getElementById("scored-search")?.value?.trim() || "";
+
+  state.scoredOrder = orderVal;
+
   const q = new URLSearchParams({
     offset: state.scoredOffset,
     limit: state.scoredLimit,
-    order: state.scoredOrder,
+    order: orderVal,
+    only_miss: onlyMiss ? "true" : "false",
   });
+  if (turnVal !== "") q.append("turn", turnVal);
+  if (query) q.append("query", query);
+
+  const container = document.getElementById("scored-cards");
+  if (container) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:3rem; color:var(--text-dim);">
+        <span class="is-loading" style="display:inline-block; width:20px; height:20px; vertical-align:middle; margin-right:8px;"></span>
+        正在加载打分样本与对话明细...
+      </div>
+    `;
+  }
 
   try {
     const res = await fetch(
@@ -4534,37 +5111,143 @@ async function loadScored(offset = 0) {
     );
     if (res.ok) {
       const data = await res.json();
-      state.scoredRecords = data.records;
-      state.scoredTotal = data.total;
+      state.scoredRecords = data.records || [];
+      state.scoredTotal = data.total || 0;
+      const countEl = document.getElementById("scored-count");
+      if (countEl) countEl.textContent = state.scoredTotal;
       renderScored();
     }
-  } catch (_) {}
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `
+        <div class="cmp-empty-card">
+          <div class="cmp-empty-icon">⚠️</div>
+          <div class="cmp-empty-title">加载打分样本失败</div>
+          <div class="cmp-empty-desc">${escapeHtml(err.message)}</div>
+        </div>
+      `;
+    }
+  }
 }
 
 function renderScored() {
-  const tbody = document.getElementById("scored-tbody");
-  if (!tbody) return;
+  const container = document.getElementById("scored-cards");
+  if (!container) return;
 
-  if (!state.scoredRecords.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:3rem; color:var(--text-dim);">无评测得分记录</td></tr>`;
+  if (!state.scoredRecords || !state.scoredRecords.length) {
+    container.innerHTML = `
+      <div class="cmp-empty-card" style="padding: 3rem 1.5rem;">
+        <div class="cmp-empty-icon" style="font-size: 2.2rem;">🎉</div>
+        <div class="cmp-empty-title" style="color: var(--emerald-500);">当前条件下无得分样本</div>
+        <div class="cmp-empty-desc">该筛选范围内无未命中坏例或无符合条件的评测记录。</div>
+      </div>
+    `;
+    renderRunPagination("scored-pagination", 0, 0, state.scoredLimit, "loadScored");
     return;
   }
 
-  tbody.innerHTML = state.scoredRecords
+  container.innerHTML = state.scoredRecords
     .map((r) => {
-      const isGood = r.score >= 1.0;
-      const scoreColor = isGood ? "var(--emerald-500)" : "var(--rose-500)";
+      const isMiss = r.is_miss ?? (r.score === null || r.score < 1.0 || Boolean(r.error));
+      const cardClass = isMiss ? "run-sample-card is-miss" : "run-sample-card is-hit";
+      const scoreStr = r.score !== null && r.score !== undefined ? String(r.score) : "0";
+
+      // 缩略图 strip
+      let imagesHtml = "";
+      if (r.image_urls && r.image_urls.length > 0) {
+        imagesHtml = `
+          <div class="run-thumb-strip">
+            ${r.image_urls
+              .map((u, i) => {
+                const ref = (r.images && r.images[i]) || `图片 ${i + 1}`;
+                return `
+                  <div class="run-thumb-wrap" onclick="openLightbox('${escapeHtml(u)}', '样本 ${escapeHtml(r.id)} - ${escapeHtml(ref)}')" title="点击放大查看原图">
+                    <img src="${escapeHtml(u)}&thumb=1" class="run-thumb-img" loading="lazy" alt="${escapeHtml(ref)}">
+                    <span class="run-thumb-zoom">🔍 点击放大</span>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      // 前置对话流气泡
+      let dialogueHtml = "";
+      if (r.turns && r.turns.length > 0) {
+        dialogueHtml = `
+          <div class="run-dialogue-box">
+            <div class="run-dialogue-title">💬 评测目标轮前置对话流:</div>
+            ${r.turns
+              .map((t) => {
+                const isUser = t.role === "user";
+                return `
+                  <div class="run-chat-bubble ${isUser ? 'run-chat-user' : 'run-chat-assistant'}">
+                    <div style="font-size: 0.74rem; font-weight: 700; margin-bottom: 2px; color: ${isUser ? 'var(--cyan-500)' : 'var(--primary-500)'};">
+                      ${isUser ? '🧑 用户 (User)' : '🤖 助手 (Assistant)'}:
+                    </div>
+                    <div style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(t.content)}</div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      // 真值 vs 预测横向对比网格
+      const compGridHtml = `
+        <div class="run-comp-grid">
+          <div class="run-comp-col run-comp-ref">
+            <div style="font-size: 0.78rem; font-weight: 700; color: var(--primary-500); margin-bottom: 0.45rem; display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 4px;"><span>🎯</span> 参考标准答案 (Reference):</span>
+              <button class="btn btn-sm btn-secondary" style="padding: 2px 7px; font-size: 0.7rem;" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(r.reference || '')}">复制</button>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: 0.83rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text-main);">
+              ${escapeHtml(r.reference || "(空)")}
+            </div>
+          </div>
+          <div class="run-comp-col run-comp-pred" style="background: ${isMiss ? 'rgba(244,63,94,0.06)' : 'rgba(16,185,129,0.06)'}; border-color: ${isMiss ? 'rgba(244,63,94,0.3)' : 'rgba(16,185,129,0.3)'};">
+            <div style="font-size: 0.78rem; font-weight: 700; color: ${isMiss ? 'var(--rose-500)' : 'var(--emerald-500)'}; margin-bottom: 0.45rem; display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 4px;"><span>${isMiss ? '❌' : '✅'}</span> 模型预测结果 (Prediction):</span>
+              <button class="btn btn-sm btn-secondary" style="padding: 2px 7px; font-size: 0.7rem;" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(r.prediction || '')}">复制</button>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: 0.83rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: ${isMiss ? 'var(--rose-500)' : 'var(--emerald-500)'};">
+              ${escapeHtml(r.prediction || (isMiss ? "(未产出预测或缺失)" : "(空)"))}
+            </div>
+          </div>
+        </div>
+      `;
+
       return `
-      <tr>
-        <td style="font-family: var(--font-mono); font-size: 0.78rem;">${escapeHtml(r.id)}</td>
-        <td>${r.turn}</td>
-        <td><strong style="color: ${scoreColor};">${r.score}</strong></td>
-        <td style="max-width: 320px; font-size: 0.8rem; word-break: break-all;">${escapeHtml(r.prediction)}</td>
-        <td style="max-width: 320px; font-size: 0.8rem; word-break: break-all; color: var(--text-muted);">${escapeHtml(r.reference)}</td>
-      </tr>
-    `;
+        <div class="${cardClass}">
+          <div class="run-card-header">
+            <div class="run-card-id-group">
+              <span class="run-card-id" onclick="copyComparisonText(this.dataset.copy)" data-copy="${escapeHtml(r.id)}" title="点击复制样本 ID">
+                📋 ${escapeHtml(r.id)}
+              </span>
+              <span class="badge badge-secondary">第 ${r.turn ?? 0} 轮</span>
+              ${isMiss
+                ? `<span class="badge badge-error">得分: ${scoreStr} (未命中)</span>`
+                : `<span class="badge badge-success">得分: ${scoreStr} (满分命中)</span>`}
+              ${r.error ? `<span class="badge badge-error">⚠️ 异常: ${escapeHtml(r.error)}</span>` : ""}
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-dim);">
+              打分器: <strong>${escapeHtml(state.runMetrics?.scorer || "exact_match")}</strong>
+            </div>
+          </div>
+
+          <div class="run-card-body">
+            ${imagesHtml}
+            ${dialogueHtml}
+            ${compGridHtml}
+          </div>
+        </div>
+      `;
     })
     .join("");
+
+  renderRunPagination("scored-pagination", state.scoredTotal, state.scoredOffset, state.scoredLimit, "loadScored");
 }
 
 // --------------------------------------------------------------------------
@@ -4901,6 +5584,10 @@ window.onRunSelected = onRunSelected;
 window.switchRunMethod = switchRunMethod;
 window.loadScored = loadScored;
 window.loadFieldMismatches = loadFieldMismatches;
+window.switchFieldCmTab = switchFieldCmTab;
+window.switchEvalCmTab = switchEvalCmTab;
+window.setCmDisplayMode = setCmDisplayMode;
+window.setCmHeatMode = setCmHeatMode;
 window.showToast = showToast;
 window.initInlineJobConsole = initInlineJobConsole;
 window.switchInlineJobType = switchInlineJobType;

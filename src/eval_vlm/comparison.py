@@ -116,6 +116,33 @@ def _field_rows(
                     }
         except Exception as exc:
             warnings.append(f"{pred_path.name} 补充字段失败: {exc}")
+    elif (run_dir / "field_metrics.json").exists() and ref_path and ref_path.exists():
+        try:
+            from .field_eval import load_fields
+            ref_data = load_fields(ref_path)
+            for sid, ref_fields in ref_data.items():
+                turn = target_turn_by_id.get(sid, -1)
+                key = (sid, turn)
+                if key not in rows_dict:
+                    all_fields = sorted(ref_fields.keys())
+                    field_rows = [
+                        {
+                            "field": f,
+                            "ref": ref_fields.get(f, []),
+                            "pred": ref_fields.get(f, []),
+                            "correct": True,
+                            "is_empty_ref": len(ref_fields.get(f, [])) == 0,
+                        }
+                        for f in all_fields
+                    ]
+                    rows_dict[key] = {
+                        "id": sid,
+                        "turn": turn,
+                        "state": "all_correct",
+                        "fields": field_rows,
+                    }
+        except Exception as exc:
+            warnings.append(f"通过 ref 补充全对字段失败: {exc}")
 
     return rows_dict
 
@@ -134,27 +161,54 @@ def _details(sample, target) -> dict[str, Any]:
 def _record_for_run(run: dict[str, Any], key: tuple[str, int]) -> dict[str, Any]:
     pred = run["predictions"].get(key)
     scored = run["scored"].get(key)
+    field_item = run["fields"].get(key)
     # score owns scorer/reference/detail; prediction owns latency/error/output.
     output = (pred or {}).get("prediction")
+    if output is None and field_item and isinstance(field_item, dict):
+        output = field_item.get("pred_desc")
     error = (pred or {}).get("error")
     score = (scored or {}).get("score")
     scorer = (scored or {}).get("scorer")
     if error:
         status = "error"
+    elif pred is None and field_item is None:
+        status = "missing"
+    elif scored is not None:
+        if _is_binary(scorer):
+            status = "correct" if _is_correct(score) else "wrong"
+        else:
+            status = "scored"
+    elif field_item is not None:
+        state = field_item.get("state")
+        if state == "pred_missing":
+            status = "missing"
+        elif state == "all_correct":
+            status = "correct"
+        else:
+            flist = field_item.get("fields") or field_item.get("mismatches") or []
+            if flist:
+                if all(f.get("correct") is True for f in flist):
+                    status = "correct"
+                elif any(f.get("correct") is False for f in flist):
+                    status = "wrong"
+                else:
+                    status = "unscored"
+            elif state == "mismatch":
+                status = "wrong"
+            else:
+                status = "unscored"
+    elif (run["dir"] / "field_metrics.json").exists() or (run["dir"] / "field_mismatches.json").exists():
+        status = "correct"
     elif pred is None:
         status = "missing"
-    elif scored is None:
-        status = "unscored"
-    elif _is_binary(scorer):
-        status = "correct" if _is_correct(score) else "wrong"
     else:
-        status = "scored"
+        status = "unscored"
     return {
         "run": run["id"], "model": run["model"], "backend": run["backend"],
         "prediction": output, "normalized_prediction": normalize_text(output),
         "latency": (pred or {}).get("latency"), "error": error,
         "score": score, "scorer": scorer, "detail": (scored or {}).get("detail"),
-        "status": status, "field": run["fields"].get(key),
+        "status": status, "field": field_item,
     }
 
 
@@ -181,15 +235,111 @@ def _categorize(outputs: list[dict[str, Any]], baseline_index: int) -> list[str]
     return categories
 
 
+def _get_field_info(output: dict[str, Any], target_field: str, run_dir: Optional[Path] = None) -> dict[str, Any]:
+    """提取单个模型 output 在指定 target_field 上的抽取值与正确性判定。"""
+    fobj = output.get("field")
+    status = output.get("status")
+
+    if fobj and isinstance(fobj, dict):
+        flist = fobj.get("fields") or fobj.get("mismatches") or []
+        item = next((x for x in flist if str(x.get("field", "")).strip() == target_field), None)
+        if item is not None:
+            pred = item.get("pred", [])
+            ref = item.get("ref", [])
+            correct = item.get("correct")
+            if correct is None and ref is not None and pred is not None:
+                r = sorted(ref or [])
+                p = sorted(pred or [])
+                correct = (r == p)
+            if status in {"missing", "error"} or fobj.get("state") == "pred_missing":
+                f_status = status if status in {"missing", "error"} else "missing"
+            elif correct is True:
+                f_status = "correct"
+            elif correct is False:
+                f_status = "wrong"
+            else:
+                f_status = "unscored"
+            return {"found": True, "status": f_status, "correct": correct, "pred": pred, "ref": ref}
+
+        # 兼容扁平结构: {"id": ..., "field": "车道位置", "expected": ..., "actual": ...}
+        if str(fobj.get("field", "")).strip() == target_field:
+            ref = fobj.get("expected") or fobj.get("ref") or []
+            pred = fobj.get("actual") or fobj.get("pred") or []
+            correct = (ref == pred)
+            f_status = "correct" if correct else "wrong"
+            return {"found": True, "status": f_status, "correct": correct, "pred": pred, "ref": ref}
+
+        if fobj.get("state") == "all_correct":
+            return {"found": True, "status": "correct", "correct": True, "pred": [], "ref": []}
+
+    if run_dir and ((run_dir / "field_metrics.json").exists() or (run_dir / "field_mismatches.json").exists()):
+        return {"found": True, "status": "correct", "correct": True, "pred": [], "ref": []}
+
+    if status in {"missing", "error"}:
+        return {"found": True, "status": status, "correct": False, "pred": None, "ref": None}
+
+    return {"found": False, "status": "unscored", "correct": None, "pred": None, "ref": None}
+
+
+def _categorize_field(field_infos: list[dict[str, Any]], baseline_index: int) -> list[str]:
+    """根据各模型在特定字段上的抽取表现，归类该字段的分歧类型。"""
+    categories: list[str] = []
+    if not any(fi.get("found") for fi in field_infos):
+        return categories
+
+    # 1. 缺失或异常
+    if any(fi["status"] in {"missing", "error"} for fi in field_infos):
+        categories.append("missing_or_error")
+
+    # 2. 文本分歧 / 字段分歧 (预测值不一致)
+    valid_preds = [
+        json.dumps(sorted(fi["pred"]), ensure_ascii=False) if isinstance(fi.get("pred"), list)
+        else str(fi.get("pred") or "")
+        for fi in field_infos
+        if fi.get("found") and fi["status"] not in {"missing", "error"}
+    ]
+    if len(set(valid_preds)) > 1:
+        categories.append("text_disagreement")
+        categories.append("field_disagreement")
+
+    # 3. 正确性分歧
+    comparable = [fi for fi in field_infos if fi.get("found") and fi["status"] in {"correct", "wrong"}]
+    if len(comparable) == len(field_infos):
+        correctness_set = {fi["status"] for fi in comparable}
+        if len(correctness_set) > 1:
+            categories.append("correctness_disagreement")
+            if "field_disagreement" not in categories:
+                categories.append("field_disagreement")
+        if all(fi["status"] == "wrong" for fi in comparable):
+            categories.append("all_wrong")
+
+    # 4. 基准模型 vs 候选模型 (回归与改进)
+    if 0 <= baseline_index < len(field_infos):
+        baseline_fi = field_infos[baseline_index]
+        cand_fis = [fi for idx, fi in enumerate(field_infos) if idx != baseline_index]
+        if baseline_fi["status"] == "correct" and any(fi["status"] == "wrong" for fi in cand_fis):
+            categories.append("regression")
+            if "field_disagreement" not in categories:
+                categories.append("field_disagreement")
+        if baseline_fi["status"] == "wrong" and any(fi["status"] == "correct" for fi in cand_fis):
+            categories.append("improvement")
+            if "field_disagreement" not in categories:
+                categories.append("field_disagreement")
+
+    return list(dict.fromkeys(categories))
+
+
 def _summary(
     records: Iterable[dict[str, Any]],
     run_ids: list[str],
     run_dirs: Optional[dict[str, Path]] = None,
+    baseline: Optional[str] = None,
 ) -> dict[str, Any]:
     all_records = list(records)
     cats = Counter(category for row in all_records for category in row["categories"])
     turns = sorted({int(row["turn"]) for row in all_records if "turn" in row and row["turn"] is not None})
     runs: dict[str, Any] = {}
+    baseline_idx = run_ids.index(baseline) if baseline and baseline in run_ids else 0
 
     for idx, run_id in enumerate(run_ids):
         output = [row["outputs"][idx] for row in all_records]
@@ -361,9 +511,20 @@ def _summary(
             if fn not in all_field_names:
                 all_field_names.append(fn)
 
+    categories_by_field: dict[str, dict[str, int]] = {}
+    for fn in all_field_names:
+        fn_cats: Counter[str] = Counter()
+        for row in all_records:
+            field_infos = [_get_field_info(o, fn, run_dir=run_dirs.get(o.get("run")) if run_dirs else None) for o in row.get("outputs", [])]
+            fc = _categorize_field(field_infos, baseline_idx)
+            for c in fc:
+                fn_cats[c] += 1
+        categories_by_field[fn] = dict(fn_cats)
+
     return {
         "aligned_total": len(all_records),
         "categories": dict(cats),
+        "categories_by_field": categories_by_field,
         "runs": runs,
         "turns": turns,
         "field_names": all_field_names,
@@ -375,6 +536,7 @@ def compare_dataset(
     run_specs: list[str],
     baseline: Optional[str] = None,
     *, allow_mixed_dataset: bool = False,
+    include_orphan: bool = False,
 ) -> dict[str, Any]:
     """Load, align and classify comparison records.  This is read-only."""
     if len(run_specs) < 2:
@@ -411,14 +573,14 @@ def compare_dataset(
         if run_sha:
             sha_values.add(str(run_sha))
             if current_sha and run_sha != current_sha:
-                warnings.append(f"{spec} 的 test SHA 与当前数据集不一致")
+                warnings.append(f"{spec} 的 test SHA 与当前数据集不一致 (历史评测版本)")
         if (run_dir / "dataset_dirty.json").exists():
             warnings.append(f"{spec} 已标记为 stale")
         runs.append({"id": spec, "model": model, "backend": backend, "dir": run_dir,
                      "predictions": _jsonl(run_dir / "predictions.jsonl", warnings, f"{spec}/predictions"),
                      "scored": _jsonl(run_dir / "scored.jsonl", warnings, f"{spec}/scored"),
                      "fields": _field_rows(run_dir, warnings, target_turn_by_id, dataset_dir=cfg.dataset_dir)})
-    if len(sha_values) > 1 or any("不一致" in w for w in warnings):
+    if len(sha_values) > 1:
         if not allow_mixed_dataset:
             raise ValueError("Run 使用的数据集版本不一致；如确认需要强制比较，请传 --allow-mixed-dataset")
     records: list[dict[str, Any]] = []
@@ -429,19 +591,26 @@ def compare_dataset(
             known_keys.add(key)
             outputs = [_record_for_run(run, key) for run in runs]
             records.append({**_details(sample, target), "outputs": outputs,
+                            "baseline": baseline,
                             "categories": _categorize(outputs, run_specs.index(baseline))})
-    # Surface prediction rows which no longer correspond to test.json rather than silently losing them.
+    # Handle prediction rows which no longer correspond to test.json rather than corrupting the sample view.
     extras = sorted(set().union(*(set(r["predictions"]) | set(r["scored"]) for r in runs)) - known_keys)
-    for sid, turn in extras:
-        outputs = [_record_for_run(run, (sid, turn)) for run in runs]
-        records.append({"id": sid, "turn": turn, "images": [], "turns": [], "reference": None, "meta": {},
-                        "outputs": outputs, "categories": list(dict.fromkeys(
-                            ["missing_or_error", "orphan_result"] + _categorize(outputs, run_specs.index(baseline))
-                        ))})
-        warnings.append(f"结果中有不在当前 test.json 的记录: {sid}/{turn}")
+    if extras:
+        if len(extras) <= 3:
+            for sid, turn in extras:
+                warnings.append(f"结果中有不在当前 test.json 的历史记录: {sid}/{turn} (已自动忽略)")
+        else:
+            warnings.append(f"结果中有 {len(extras)} 条历史记录不在当前 test.json 中 (已自动忽略孤儿样本)")
+    if include_orphan:
+        for sid, turn in extras:
+            outputs = [_record_for_run(run, (sid, turn)) for run in runs]
+            records.append({"id": sid, "turn": turn, "images": [], "turns": [], "reference": None, "meta": {},
+                            "outputs": outputs, "baseline": baseline, "categories": list(dict.fromkeys(
+                                ["missing_or_error", "orphan_result"] + _categorize(outputs, run_specs.index(baseline))
+                            ))})
     return {"dataset": cfg.dataset_dir.name, "runs": run_specs, "baseline": baseline,
             "warnings": list(dict.fromkeys(warnings)), "records": records,
-            "summary": _summary(records, run_specs, run_dirs={r["id"]: r["dir"] for r in runs}),
+            "summary": _summary(records, run_specs, run_dirs={r["id"]: r["dir"] for r in runs}, baseline=baseline),
             "normalization": "prediction.strip()"}
 
 
@@ -498,27 +667,49 @@ def _is_field_disagreement(record: dict[str, Any], target_field: str) -> bool:
 
 def filter_records(records: Iterable[dict[str, Any]], *, category: Optional[str] = None,
                    query: Optional[str] = None, include_agreements: bool = False,
-                   field: Optional[str] = None) -> list[dict[str, Any]]:
+                   field: Optional[str] = None, baseline: Optional[str] = None) -> list[dict[str, Any]]:
     needle = (query or "").strip().lower()
     target_field = (field or "").strip()
     filtered: list[dict[str, Any]] = []
     for record in records:
-        categories = record["categories"]
-        if category and category not in categories:
-            continue
+        b_idx = 0
+        b_spec = baseline or record.get("baseline")
+        if b_spec:
+            for idx, o in enumerate(record.get("outputs", [])):
+                if o.get("run") == b_spec:
+                    b_idx = idx
+                    break
+
         if target_field:
-            if not _is_field_disagreement(record, target_field):
+            field_infos = [_get_field_info(o, target_field) for o in record.get("outputs", [])]
+            field_cats = _categorize_field(field_infos, b_idx)
+            record["target_field"] = target_field
+            record["target_field_categories"] = field_cats
+
+            if category:
+                if category not in field_cats:
+                    continue
+            else:
+                if not include_agreements:
+                    meaningful = {"text_disagreement", "field_disagreement", "correctness_disagreement",
+                                  "missing_or_error", "regression", "improvement", "orphan_result"}
+                    if not (meaningful.intersection(field_cats) or _is_field_disagreement(record, target_field)):
+                        continue
+        else:
+            categories = record.get("categories", [])
+            if category and category not in categories:
                 continue
-        elif not include_agreements and not category:
-            # ``all_wrong`` alone describes a hard sample, not a disagreement:
-            # do not flood the default reviewer queue with identical failures.
-            meaningful = {"text_disagreement", "field_disagreement", "correctness_disagreement",
-                          "missing_or_error", "regression", "improvement", "orphan_result"}
-            if not meaningful.intersection(categories):
-                continue
+            elif not include_agreements and not category:
+                # ``all_wrong`` alone describes a hard sample, not a disagreement:
+                # do not flood the default reviewer queue with identical failures.
+                meaningful = {"text_disagreement", "field_disagreement", "correctness_disagreement",
+                              "missing_or_error", "regression", "improvement", "orphan_result"}
+                if not meaningful.intersection(categories):
+                    continue
+
         if needle:
             text = " ".join([str(record.get("id", "")), str(record.get("reference", ""))] +
-                            [str(x.get("prediction", "")) for x in record["outputs"]]).lower()
+                            [str(x.get("prediction", "")) for x in record.get("outputs", [])]).lower()
             if needle not in text:
                 continue
         filtered.append(record)
@@ -538,7 +729,9 @@ def sort_records(records: list[dict[str, Any]], sort: str = "priority", descendi
     elif sort == "id":
         def key(row: dict[str, Any]): return (str(row["id"]), row["turn"])
     else:
-        def key(row: dict[str, Any]): return (min((priority.get(c, 99) for c in row["categories"]), default=99), str(row["id"]), row["turn"])
+        def key(row: dict[str, Any]):
+            cats = row.get("target_field_categories") or row.get("categories", [])
+            return (min((priority.get(c, 99) for c in cats), default=99), str(row["id"]), row["turn"])
     return sorted(records, key=key, reverse=descending)
 
 

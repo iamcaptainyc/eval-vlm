@@ -252,7 +252,12 @@ def test_run_field_eval_end_to_end(tmp_path, monkeypatch):
     calls: dict = {}
     _install_fakes(cfg, monkeypatch, calls)
 
-    metrics = field_eval.run_field_eval(cfg)
+    # 默认 report_html=False 不生成 html
+    metrics_default = field_eval.run_field_eval(cfg, report_html=False)
+    assert not cfg.field_mismatches_html_path.exists()
+
+    # 显式开启 report_html=True 时生成 HTML 报告
+    metrics = field_eval.run_field_eval(cfg, report_html=True, overwrite=True)
 
     assert metrics["num_scored"] == 2
     pf = metrics["per_field"]["主辅路"]

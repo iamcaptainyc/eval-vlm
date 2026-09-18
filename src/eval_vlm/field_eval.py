@@ -875,7 +875,13 @@ def _render_mismatches_html(rows: list[dict], metrics: dict, cfg: Config) -> str
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def run_field_eval(cfg: Config, *, overwrite: bool = False, limit: Optional[int] = None) -> dict:
+def run_field_eval(
+    cfg: Config,
+    *,
+    overwrite: bool = False,
+    limit: Optional[int] = None,
+    report_html: bool = False,
+) -> dict:
     """三阶段跑通字段抽取评测,落盘并返回聚合指标。"""
     if not cfg.test_path.exists():
         raise FileNotFoundError(
@@ -920,6 +926,7 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False, limit: Optional[int]
         "endpoint": _endpoint(le),
         "ref_extract": ref_stats,
         "pred_extract": pred_stats,
+        "field_mismatches_html_path": str(cfg.field_mismatches_html_path) if report_html else None,
         **metrics,
     }
     store.write_json(cfg.field_metrics_path, metrics)
@@ -929,5 +936,6 @@ def run_field_eval(cfg: Config, *, overwrite: bool = False, limit: Optional[int]
         "run_name": cfg.run_name, "model": cfg.inference.result_name,
         "backend": cfg.inference.backend, "num_scored": metrics["num_scored"], "rows": rows,
     })
-    store.write_text(cfg.field_mismatches_html_path, _render_mismatches_html(rows, metrics, cfg))
+    if report_html:
+        store.write_text(cfg.field_mismatches_html_path, _render_mismatches_html(rows, metrics, cfg))
     return metrics

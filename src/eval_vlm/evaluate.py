@@ -44,8 +44,15 @@ def _is_exact_match_miss(row: dict) -> bool:
     return float(detail["exact_match"]) != 1.0
 
 
-def score_predictions(cfg: Config, scorer_name: Optional[str] = None, limit: Optional[int] = None) -> dict:
+def score_predictions(
+    cfg: Config,
+    scorer_name: Optional[str] = None,
+    limit: Optional[int] = None,
+    *,
+    report_html: bool = False,
+) -> dict:
     """对已有预测逐轮评分,返回聚合指标。"""
+    report_html = report_html or getattr(cfg, "report_html", False)
     default_name = scorer_name or cfg.scoring.scorer
     turn_names = list(cfg.scoring.turn_scorers or [])
     cache: dict[str, Scorer] = {}
@@ -129,7 +136,7 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None, limit: Opt
         "num_failed_samples": len(failed_ids),     # exact_match 未命中的样本(id)数
         "num_failed_targets": num_failed_targets,  # 其中错误的目标轮数
         "failures_path": str(cfg.failures_path),
-        "failures_html_path": str(cfg.failures_html_path),
+        "failures_html_path": str(cfg.failures_html_path) if report_html else None,
         "per_turn": per_turn,
     }
 
@@ -138,8 +145,9 @@ def score_predictions(cfg: Config, scorer_name: Optional[str] = None, limit: Opt
     # 人类可读、按 id 分组的未命中清单(供人工审核);机器可读逐轮数据见 scored.jsonl。
     store.write_text(cfg.failures_path,
                      _render_failures_md(failed_ids, sample_by_id, rows_by_id, metrics))
-    store.write_text(cfg.failures_html_path,
-                     _render_failures_html(failed_ids, sample_by_id, rows_by_id, metrics, cfg))
+    if report_html:
+        store.write_text(cfg.failures_html_path,
+                         _render_failures_html(failed_ids, sample_by_id, rows_by_id, metrics, cfg))
     store.write_text(cfg.summary_path, _render_summary(metrics))
     return metrics
 

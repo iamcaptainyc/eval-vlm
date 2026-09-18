@@ -1703,31 +1703,54 @@
           <div id="field-metrics-grid" class="field-metrics-grid"></div>
         </div>
 
-        <!-- 逐字段失配清单明细表 -->
-        <div class="data-table-container">
-          <div style="padding: 1rem 1.25rem; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
-            <strong style="font-size: 0.95rem;">逐字段失配清单明细 (Field Mismatches)</strong>
-            <div style="display: flex; align-items: center; gap: 0.65rem;">
-              <span style="font-size: 0.82rem; color: var(--text-muted);">状态筛选:</span>
-              <select id="field-mismatches-filter" class="select" onchange="state.fieldMismatchesFilter=this.value; loadFieldMismatches(0);">
-                <option value="">全部失配记录</option>
-                <option value="mismatch">部分字段失配 (mismatch)</option>
-                <option value="pred_missing">模型无输出判错 (pred_missing)</option>
-              </select>
+        <!-- 逐字段混淆矩阵看板 (Confusion Matrices) -->
+        <div id="field-cm-section" class="dataset-card field-cm-wrapper" style="margin-bottom: 1.75rem; display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.2rem;">📊</span>
+              <h3 style="font-size: 1.05rem; margin: 0; color: var(--text-main);">逐字段混淆矩阵与分类指标 (Confusion Matrices)</h3>
+            </div>
+            <span style="font-size: 0.78rem; color: var(--text-dim);">对角线绿色为正确分类，非对角浅红为误判分布</span>
+          </div>
+          <div id="field-cm-tab-bar" class="field-tab-bar"></div>
+          <div id="field-cm-panes" class="field-cm-panes"></div>
+        </div>
+
+        <!-- 逐字段失配富样本审查 (Field Mismatches Sample Review) -->
+        <div class="run-review-section">
+          <div class="run-review-toolbar">
+            <div class="run-review-toolbar-left">
+              <strong style="font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                <span>🔬</span> 失配样本深度审查 (<span id="field-mismatches-count">0</span>)
+              </strong>
+              <div class="run-filter-group">
+                <span class="run-filter-label">状态:</span>
+                <select id="field-mismatches-filter" class="select select-sm" onchange="state.fieldMismatchesFilter=this.value; loadFieldMismatches(0);">
+                  <option value="">全部失配记录</option>
+                  <option value="mismatch">部分字段失配 (mismatch)</option>
+                  <option value="pred_missing">模型未产出描述 (pred_missing)</option>
+                </select>
+              </div>
+              <div class="run-filter-group">
+                <span class="run-filter-label">按失配字段筛选:</span>
+                <select id="field-mismatches-field-filter" class="select select-sm" onchange="state.fieldMismatchesFieldFilter=this.value; loadFieldMismatches(0);">
+                  <option value="">🌟 全部字段 (不限)</option>
+                </select>
+              </div>
+            </div>
+            <div class="run-review-toolbar-right">
+              <div class="search-input-wrap">
+                <input id="field-mismatches-search" class="input input-sm" placeholder="搜索样本 ID / 预测描述..." onkeydown="if(event.key==='Enter')loadFieldMismatches(0)">
+                <button class="search-clear-btn" type="button" onclick="document.getElementById('field-mismatches-search').value=''; loadFieldMismatches(0);">✕</button>
+              </div>
+              <button class="btn btn-sm btn-secondary" onclick="loadFieldMismatches(0)">刷新</button>
             </div>
           </div>
 
-          <table class="ui-table">
-            <thead>
-              <tr>
-                <th style="width: 140px;">样本 ID</th>
-                <th style="width: 110px;">判定状态</th>
-                <th>模型输出文本 (Prediction)</th>
-                <th style="width: 380px;">逐字段比对详情 (Field Comparison)</th>
-              </tr>
-            </thead>
-            <tbody id="field-mismatches-tbody"></tbody>
-          </table>
+          <!-- 样本卡片列表容器 -->
+          <div id="field-mismatches-cards" class="run-cards-container"></div>
+          <!-- 分页栏 -->
+          <div id="field-mismatches-pagination" class="cmp-pagination-bar"></div>
         </div>
       </div>
 
@@ -1753,32 +1776,58 @@
           </div>
         </div>
 
-        <!-- Scored 明细表格 -->
-        <div class="data-table-container">
-          <div style="padding: 1rem 1.25rem; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
-            <strong style="font-size: 0.95rem;">逐样本打分明细 (Scored Details)</strong>
-            <div style="display: flex; align-items: center; gap: 0.65rem;">
-              <span style="font-size: 0.82rem; color: var(--text-muted);">排序:</span>
-              <select class="select" onchange="state.scoredOrder=this.value; loadScored(0);">
-                <option value="default">默认文件顺序</option>
-                <option value="lowest">最低分优先 (审核坏例)</option>
-                <option value="highest">最高分优先</option>
-              </select>
+        <!-- eval 轮次混淆矩阵看板 (若评测指标包含混淆矩阵) -->
+        <div id="eval-cm-section" class="dataset-card field-cm-wrapper" style="margin-bottom: 1.75rem; display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.2rem;">📊</span>
+              <h3 style="font-size: 1.05rem; margin: 0; color: var(--text-main);">目标轮次混淆矩阵 (Confusion Matrix)</h3>
+            </div>
+            <span style="font-size: 0.78rem; color: var(--text-dim);">模型预测类别 vs 标注真值分布</span>
+          </div>
+          <div id="eval-cm-tab-bar" class="field-tab-bar"></div>
+          <div id="eval-cm-panes" class="field-cm-panes"></div>
+        </div>
+
+        <!-- eval 样本审查板块 (Scored Samples Review) -->
+        <div class="run-review-section">
+          <div class="run-review-toolbar">
+            <div class="run-review-toolbar-left">
+              <strong style="font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                <span>💬</span> 样本评测打分明细 (<span id="scored-count">0</span>)
+              </strong>
+              <label class="run-checkbox-label">
+                <input type="checkbox" id="scored-only-miss" checked onchange="loadScored(0)">
+                <span>仅看未命中/错误 (score &lt; 1.0)</span>
+              </label>
+              <div class="run-filter-group">
+                <span class="run-filter-label">轮次:</span>
+                <select id="scored-turn-filter" class="select select-sm" onchange="loadScored(0)">
+                  <option value="">全部目标轮次</option>
+                </select>
+              </div>
+              <div class="run-filter-group">
+                <span class="run-filter-label">排序:</span>
+                <select id="scored-order-select" class="select select-sm" onchange="state.scoredOrder=this.value; loadScored(0);">
+                  <option value="lowest">最低分优先 (坏例审查)</option>
+                  <option value="default">默认文件顺序</option>
+                  <option value="highest">最高分优先</option>
+                </select>
+              </div>
+            </div>
+            <div class="run-review-toolbar-right">
+              <div class="search-input-wrap">
+                <input id="scored-search" class="input input-sm" placeholder="搜索 ID / 预测 / 真值..." onkeydown="if(event.key==='Enter')loadScored(0)">
+                <button class="search-clear-btn" type="button" onclick="document.getElementById('scored-search').value=''; loadScored(0);">✕</button>
+              </div>
+              <button class="btn btn-sm btn-secondary" onclick="loadScored(0)">刷新</button>
             </div>
           </div>
 
-          <table class="ui-table">
-            <thead>
-              <tr>
-                <th>样本 ID</th>
-                <th>轮次</th>
-                <th>得分</th>
-                <th>模型预测结果 (Prediction)</th>
-                <th>参考标准答案 (Reference)</th>
-              </tr>
-            </thead>
-            <tbody id="scored-tbody"></tbody>
-          </table>
+          <!-- 样本卡片列表容器 -->
+          <div id="scored-cards" class="run-cards-container"></div>
+          <!-- 分页栏 -->
+          <div id="scored-pagination" class="cmp-pagination-bar"></div>
         </div>
       </div>
     </section>
@@ -2092,10 +2141,14 @@
         </div>
       </div>
 
-      <div style="display: flex; align-items: center; justify-content: space-between;">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
         <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;">
           <input type="checkbox" id="job-modal-failfast" onchange="updateJobCommandPreview()">
           <span>遇错立即终止 (--fail-fast)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary); font-size: 0.82rem;" title="默认关闭以提高评测速度并节约空间；WebUI 中已内置富样本与混淆矩阵审查">
+          <input type="checkbox" id="job-modal-report-html" onchange="updateJobCommandPreview()">
+          <span>生成独立 HTML 报告 (--report-html)</span>
         </label>
       </div>
 

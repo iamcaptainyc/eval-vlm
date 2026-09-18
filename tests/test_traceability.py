@@ -37,6 +37,7 @@ def test_predictions_carry_original_images(messages_config):
 def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
     """强制错误答案 -> 每个样本(含两轮)exact_match 未命中,按 id 分组进 failures.md。"""
     cfg = tworound_config
+    cfg.report_html = True
     split_dataset(cfg)
 
     def wrong(self, context, images, sample_id, expected=None):
@@ -80,6 +81,7 @@ def test_failures_md_groups_wrong_exact_match(tworound_config, monkeypatch):
 def test_no_failures_when_all_correct(messages_config):
     """fake 回显标准答案 -> 全部命中 -> failures.md / html 标注无未命中。"""
     cfg = messages_config
+    cfg.report_html = True
     split_dataset(cfg)
     run_inference(cfg)
     metrics = score_predictions(cfg)
@@ -93,6 +95,7 @@ def test_no_failures_when_all_correct(messages_config):
 def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
     """token_f1 评分即使分数<1,也不计入 failures(只看 exact_match)。"""
     cfg = messages_config
+    cfg.report_html = True
     cfg.scoring.scorer = "token_f1"
     split_dataset(cfg)
 
@@ -112,6 +115,7 @@ def test_non_exact_match_scorer_not_in_failures(messages_config, monkeypatch):
 def test_confusion_matrix_in_summary_and_html(messages_config, monkeypatch):
     """分类任务下 score 阶段自动输出混淆矩阵至 metrics.json / summary.md / failures.html。"""
     cfg = messages_config
+    cfg.report_html = True
     split_dataset(cfg)
 
     # 修改 test.json 中的 reference，使其具备多类别（"cat", "dog"）
@@ -148,6 +152,7 @@ def test_confusion_matrix_in_summary_and_html(messages_config, monkeypatch):
 def test_turn_filter_in_failures_html(tworound_config, monkeypatch):
     """多轮对话场景下，某一轮预测正确、另一轮预测错误时，failures.html 包含精确轮次标签与筛选下拉框。"""
     cfg = tworound_config
+    cfg.report_html = True
     split_dataset(cfg)
 
     # 针对 sample_0 只在第一轮答对，第二轮答错；其他 sample 两轮皆错

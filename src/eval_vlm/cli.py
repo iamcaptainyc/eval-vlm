@@ -296,8 +296,8 @@ def _do_run(cfg: Config, tag: str = "pred", limit: Optional[int] = None) -> dict
     return stats
 
 
-def _do_score(cfg: Config, scorer: Optional[str], limit: Optional[int] = None) -> dict:
-    metrics = score_predictions(cfg, scorer_name=scorer, limit=limit)
+def _do_score(cfg: Config, scorer: Optional[str], limit: Optional[int] = None, report_html: bool = False) -> dict:
+    metrics = score_predictions(cfg, scorer_name=scorer, limit=limit, report_html=report_html)
     per_turn = metrics.get("per_turn") or {}
     print(f"[score] {len(per_turn)} 个目标轮,总体均分 {metrics.get('overall_mean_score')} "
           f"-> {cfg.metrics_path}")
@@ -306,7 +306,8 @@ def _do_score(cfg: Config, scorer: Optional[str], limit: Optional[int] = None) -
         print(f"[score] exact_match 未命中 {n_fail} 个样本"
               f"(共 {metrics.get('num_failed_targets', 0)} 个错误轮),"
               f"人类可读清单 -> {cfg.failures_path}")
-        print(f"[score] 错误样本可视化(HTML,含图片) -> {cfg.failures_html_path}")
+        if report_html:
+            print(f"[score] 错误样本可视化(HTML,含图片) -> {cfg.failures_html_path}")
     for turn_key, turn_data in per_turn.items():
         if "confusion_matrix" in turn_data:
             from .scoring.confusion_matrix import format_confusion_matrix_text
@@ -375,10 +376,11 @@ def _cmd_score(args: argparse.Namespace) -> int:
     cfg = load_dataset_config(folder)
     _report_persist("score", persisted, folder)
     limit = getattr(args, "limit", None)
+    report_html = getattr(args, "report_html", False)
     if limit is not None:
-        _do_score(cfg, args.scorer, limit=limit)
+        _do_score(cfg, args.scorer, limit=limit, report_html=report_html)
     else:
-        _do_score(cfg, args.scorer)
+        _do_score(cfg, args.scorer, report_html=report_html)
     _maybe_generate_mnn_report(cfg)
     return 0
 
@@ -415,7 +417,11 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     else:
         print(f"[field-eval] 复用已有完整预测(backend={cfg.inference.backend}) -> {cfg.predictions_path}")
 
-    fe_kwargs = {"overwrite": getattr(args, "overwrite", False)}
+    fe_kwargs = {
+        "overwrite": getattr(args, "overwrite", False),
+    }
+    if getattr(args, "report_html", False):
+        fe_kwargs["report_html"] = True
     if limit is not None:
         fe_kwargs["limit"] = limit
     metrics = run_field_eval(cfg, **fe_kwargs)
@@ -442,7 +448,8 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
         from .scoring.confusion_matrix import format_confusion_matrix_text
         print(format_confusion_matrix_text(cm, title=f"字段混淆矩阵 — {f}"))
     print(f"[field-eval] 失配清单 -> {cfg.field_mismatches_path}")
-    print(f"[field-eval] 失配清单(HTML,含图片) -> {cfg.field_mismatches_html_path}")
+    if getattr(args, "report_html", False):
+        print(f"[field-eval] 失配清单(HTML,含图片) -> {cfg.field_mismatches_html_path}")
     _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "field-eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
@@ -470,12 +477,13 @@ def run_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     _report_persist("eval", persisted, folder)
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     limit = getattr(args, "limit", None)
+    report_html = getattr(args, "report_html", False)
     if limit is not None:
         _do_run(cfg, "eval", limit=limit)
-        metrics = _do_score(cfg, args.scorer, limit=limit)
+        metrics = _do_score(cfg, args.scorer, limit=limit, report_html=report_html)
     else:
         _do_run(cfg, "eval")
-        metrics = _do_score(cfg, args.scorer)
+        metrics = _do_score(cfg, args.scorer, report_html=report_html)
     _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "eval",
             "model": cfg.inference.result_name, "backend": cfg.inference.backend,
@@ -830,6 +838,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="临时覆盖推理后端(写回 inference.backend);定位对应后端的 predictions.jsonl")
     p_score.add_argument("--mnn-config", dest="mnn_config", default=None,
                          help="backend=mnn 时:转换产物目录里 config.json 路径(写回 inference.mnn.config_path)")
+    p_score.add_argument("--report-html", action="store_true", default=False,
+                         help="是否生成 HTML 格式的可视化错误报告（默认关闭以提速）")
     _add_workspace_arg(p_score)
     p_score.set_defaults(func=_cmd_score)
 
@@ -863,6 +873,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="backend=hf 时:本地 HF 权重目录(写回 inference.hf.model_path)")
     p_fe.add_argument("--mnn-config", dest="mnn_config", default=None,
                       help="backend=mnn 时:转换产物 config.json 路径(写回 inference.mnn.config_path)")
+    p_fe.add_argument("--report-html", action="store_true", default=False,
+                      help="是否生成 HTML 格式的失配可视化报告（默认关闭以提速）")
     _add_inference_args(p_fe)          # --base-url / --model / --fail-fast
     _add_vllm_offline_args(p_fe)       # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
     _add_llamacpp_args(p_fe)           # --llamacpp-base-url / --llamacpp-model / --llamacpp-model-path / --llamacpp-mmproj / --llamacpp-mode
@@ -892,6 +904,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="backend=mnn 时:图片最长边像素上限(写回 inference.mnn.image_max_side)")
     p_eval.add_argument("--mnn-quant", dest="mnn_quant", default=None,
                         help="backend=mnn 时:量化配方标签(如 hqq-4bit/hqq-8bit),供 report 标注(写回 inference.mnn.quant)")
+    p_eval.add_argument("--report-html", action="store_true", default=False,
+                        help="是否生成 HTML 格式的可视化错误报告（默认关闭以提速）")
     _add_vllm_offline_args(p_eval)
     _add_llamacpp_args(p_eval)
     _add_workspace_arg(p_eval)
@@ -935,6 +949,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_inference_args(p_sweep)       # --base-url / --model / --fail-fast
     _add_vllm_offline_args(p_sweep)    # --vllm-model / --vllm-gpu-util / --vllm-max-model-len / --vllm-image-max-pixels
     _add_llamacpp_args(p_sweep)
+    p_sweep.add_argument("--report-html", action="store_true", default=False,
+                         help="是否为各数据集生成 HTML 可视化报告（默认关闭以提速）")
     _add_workspace_arg(p_sweep)
     p_sweep.set_defaults(func=_cmd_sweep)
 
