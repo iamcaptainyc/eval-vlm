@@ -3481,6 +3481,7 @@ async function loadComparison(offset = 0) {
 
   const sortVal = document.getElementById("comparison-sort")?.value || "priority";
   const filterVal = document.getElementById("comparison-filter")?.value;
+  const fieldVal = document.getElementById("comparison-field-filter")?.value;
   const queryVal = document.getElementById("comparison-query")?.value;
   const allowMixed = document.getElementById("comparison-allow-mixed")?.checked;
 
@@ -3493,6 +3494,7 @@ async function loadComparison(offset = 0) {
   c.runs.forEach(run => params.append("runs", run));
   if (allowMixed) params.set("allow_mixed_dataset", "true");
   if (filterVal) params.set("filter", filterVal);
+  if (fieldVal && fieldVal.trim()) params.set("field", fieldVal.trim());
   if (queryVal && queryVal.trim()) params.set("query", queryVal.trim());
 
   try {
@@ -3528,6 +3530,46 @@ async function loadComparison(offset = 0) {
   }
 }
 
+function updateComparisonFieldFilterOptions(fieldNames = []) {
+  const select = document.getElementById("comparison-field-filter");
+  const container = document.getElementById("comparison-field-filter-item");
+  if (!select) return;
+
+  if (!fieldNames || !fieldNames.length) {
+    if (container) container.style.display = "none";
+    select.innerHTML = `<option value="">🌟 全部字段 (不限字段)</option>`;
+    select.value = "";
+    return;
+  }
+
+  if (container) container.style.display = "";
+
+  const currentVal = select.value;
+  const optionsHtml = [
+    `<option value="">🌟 全部字段 (不限字段)</option>`,
+    ...fieldNames.map(fn => `<option value="${escapeHtml(fn)}">🔍 字段: ${escapeHtml(fn)}</option>`)
+  ].join("");
+
+  select.innerHTML = optionsHtml;
+  if (currentVal && fieldNames.includes(currentVal)) {
+    select.value = currentVal;
+  } else {
+    select.value = "";
+  }
+}
+
+function filterComparisonByField(fieldName) {
+  const select = document.getElementById("comparison-field-filter");
+  if (!select) return;
+  const targetVal = fieldName ? String(fieldName).trim() : "";
+  if (select.value === targetVal) {
+    select.value = "";
+  } else {
+    select.value = targetVal;
+  }
+  loadComparison(0);
+}
+
 function setComparisonFieldAccuracyMode(mode) {
   if (mode !== "non_empty" && mode !== "overall") return;
   state.comparison.fieldAccuracyMode = mode;
@@ -3547,6 +3589,7 @@ function renderComparisonSummary(summary, filteredTotal) {
   const categories = summary.categories || {};
   const runsStats = summary.runs || {};
   const currentFilter = document.getElementById("comparison-filter")?.value || "";
+  const currentFieldFilter = document.getElementById("comparison-field-filter")?.value?.trim() || "";
 
   const diffPct = alignedTotal > 0 ? Math.min(100, Math.round((filteredTotal / alignedTotal) * 100)) : 0;
 
@@ -3641,6 +3684,9 @@ function renderComparisonSummary(summary, filteredTotal) {
     }
   });
 
+  // 更新字段筛选下拉框选项 (仅在有 field_eval 时展示)
+  updateComparisonFieldFilterOptions(hasAnyFieldEval ? fieldNames : []);
+
   // 1. 构建 Field-Eval 矩阵 HTML
   let fieldEvalMatrixHtml = "";
   if (!hasAnyFieldEval) {
@@ -3650,7 +3696,19 @@ function renderComparisonSummary(summary, filteredTotal) {
       </div>
     `;
   } else {
-    const theadFields = fieldNames.map(fn => `<th>${escapeHtml(fn)} ${isOverall ? '总体准确率' : '非空准确率'}</th>`).join("");
+    const theadFields = fieldNames.map(fn => {
+      const isFiltering = currentFieldFilter === fn;
+      return `
+        <th class="cmp-clickable-field-th ${isFiltering ? 'is-filtering-active' : ''}" 
+            onclick="filterComparisonByField('${escapeHtml(fn)}')" 
+            title="点击按【${escapeHtml(fn)}】字段筛选不一致样本 (再次点击取消筛选)">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+            <span>${escapeHtml(fn)} ${isOverall ? '总体准确率' : '非空准确率'}</span>
+            <span class="cmp-field-filter-badge ${isFiltering ? 'is-active' : ''}">${isFiltering ? '🎯 聚焦中' : '🔍 筛选'}</span>
+          </div>
+        </th>
+      `;
+    }).join("");
     const tbodyRows = Object.entries(runsStats).map(([runId, st]) => {
       const isBaseline = runId === state.comparison.baseline;
       const parts = runId.split("/");
@@ -3874,6 +3932,11 @@ function renderComparisonSummary(summary, filteredTotal) {
           <div class="cmp-matrix-header">
             <div class="cmp-matrix-title">
               <span>🔬 Field-Eval 字段准确率 & 全对率对比</span>
+              ${currentFieldFilter ? `
+                <span class="cmp-filter-active-tag" onclick="filterComparisonByField('')" title="点击取消按字段筛选">
+                  🎯 正在筛选: <strong>${escapeHtml(currentFieldFilter)}</strong> ✕
+                </span>
+              ` : ""}
             </div>
             <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
               <div class="cmp-mode-toggle-group" title="切换字段准确率与全对率统计口径">
@@ -3948,6 +4011,7 @@ function comparisonPredictionCard(output, allOutputs, baselineOutput, hasAnyFiel
   if (output.field && typeof output.field === "object") {
     const fieldsList = output.field.fields || output.field.mismatches;
     if (Array.isArray(fieldsList) && fieldsList.length > 0) {
+      const curFieldFilter = document.getElementById("comparison-field-filter")?.value?.trim() || "";
       const isAllCorrect = output.field.state === "all_correct" || fieldsList.every(f => f.correct === true);
       const titleIcon = isAllCorrect ? "✅" : "🔬";
       const titleText = isAllCorrect ? "字段抽取比对 (field-eval · 全部一致 ✓)" : "字段抽取比对 (field-eval · 存在失配 ✗)";
@@ -3962,11 +4026,14 @@ function comparisonPredictionCard(output, allOutputs, baselineOutput, hasAnyFiel
           <div class="cmp-fields-list">
             ${fieldsList.map(f => {
               const isCor = f.correct === true;
+              const isTargetField = curFieldFilter && f.field === curFieldFilter;
               const refVal = Array.isArray(f.ref) ? (f.ref.length ? f.ref.join(", ") : "(空)") : (f.ref ?? "(空)");
               const predVal = Array.isArray(f.pred) ? (f.pred.length ? f.pred.join(", ") : "(空)") : (f.pred ?? "(空)");
               return `
-                <span class="cmp-field-tag ${isCor ? "is-correct" : "is-wrong"}" title="真值(ref): ${escapeHtml(refVal)} | 预测(pred): ${escapeHtml(predVal)}">
-                  ${isCor ? "✓" : "✗"} <strong>${escapeHtml(f.field || "")}:</strong> ${escapeHtml(predVal)}
+                <span class="cmp-field-tag ${isCor ? "is-correct" : "is-wrong"}" 
+                      style="${isTargetField ? 'outline:2px solid var(--cyan-500); box-shadow:0 0 8px rgba(6,182,212,0.4); font-weight:700;' : ''}"
+                      title="${isTargetField ? '🎯 当前筛选目标字段 | ' : ''}真值(ref): ${escapeHtml(refVal)} | 预测(pred): ${escapeHtml(predVal)}">
+                  ${isTargetField ? '🎯 ' : ''}${isCor ? "✓" : "✗"} <strong>${escapeHtml(f.field || "")}:</strong> ${escapeHtml(predVal)}
                 </span>
               `;
             }).join("")}
@@ -4068,15 +4135,33 @@ function renderComparison() {
   const pager = document.getElementById("comparison-pagination");
   if (!target) return;
 
+  const currentFieldFilter = document.getElementById("comparison-field-filter")?.value?.trim() || "";
+  let activeFilterBanner = "";
+  if (currentFieldFilter) {
+    activeFilterBanner = `
+      <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(6,182,212,0.08); border:1px solid rgba(6,182,212,0.3); border-radius:var(--radius-md); padding:0.65rem 1rem; margin-bottom:1rem; flex-wrap:wrap; gap:0.6rem;">
+        <div style="display:flex; align-items:center; gap:0.55rem; font-size:0.83rem;">
+          <span>🔬 <strong>按字段筛选不一致已生效:</strong></span>
+          <span class="badge" style="background:var(--cyan-500); color:#081528; font-family:var(--font-mono); font-weight:700; padding:2px 8px; font-size:0.78rem;">${escapeHtml(currentFieldFilter)}</span>
+          <span style="color:var(--text-muted); font-size:0.75rem;">(当前仅展示【${escapeHtml(currentFieldFilter)}】字段存在预测错误、失配或模型分歧的样本)</span>
+        </div>
+        <button class="cmp-filter-active-tag" onclick="filterComparisonByField('')" title="清除此字段筛选，查看全部样本">
+          ✕ 清除字段筛选
+        </button>
+      </div>
+    `;
+  }
+
   if (!c.records || !c.records.length) {
     target.innerHTML = `
+      ${activeFilterBanner}
       <div class="cmp-empty-card">
         <div class="cmp-empty-icon">🎉</div>
         <div class="cmp-empty-title">当前筛选下无差异样本</div>
         <div class="cmp-empty-desc">
-          所有参与对比的模型在当前过滤条件下输出完全一致，或未搜索到匹配的样本。
+          ${currentFieldFilter ? `所有参与对比的模型在【<strong>${escapeHtml(currentFieldFilter)}</strong>】字段上均一致匹配，或未搜索到匹配的样本。` : `所有参与对比的模型在当前过滤条件下输出完全一致，或未搜索到匹配的样本。`}
         </div>
-        <button class="btn btn-primary" onclick="filterComparisonByCategory(''); document.getElementById('comparison-query').value=''; loadComparison(0);">
+        <button class="btn btn-primary" onclick="filterComparisonByCategory(''); filterComparisonByField(''); document.getElementById('comparison-query').value=''; loadComparison(0);">
           重置所有筛选与搜索
         </button>
       </div>
@@ -4087,7 +4172,7 @@ function renderComparison() {
 
   const baselineId = c.baseline;
 
-  target.innerHTML = c.records.map(row => {
+  target.innerHTML = activeFilterBanner + c.records.map(row => {
     const catBadges = (row.categories || []).map(catKey => {
       const meta = COMPARISON_CATEGORY_CONFIG[catKey] || { label: catKey, icon: "🏷️", cls: "cmp-cat-all" };
       return `<span class="cmp-cat-pill ${meta.cls}" style="font-size:0.72rem; padding:1px 7px; pointer-events:none;">${meta.icon} ${escapeHtml(meta.label)}</span>`;

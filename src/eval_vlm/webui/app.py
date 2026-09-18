@@ -496,6 +496,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         descending: bool = False,
         include_agreements: bool = False,
         query: Optional[str] = None,
+        field: Optional[str] = Query(None, description="按抽取字段过滤不一致样本"),
         offset: int = 0,
         limit: int = Query(20, ge=1, le=100),
         allow_mixed_dataset: bool = False,
@@ -504,7 +505,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             comparison = compare_dataset(cfg, runs, baseline, allow_mixed_dataset=allow_mixed_dataset)
             rows = filter_records(comparison["records"], category=filter, query=query,
-                                  include_agreements=include_agreements)
+                                  include_agreements=include_agreements, field=field)
             rows = sort_records(rows, sort, descending)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

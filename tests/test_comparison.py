@@ -87,6 +87,12 @@ def test_field_mismatch_without_turn_is_mapped_to_first_target(tmp_path):
     first = next(row for row in result["records"] if row["turn"] == 1)
     assert first["outputs"][0]["field"]["state"] == "mismatch"
 
+    # 测试按特定字段筛选不一致样本
+    road_disagreements = filter_records(result["records"], field="road")
+    assert len(road_disagreements) >= 1
+    other_disagreements = filter_records(result["records"], field="non_existent_field")
+    assert len(other_disagreements) == 0
+
 
 def test_compare_cli_parser_accepts_multiple_runs():
     args = build_parser().parse_args(["compare", "--dataset", "demo", "--runs", "old/hf", "new/hf", "--output", "out"])

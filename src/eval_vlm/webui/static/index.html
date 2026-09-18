@@ -1559,7 +1559,7 @@
 
         <!-- 第二行: 过滤、排序与关键字检索 -->
         <div class="cmp-filter-row">
-          <div class="cmp-control-item" style="min-width: 220px;">
+          <div class="cmp-control-item" style="min-width: 200px;">
             <label class="cmp-control-label">🎯 分歧类型筛选</label>
             <select id="comparison-filter" class="select" onchange="loadComparison(0)">
               <option value="">🌟 仅预测不同 (默认全部差异)</option>
@@ -1569,6 +1569,13 @@
               <option value="field_disagreement">🔷 字段分歧 (结构化属性不同)</option>
               <option value="all_wrong">⚠️ 全错 (所有模型均错误)</option>
               <option value="missing_or_error">❌ 异常/缺失 (未输出或报错)</option>
+            </select>
+          </div>
+
+          <div class="cmp-control-item" id="comparison-field-filter-item" style="min-width: 190px;">
+            <label class="cmp-control-label">🔬 按字段筛选不一致</label>
+            <select id="comparison-field-filter" class="select" onchange="loadComparison(0)">
+              <option value="">🌟 全部字段 (不限字段)</option>
             </select>
           </div>
 

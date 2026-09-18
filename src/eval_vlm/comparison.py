@@ -452,15 +452,64 @@ def _sha(path: Path) -> Optional[str]:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_field_disagreement(record: dict[str, Any], target_field: str) -> bool:
+    """判断当前样本在指定 target_field 抽取字段上是否存在不一致或判定错误。"""
+    target_items = []
+    target_fobjs = []
+    for o in record.get("outputs", []):
+        fobj = o.get("field")
+        if not fobj or not isinstance(fobj, dict):
+            continue
+        flist = fobj.get("fields") or fobj.get("mismatches") or []
+        item = next((x for x in flist if str(x.get("field", "")).strip() == target_field), None)
+        if item is not None:
+            target_items.append(item)
+            target_fobjs.append(fobj)
+
+    if not target_items:
+        return False
+
+    # 1. 任意模型在该字段上判定为错误、或 ref 与 pred 值不相等、或在 mismatch 清单中
+    for item, fobj in zip(target_items, target_fobjs):
+        if item.get("correct") is False:
+            return True
+        if item.get("ref") is not None and item.get("pred") is not None:
+            r = sorted(item.get("ref") or [])
+            p = sorted(item.get("pred") or [])
+            if r != p:
+                return True
+        if fobj.get("state") == "mismatch" and item.get("correct") is not True:
+            return True
+
+    # 2. 各模型对该字段的预测内容存在分歧
+    normalized_preds = {
+        json.dumps(sorted(item.get("pred") or []), ensure_ascii=False)
+        for item in target_items
+    }
+    if len(normalized_preds) > 1:
+        return True
+
+    # 3. 各模型对该字段的判定正确性不一致
+    if len({item.get("correct") for item in target_items}) > 1:
+        return True
+
+    return False
+
+
 def filter_records(records: Iterable[dict[str, Any]], *, category: Optional[str] = None,
-                   query: Optional[str] = None, include_agreements: bool = False) -> list[dict[str, Any]]:
+                   query: Optional[str] = None, include_agreements: bool = False,
+                   field: Optional[str] = None) -> list[dict[str, Any]]:
     needle = (query or "").strip().lower()
+    target_field = (field or "").strip()
     filtered: list[dict[str, Any]] = []
     for record in records:
         categories = record["categories"]
         if category and category not in categories:
             continue
-        if not include_agreements and not category:
+        if target_field:
+            if not _is_field_disagreement(record, target_field):
+                continue
+        elif not include_agreements and not category:
             # ``all_wrong`` alone describes a hard sample, not a disagreement:
             # do not flood the default reviewer queue with identical failures.
             meaningful = {"text_disagreement", "field_disagreement", "correctness_disagreement",

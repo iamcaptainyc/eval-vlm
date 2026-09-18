@@ -5244,6 +5244,55 @@ table.ui-table tr:hover {
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
 }
 
+/* 可点击字段表头与激活状态 (深色模式) */
+.cmp-clickable-field-th {
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.cmp-clickable-field-th:hover {
+  background: rgba(6, 182, 212, 0.22) !important;
+}
+
+.cmp-clickable-field-th.is-filtering-active {
+  background: rgba(6, 182, 212, 0.28) !important;
+  color: #38bdf8 !important;
+  border-bottom: 2px solid var(--cyan-500) !important;
+}
+
+.cmp-field-filter-badge {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-dim);
+}
+
+.cmp-field-filter-badge.is-active {
+  background: var(--cyan-500);
+  color: #081528;
+  font-weight: 700;
+}
+
+.cmp-filter-active-tag {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all var(--transition-fast);
+}
+
+.cmp-filter-active-tag:hover {
+  background: rgba(244, 63, 94, 0.22);
+}
+
 .cmp-matrix-title {
   font-size: 0.85rem;
   font-weight: 700;
@@ -6632,6 +6681,43 @@ table.ui-table tr:hover {
   color: #0f172a !important;
   border: 1px solid #cbd5e1 !important;
 }
+
+/* 浅色模式下字段表头可点击与激活徽章样式 (明亮清爽高对比度) */
+[data-theme="light"] .cmp-clickable-field-th:hover {
+  background: #ccfbf1 !important;
+  color: #0f766e !important;
+}
+
+[data-theme="light"] .cmp-clickable-field-th.is-filtering-active {
+  background: #99f6e4 !important;
+  color: #042f2e !important;
+  border-bottom: 2.5px solid #0d9488 !important;
+}
+
+[data-theme="light"] .cmp-field-filter-badge {
+  background: rgba(15, 23, 42, 0.08) !important;
+  color: #475569 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .cmp-field-filter-badge.is-active {
+  background: #0d9488 !important;
+  color: #ffffff !important;
+  border-color: #0f766e !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .cmp-filter-active-tag {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+  border: 1px solid #fca5a5 !important;
+}
+
+[data-theme="light"] .cmp-filter-active-tag:hover {
+  background: #fecdd3 !important;
+  color: #881337 !important;
+}
+
 
 
 
