@@ -9,6 +9,7 @@ rollout 模式下,后续轮的上下文用模型**自己生成**的前文;gold �
 """
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,6 +118,39 @@ def run_inference(cfg: Config, limit: Optional[int] = None) -> dict:
     todo: list[Sample] = [s for s in samples if not sample_done(s)]
     n_targets = sum(len(s.targets) for s in samples)
 
+    if not todo:
+        print(f"[run] 全部 {len(samples)} 条样本({n_targets} 个目标轮)已完成预测,无需推理(跳过后端加载)。", flush=True)
+        now_str = datetime.now(timezone.utc).isoformat()
+        started = now_str
+        if cfg.run_meta_path.exists():
+            try:
+                existing = json.loads(cfg.run_meta_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict) and "started_at" in existing:
+                    started = existing["started_at"]
+            except Exception:
+                pass
+        stats = {
+            "run_name": cfg.run_name,
+            "model": cfg.inference.result_name,
+            "backend": cfg.inference.backend,
+            "base_url": getattr(cfg.inference.active, "base_url", None),
+            "quant": cfg.inference.mnn.quant if cfg.inference.backend == "mnn" else None,
+            "eval_targets": cfg.eval.targets,
+            "eval_context": cfg.eval.context,
+            "test_size": len(samples),
+            "num_targets": n_targets,
+            "newly_completed": 0,
+            "errors": 0,
+            "skipped_samples_already_done": len(samples),
+            "started_at": started,
+            "finished_at": now_str,
+            "split_source": meta.get("source"),
+            "split_source_sha256": meta.get("source_sha256"),
+            "test_sha256": _file_sha256(cfg.test_path),
+        }
+        store.write_json(cfg.run_meta_path, stats)
+        return stats
+
     print(f"[run] 待推理 {len(todo)} 条样本(已完成跳过 {len(samples) - len(todo)} 条),"
           f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
@@ -135,44 +169,42 @@ def run_inference(cfg: Config, limit: Optional[int] = None) -> dict:
     n_ok = 0
     n_err = 0
 
-    if not todo:
-        print(f"全部 {len(samples)} 条样本({n_targets} 个目标轮)已完成,无需推理(断点续跑)。")
-    else:
+    try:
         with store.PredictionWriter(cfg.predictions_path) as writer:
-            try:
-                if batch_mode:
-                    # 真·批处理后端(如离线 vLLM):按轮次跨样本批量,引擎内部 continuous batching。
-                    n_ok, n_err = _rollout_batch(cfg, backend, todo, writer)
-                elif max_workers == 1:
-                    pbar = tqdm(todo, total=len(todo), desc="inference", unit="sample")
-                    for s in pbar:
-                        pbar.set_postfix_str(s.id)
-                        for pred in _rollout_sample(cfg, backend, s):
-                            writer.write(pred)
-                            if pred.error:
-                                n_err += 1
-                            else:
-                                n_ok += 1
-                else:
-                    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                        futures = {pool.submit(_rollout_sample, cfg, backend, s): s for s in todo}
-                        try:
-                            for fut in tqdm(as_completed(futures), total=len(futures),
-                                            desc="inference", unit="sample"):
-                                for pred in fut.result():
-                                    writer.write(pred)
-                                    if pred.error:
-                                        n_err += 1
-                                    else:
-                                        n_ok += 1
-                        except KeyboardInterrupt:
-                            for fut in futures:
-                                fut.cancel()
-                            raise
-            except KeyboardInterrupt:
-                print(f"\n[run] 已中断:本轮成功 {n_ok} 条、失败 {n_err} 条均已落盘;"
-                      f"重跑同一命令即可断点续跑。", flush=True)
-    backend.close()
+            if batch_mode:
+                # 真·批处理后端(如离线 vLLM):按轮次跨样本批量,引擎内部 continuous batching。
+                n_ok, n_err = _rollout_batch(cfg, backend, todo, writer)
+            elif max_workers == 1:
+                pbar = tqdm(todo, total=len(todo), desc="inference", unit="sample")
+                for s in pbar:
+                    pbar.set_postfix_str(s.id)
+                    for pred in _rollout_sample(cfg, backend, s):
+                        writer.write(pred)
+                        if pred.error:
+                            n_err += 1
+                        else:
+                            n_ok += 1
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {pool.submit(_rollout_sample, cfg, backend, s): s for s in todo}
+                    try:
+                        for fut in tqdm(as_completed(futures), total=len(futures),
+                                        desc="inference", unit="sample"):
+                            for pred in fut.result():
+                                writer.write(pred)
+                                if pred.error:
+                                    n_err += 1
+                                else:
+                                    n_ok += 1
+                    except KeyboardInterrupt:
+                        for fut in futures:
+                            fut.cancel()
+                        raise
+    except KeyboardInterrupt:
+        print(f"\n[run] 已中断:本轮成功 {n_ok} 条、失败 {n_err} 条均已落盘;"
+              f"重跑同一命令即可断点续跑。", flush=True)
+    finally:
+        backend.close()
 
     stats = {
         "run_name": cfg.run_name,

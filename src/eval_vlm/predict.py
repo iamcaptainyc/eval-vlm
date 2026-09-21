@@ -228,29 +228,63 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
     done = set() if overwrite else _done_images(pred_path)
     todo = [p for p in images if p.name not in done]
 
+    if not todo:
+        print(f"[pred] 全部 {len(images)} 张图片已完成描述,无需推理(跳过后端加载)。", flush=True)
+        _rebuild_txt_from_jsonl(pred_path, txt_path)
+        now_str = datetime.now(timezone.utc).isoformat()
+        started = now_str
+        meta_path = out_dir / "pred_meta.json"
+        if meta_path.exists():
+            try:
+                existing = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict) and "started_at" in existing:
+                    started = existing["started_at"]
+            except Exception:
+                pass
+        stats = {
+            "datadir": str(datadir),
+            "model": cfg.inference.result_name,
+            "backend": cfg.inference.backend,
+            "base_url": getattr(cfg.inference.active, "base_url", None),
+            "quant": cfg.inference.mnn.quant if cfg.inference.backend == "mnn" else None,
+            # 对话结构:单轮记 prompt;多轮记轮数(prompt 为 null)。便于复现与排查。
+            "prompt": None if cfg.pred.template else (
+                prompt if prompt is not None else cfg.pred.prompt),
+            "num_context_turns": len(context),
+            "system_prompt": cfg.inference.system_prompt,
+            "num_images": len(images),
+            "newly_completed": 0,
+            "errors": 0,
+            "skipped_already_done": len(images),
+            "interrupted": False,
+            "predictions_path": str(pred_path),
+            "started_at": started,
+            "finished_at": now_str,
+        }
+        store.write_json(meta_path, stats)
+        return stats
+
     # 后端构造可能很慢(如 MNN 的 model.load() 要加载权重);显式打点便于区分
     # "卡在加载" vs "卡在推理"——中断在加载阶段时 predictions.jsonl 本就还没有任何结果。
     print(f"[pred] 待描述 {len(todo)} 张(已完成跳过 {len(images) - len(todo)} 张),"
           f"正在加载后端/模型({cfg.inference.backend})...", flush=True)
     backend = build_backend(cfg)
-    max_workers = worker_count(backend, cfg.inference.max_concurrency)
-    if cfg.inference.max_concurrency > 1 and max_workers == 1:
-        import warnings
-        warnings.warn(
-            f"[pred] 注意: max_concurrency={cfg.inference.max_concurrency} 对 "
-            f"{cfg.inference.backend} 后端不生效(该后端为有状态单对象,必须串行推理),"
-            f"实际并发=1。如需并行加速,请换用 openai/vllm 后端。",
-            stacklevel=1,
-        )
-    print("[pred] 后端就绪,开始推理。", flush=True)
-    started = datetime.now(timezone.utc).isoformat()
-    n_ok = 0
-    n_err = 0
-    interrupted = False
+    try:
+        max_workers = worker_count(backend, cfg.inference.max_concurrency)
+        if cfg.inference.max_concurrency > 1 and max_workers == 1:
+            import warnings
+            warnings.warn(
+                f"[pred] 注意: max_concurrency={cfg.inference.max_concurrency} 对 "
+                f"{cfg.inference.backend} 后端不生效(该后端为有状态单对象,必须串行推理),"
+                f"实际并发=1。如需并行加速,请换用 openai/vllm 后端。",
+                stacklevel=1,
+            )
+        print("[pred] 后端就绪,开始推理。", flush=True)
+        started = datetime.now(timezone.utc).isoformat()
+        n_ok = 0
+        n_err = 0
+        interrupted = False
 
-    if not todo:
-        print(f"全部 {len(images)} 张图片已完成描述,无需推理(断点续跑)。")
-    else:
         pred_path.parent.mkdir(parents=True, exist_ok=True)
 
         def _append(fh, obj: dict) -> None:
@@ -315,7 +349,8 @@ def predict_folder(cfg: Config, datadir: Path, *, prompt: Optional[str] = None,
                 interrupted = True
                 print(f"\n[pred] 已中断:本轮成功 {n_ok} 张、失败 {n_err} 张均已落盘 "
                       f"-> {pred_path};重跑同一命令即可断点续跑补齐剩余。", flush=True)
-    backend.close()
+    finally:
+        backend.close()
     # txt 是 jsonl 的人类可读视图:据最终 jsonl 整份重建,保证两者完全一致
     # (覆盖续跑累积、--overwrite、以及本特性之前已有的 jsonl)。
     _rebuild_txt_from_jsonl(pred_path, txt_path)

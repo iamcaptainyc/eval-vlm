@@ -339,3 +339,110 @@ async def test_job_worker_execution_and_log_emission(tmp_path):
     assert "=== 正在启动任务" in log_content
     assert "=== 任务进程已就绪" in log_content
     await mgr.shutdown()
+
+
+@pytest.mark.anyio
+async def test_parallel_execution_eval_and_convert(tmp_path, monkeypatch):
+    """测试评测任务 (eval) 与格式转换任务 (convert-gguf) 能够在多通道中并行运行。"""
+    settings = Settings(workspace_dir=tmp_path)
+    mgr = JobManager(settings)
+    loop = asyncio.get_running_loop()
+    mgr.start_worker(loop=loop)
+
+    eval_started = asyncio.Event()
+    eval_finish = asyncio.Event()
+    convert_started = asyncio.Event()
+    convert_finish = asyncio.Event()
+
+    async def fake_execute_job(job):
+        if job.type == "eval":
+            eval_started.set()
+            await eval_finish.wait()
+        elif job.type == "convert-gguf":
+            convert_started.set()
+            await convert_finish.wait()
+        job.status = "succeeded"
+        job.exit_code = 0
+
+    monkeypatch.setattr(mgr, "_execute_job", fake_execute_job)
+
+    # 1. 提交 eval 任务
+    job1 = mgr.submit_job("eval", "ds_eval", {}, "user1")
+    # 2. 提交 convert-gguf 任务
+    job2 = mgr.submit_job("convert-gguf", None, {"hf_path": "/path/hf"}, "user2")
+
+    # 等待两个任务均开始执行
+    await asyncio.wait_for(asyncio.gather(eval_started.wait(), convert_started.wait()), timeout=2.0)
+
+    # 验证两个任务同时处于 running 状态且在 running_job_ids 集合中
+    assert mgr.get_job(job1.id).status == "running"
+    assert mgr.get_job(job2.id).status == "running"
+    assert job1.id in mgr.running_job_ids
+    assert job2.id in mgr.running_job_ids
+
+    # 释放两个任务
+    eval_finish.set()
+    convert_finish.set()
+    await asyncio.sleep(0.05)
+    await mgr.shutdown()
+
+
+@pytest.mark.anyio
+async def test_cancel_one_lane_does_not_affect_other(tmp_path, monkeypatch):
+    """测试取消一个通道的运行任务不会影响另一个通道的运行任务。"""
+    settings = Settings(workspace_dir=tmp_path)
+    mgr = JobManager(settings)
+    loop = asyncio.get_running_loop()
+    mgr.start_worker(loop=loop)
+
+    eval_started = asyncio.Event()
+    eval_wait = asyncio.Event()
+    convert_started = asyncio.Event()
+    convert_canceled = asyncio.Event()
+
+    async def fake_execute_job(job):
+        if job.type == "eval":
+            eval_started.set()
+            await eval_wait.wait()
+        elif job.type == "convert-gguf":
+            convert_started.set()
+            while not job.cancel_requested:
+                await asyncio.sleep(0.01)
+            convert_canceled.set()
+        job.status = "succeeded"
+        job.exit_code = 0
+
+    monkeypatch.setattr(mgr, "_execute_job", fake_execute_job)
+
+    job_eval = mgr.submit_job("eval", "ds_eval", {}, "user1")
+    job_convert = mgr.submit_job("convert-gguf", None, {"hf_path": "/path/hf"}, "user2")
+
+    await asyncio.wait_for(asyncio.gather(eval_started.wait(), convert_started.wait()), timeout=2.0)
+
+    # 取消 convert-gguf
+    ok = await mgr.cancel_job(job_convert.id)
+    assert ok is True
+    await asyncio.wait_for(convert_canceled.wait(), timeout=1.0)
+
+    # 验证 eval 依然在运行中
+    assert mgr.get_job(job_eval.id).status == "running"
+    assert job_eval.id in mgr.running_job_ids
+
+    eval_wait.set()
+    await asyncio.sleep(0.05)
+    await mgr.shutdown()
+
+
+def test_multi_queue_positions(job_mgr):
+    """测试不同通道的排队位置独立统计。"""
+    eval1 = job_mgr.submit_job("eval", "ds1", {}, "user1")
+    eval2 = job_mgr.submit_job("eval", "ds1", {}, "user2")
+    conv1 = job_mgr.submit_job("convert-gguf", None, {}, "user3")
+    conv2 = job_mgr.submit_job("convert-gguf", None, {}, "user4")
+
+    # 未启动 worker 时，按通道独立统计 queue_position
+    assert eval1.queue_position == 1
+    assert eval2.queue_position == 2
+    assert conv1.queue_position == 1
+    assert conv2.queue_position == 2
+

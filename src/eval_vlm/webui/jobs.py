@@ -115,7 +115,6 @@ class Job:
             log_file=str(self.log_file.resolve()),
             params=self.params,
         )
-
     def broadcast(self, event_type: str, data: Any) -> None:
         payload = {"event": event_type, "data": data}
         for q in list(self.subscribers):
@@ -125,16 +124,49 @@ class Job:
                 pass
 
 
+LANE_EVAL = "eval"
+LANE_CONVERT = "convert"
+TOOL_JOB_TYPES = {"convert-gguf"}
+
+
+def get_job_lane(job_type: str) -> str:
+    """按任务类型划分调度通道：格式转换/工具任务独立通道并行执行，评测推理任务主通道串行执行。"""
+    if job_type in TOOL_JOB_TYPES:
+        return LANE_CONVERT
+    return LANE_EVAL
+
+
 class JobManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.jobs: dict[str, Job] = {}
-        self.queue: asyncio.Queue[str] = asyncio.Queue()
-        self.worker_task: Optional[asyncio.Task] = None
-        self.current_job_id: Optional[str] = None
+        self.queues: dict[str, asyncio.Queue[str]] = {
+            LANE_EVAL: asyncio.Queue(),
+            LANE_CONVERT: asyncio.Queue(),
+        }
+        self.worker_tasks: dict[str, Optional[asyncio.Task]] = {
+            LANE_EVAL: None,
+            LANE_CONVERT: None,
+        }
+        self.running_job_ids: set[str] = set()
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown = False
         self._reconcile_on_startup()
+
+    @property
+    def queue(self) -> asyncio.Queue[str]:
+        """兼容性属性：主评测通道队列。"""
+        return self.queues[LANE_EVAL]
+
+    @property
+    def worker_task(self) -> Optional[asyncio.Task]:
+        """兼容性属性：主评测通道 Worker 协程任务。"""
+        return self.worker_tasks.get(LANE_EVAL)
+
+    @property
+    def current_job_id(self) -> Optional[str]:
+        """兼容性属性：当前正在运行的任务 ID（若有多个并发运行，返回任意一个）。"""
+        return next(iter(self.running_job_ids), None)
 
     def _reconcile_on_startup(self) -> None:
         """启动时对账：扫描未完成任务。"""
@@ -172,8 +204,10 @@ class JobManager:
                 pass
 
         if self.loop is not None and self.loop.is_running():
-            if self.worker_task is None or self.worker_task.done():
-                self.worker_task = self.loop.create_task(self._queue_worker())
+            for lane in (LANE_EVAL, LANE_CONVERT):
+                task = self.worker_tasks.get(lane)
+                if task is None or task.done():
+                    self.worker_tasks[lane] = self.loop.create_task(self._queue_worker(lane))
 
     def is_dataset_busy(self, dataset_name: str) -> bool:
         """检查该数据集是否有正在运行或排队的任务。"""
@@ -218,31 +252,35 @@ class JobManager:
         # 确保 worker 调度循环已就绪
         self.start_worker()
 
+        lane = get_job_lane(job_type)
+        target_queue = self.queues[lane]
+
         # 安全入队（兼容跨线程或异步事件循环环境）
         if self.loop is not None and self.loop.is_running():
             try:
                 curr_loop = asyncio.get_running_loop()
                 if curr_loop is self.loop:
-                    self.queue.put_nowait(job_id)
+                    target_queue.put_nowait(job_id)
                 else:
-                    self.loop.call_soon_threadsafe(self.queue.put_nowait, job_id)
+                    self.loop.call_soon_threadsafe(target_queue.put_nowait, job_id)
             except RuntimeError:
-                self.loop.call_soon_threadsafe(self.queue.put_nowait, job_id)
+                self.loop.call_soon_threadsafe(target_queue.put_nowait, job_id)
         else:
-            self.queue.put_nowait(job_id)
+            target_queue.put_nowait(job_id)
 
-        queue_pos = self.queue.qsize()
+        queue_pos = target_queue.qsize()
         return job.to_summary(queue_pos=queue_pos)
 
-    async def _queue_worker(self) -> None:
+    async def _queue_worker(self, lane: str) -> None:
+        target_queue = self.queues[lane]
         while True:
-            job_id = await self.queue.get()
+            job_id = await target_queue.get()
             job = self.jobs.get(job_id)
             if not job or job.status == "canceled":
-                self.queue.task_done()
+                target_queue.task_done()
                 continue
 
-            self.current_job_id = job_id
+            self.running_job_ids.add(job_id)
             job.status = "running"
             job.started_at = datetime.now(timezone.utc).isoformat()
             job.save_meta()
@@ -262,8 +300,8 @@ class JobManager:
                 job.save_meta()
                 job.broadcast("status", {"status": "failed", "error": str(e)})
             finally:
-                self.current_job_id = None
-                self.queue.task_done()
+                self.running_job_ids.discard(job_id)
+                target_queue.task_done()
 
     async def _stop_process(self, job: Job, grace_period: float = 5.0) -> None:
         """Request process termination and wait for a definitive exit.
@@ -481,24 +519,23 @@ class JobManager:
                 job.save_meta()
                 job.broadcast("status", {"status": "canceled"})
 
-        current = self.jobs.get(self.current_job_id) if self.current_job_id else None
-        if current and current.status == "running":
-            current.cancel_requested = True
-            await self._stop_process(current)
+        for job_id in list(self.running_job_ids):
+            running_job = self.jobs.get(job_id)
+            if running_job and running_job.status == "running":
+                running_job.cancel_requested = True
+                await self._stop_process(running_job)
 
-        if self.worker_task and not self.worker_task.done():
-            # Give _execute_job a chance to drain the terminated child and
-            # write final metadata before stopping an otherwise endless queue
-            # worker.
-            try:
-                await asyncio.wait_for(asyncio.shield(self.worker_task), timeout=1.0)
-            except asyncio.TimeoutError:
-                pass
-            self.worker_task.cancel()
-            try:
-                await self.worker_task
-            except asyncio.CancelledError:
-                pass
+        for task in list(self.worker_tasks.values()):
+            if task and not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     def delete_job(self, job_id: str) -> bool:
         """删除任务记录及其日志文件目录。正在运行的任务不可直接删除，需先取消。"""
@@ -553,7 +590,9 @@ class JobManager:
         # The active worker owns the brief post-exit stdout drain window and
         # will finalize within its bounded grace period. Avoid closing SSE
         # early and hiding the last buffered log lines from viewers.
-        if self.current_job_id == job.id and self.worker_task and not self.worker_task.done():
+        lane = get_job_lane(job.type)
+        worker = self.worker_tasks.get(lane)
+        if job.id in self.running_job_ids and worker and not worker.done():
             return
         job.exit_code = job.proc.returncode
         job.finished_at = datetime.now(timezone.utc).isoformat()

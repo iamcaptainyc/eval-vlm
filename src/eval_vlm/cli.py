@@ -398,16 +398,18 @@ def run_field_eval_once(folder: Path, args: argparse.Namespace) -> dict:
 
     # 自给自足:run_dir 由 cfg.inference.backend + result_name 决定。预测**完整覆盖 test 全部
     # 目标轮**才直接评;缺失/部分/无 都用当前 backend 补跑(run_inference 可续跑,已完成样本不重推)。
+    limit = getattr(args, "limit", None)
     need_pred = True
     if cfg.predictions_path.exists():
         try:
             samples = load_samples(cfg, source=cfg.test_path)
+            if limit is not None and limit > 0:
+                samples = samples[:limit]
             expected = {(s.id, t.turn_index) for s in samples for t in s.targets}
             done = store.load_prediction_keys(cfg.predictions_path)
             need_pred = not (expected and expected.issubset(done))
         except Exception:  # noqa: BLE001 - 读不出就当作需要补跑,交给下游报确切错
             need_pred = True
-    limit = getattr(args, "limit", None)
     if need_pred:
         print(f"[field-eval] 预测缺失/不完整,用 backend={cfg.inference.backend} 补跑 pred -> {cfg.run_dir}")
         if limit is not None:
@@ -478,11 +480,30 @@ def run_eval_once(folder: Path, args: argparse.Namespace) -> dict:
     print(f"[eval] 模型目录(按 模型/后端 区分)-> {cfg.run_dir}")
     limit = getattr(args, "limit", None)
     report_html = getattr(args, "report_html", False)
+
+    need_pred = True
+    if cfg.predictions_path.exists():
+        try:
+            samples = load_samples(cfg, source=cfg.test_path)
+            if limit is not None and limit > 0:
+                samples = samples[:limit]
+            expected = {(s.id, t.turn_index) for s in samples for t in s.targets}
+            done = store.load_prediction_keys(cfg.predictions_path)
+            need_pred = not (expected and expected.issubset(done))
+        except Exception:  # noqa: BLE001 - 读不出就当作需要补跑,交给下游报确切错
+            need_pred = True
+
+    if need_pred:
+        if limit is not None:
+            _do_run(cfg, "eval", limit=limit)
+        else:
+            _do_run(cfg, "eval")
+    else:
+        print(f"[eval] 复用已有完整预测(backend={cfg.inference.backend}) -> {cfg.predictions_path}")
+
     if limit is not None:
-        _do_run(cfg, "eval", limit=limit)
         metrics = _do_score(cfg, args.scorer, limit=limit, report_html=report_html)
     else:
-        _do_run(cfg, "eval")
         metrics = _do_score(cfg, args.scorer, report_html=report_html)
     _maybe_generate_mnn_report(cfg)
     return {"dataset": folder.name, "method": "eval",

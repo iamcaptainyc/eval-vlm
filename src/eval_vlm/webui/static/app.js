@@ -2645,6 +2645,30 @@ function renderJobs() {
     `;
     })
     .join("");
+  renderTerminalActiveSwitcher();
+}
+
+function renderTerminalActiveSwitcher() {
+  const switcher = document.getElementById("terminal-active-switcher");
+  if (!switcher) return;
+  const runningJobs = (state.jobs || []).filter((j) => j.status === "running");
+  if (runningJobs.length <= 1) {
+    switcher.innerHTML = "";
+    return;
+  }
+  switcher.innerHTML = `
+    <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 0.25rem;">切换运行中:</span>
+    ${runningJobs
+      .map((j) => {
+        const isCurrent = j.id === state.currentJobId;
+        const typeIcon = j.type === "convert-gguf" ? "📦" : "🏷️";
+        const activeBg = isCurrent
+          ? "background: var(--primary); color: #fff; border: 1px solid var(--primary);"
+          : "background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid var(--border-subtle);";
+        return `<button class="btn btn-sm" style="font-size: 0.72rem; padding: 2px 7px; border-radius: 9999px; cursor: pointer; ${activeBg}" onclick="openTerminal('${escapeHtml(j.id)}')" title="${escapeHtml(j.id)}">${typeIcon} ${escapeHtml(j.type)}</button>`;
+      })
+      .join("")}
+  `;
 }
 
 async function openTerminal(jobId) {
@@ -2701,6 +2725,7 @@ function renderTerminalSnapshot(job, { showQueueMessage = false } = {}) {
   if (pre && showQueueMessage && job.status === "queued" && !state.terminalLogs) {
     pre.textContent = `[调度队列] 任务已进入等待执行队列 (ID: ${job.id})\n即将执行: ${job.command?.length ? job.command.join(" ") : "—"}\n正在连接调度器并等待拉起进程...\n\n`;
   }
+  renderTerminalActiveSwitcher();
 }
 
 async function refreshTerminalSnapshot(jobId, session) {

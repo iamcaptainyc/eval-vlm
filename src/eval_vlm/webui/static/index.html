@@ -1320,7 +1320,7 @@
       <div class="control-bar">
         <div>
           <h2 class="section-title">任务调度队列</h2>
-          <p class="section-subtitle">串行化异步调度，子进程执行 CLI，透明化命令与日志落盘</p>
+          <p class="section-subtitle">多通道异步队列调度（评测推理与模型转换并行执行），子进程执行 CLI，透明化命令与日志落盘</p>
         </div>
         <div class="control-bar-right">
           <button class="btn btn-outline-danger" onclick="clearFinishedJobs()" title="清理所有已结束（非排队、非运行）的历史任务记录与日志">🗑️ 清理已结束任务</button>
@@ -2485,6 +2485,7 @@
         <span id="terminal-job-label" class="user-tag" style="background: rgba(99,102,241,0.25); color: #a5b4fc; font-family: var(--font-mono); font-size: 0.75rem;"></span>
         <span id="terminal-dataset-label" class="dataset-active-pill" style="font-size: 0.75rem; padding: 2px 8px;"></span>
         <span id="terminal-connection-status" class="terminal-connection-status" aria-live="polite">未连接</span>
+        <div id="terminal-active-switcher" style="display: inline-flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;"></div>
       </div>
       <div class="terminal-header-actions" style="display: flex; align-items: center; gap: 0.75rem;">
         <label style="font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem;">
